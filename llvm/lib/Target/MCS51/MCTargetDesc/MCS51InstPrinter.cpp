@@ -1,0 +1,20 @@
+#include "MCS51InstPrinter.h"
+#include "llvm/MC/MCInst.h"
+#include "llvm/Support/Compiler.h"
+
+using namespace llvm;
+
+#define PRINT_ALIAS_INSTR
+#include "MCS51GenAsmWriter.inc"
+
+void MCS51InstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
+  OS << getRegisterName(Reg);
+}
+
+void MCS51InstPrinter::printInst(const MCInst *MI, uint64_t Address,
+                                 StringRef Annot, const MCSubtargetInfo &,
+                                 raw_ostream &OS) {
+  if (!printAliasInstr(MI, Address, OS))
+    printInstruction(MI, Address, OS);
+  printAnnotation(OS, Annot);
+}
