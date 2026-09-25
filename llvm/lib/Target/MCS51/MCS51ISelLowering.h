@@ -6,6 +6,8 @@
 namespace llvm {
 
 class MCS51Subtarget;
+class MachineBasicBlock;
+class MachineInstr;
 
 class MCS51TargetLowering final : public TargetLowering {
 public:
@@ -27,6 +29,12 @@ public:
                       const SmallVectorImpl<ISD::OutputArg> &Outs,
                       const SmallVectorImpl<SDValue> &OutVals,
                       const SDLoc &DL, SelectionDAG &DAG) const override;
+
+  MachineBasicBlock *EmitInstrWithCustomInserter(
+      MachineInstr &MI, MachineBasicBlock *MBB) const override;
+
+private:
+  const MCS51Subtarget &STI;
 };
 
 } // namespace llvm

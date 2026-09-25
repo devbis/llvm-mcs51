@@ -3,6 +3,7 @@
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -14,7 +15,7 @@ using namespace llvm;
 
 MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
                                          const MCS51Subtarget &STI)
-    : TargetLowering(TM, STI) {
+    : TargetLowering(TM, STI), STI(STI) {
   addRegisterClass(MVT::i8, &MCS51::MCS51GPR8RegClass);
   setBooleanContents(ZeroOrOneBooleanContent);
   setStackPointerRegisterToSaveRestore(MCS51::SP);
@@ -67,4 +68,59 @@ SDValue MCS51TargetLowering::LowerReturn(
   if (!OutVals.empty())
     Chain = DAG.getCopyToReg(Chain, DL, MCS51::A, OutVals.front());
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
+}
+
+MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
+    MachineInstr &MI, MachineBasicBlock *MBB) const {
+  const TargetInstrInfo &TII = *STI.getInstrInfo();
+  MachineBasicBlock::iterator MII = MI.getIterator();
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register Dst = MI.getOperand(0).getReg();
+  Register LHS = MI.getOperand(1).getReg();
+  unsigned AccOpcode;
+  bool IsImmediate = MI.getOpcode() == MCS51::ADD8ri ||
+                     MI.getOpcode() == MCS51::AND8ri ||
+                     MI.getOpcode() == MCS51::OR8ri ||
+                     MI.getOpcode() == MCS51::XOR8ri;
+
+  BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+  switch (MI.getOpcode()) {
+  case MCS51::ADD8rr:
+    AccOpcode = MCS51::ADD_A_RN;
+    break;
+  case MCS51::AND8rr:
+    AccOpcode = MCS51::ANL_A_RN;
+    break;
+  case MCS51::OR8rr:
+    AccOpcode = MCS51::ORL_A_RN;
+    break;
+  case MCS51::XOR8rr:
+    AccOpcode = MCS51::XRL_A_RN;
+    break;
+  case MCS51::ADD8ri:
+    AccOpcode = MCS51::ADD_A_IMM;
+    break;
+  case MCS51::AND8ri:
+    AccOpcode = MCS51::ANL_A_IMM;
+    break;
+  case MCS51::OR8ri:
+    AccOpcode = MCS51::ORL_A_IMM;
+    break;
+  case MCS51::XOR8ri:
+    AccOpcode = MCS51::XRL_A_IMM;
+    break;
+  default:
+    llvm_unreachable("unexpected MCS-51 ALU pseudo");
+  }
+  if (IsImmediate) {
+    BuildMI(*MBB, MII, DL, TII.get(AccOpcode), MCS51::A)
+        .addImm(MI.getOperand(2).getImm());
+  } else {
+    BuildMI(*MBB, MII, DL, TII.get(AccOpcode))
+        .addReg(MI.getOperand(2).getReg());
+  }
+  BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+      .addReg(MCS51::A);
+  MI.eraseFromParent();
+  return MBB;
 }

@@ -84,19 +84,21 @@ class MCS51AccImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{15-8} = imm;
 }
 
-class MCS51AccImmALUInst<bits<8> opcode, string mnemonic,
-                         SDNode node> : MCS51AccImmInst<opcode, mnemonic> {
-  let Pattern = [(set MCS51AReg:$dst,
-                      (node A, MCS51Imm8:$imm))];
-}
-
 def MOV_A_IMM : MCS51AccImmInst<0x74, "mov"> {
   let Pattern = [(set MCS51AReg:$dst, MCS51Imm8:$imm)];
 }
-def ADD_A_IMM : MCS51AccImmALUInst<0x24, "add", add>;
-def ANL_A_IMM : MCS51AccImmALUInst<0x54, "anl", and>;
-def ORL_A_IMM : MCS51AccImmALUInst<0x44, "orl", or>;
-def XRL_A_IMM : MCS51AccImmALUInst<0x64, "xrl", xor>;
+def ADD_A_IMM : MCS51AccImmInst<0x24, "add"> {
+  let Defs = [A]; let Uses = [A];
+}
+def ANL_A_IMM : MCS51AccImmInst<0x54, "anl"> {
+  let Defs = [A]; let Uses = [A];
+}
+def ORL_A_IMM : MCS51AccImmInst<0x44, "orl"> {
+  let Defs = [A]; let Uses = [A];
+}
+def XRL_A_IMM : MCS51AccImmInst<0x64, "xrl"> {
+  let Defs = [A]; let Uses = [A];
+}
 
 class MCS51AccDirectInst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -235,10 +237,10 @@ class MCS51RegCopyInst : Instruction {
 }
 
 def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,"> { let Defs = [A]; }
-def ADD_A_RN  : MCS51RnInst<0b00101, "add a,">;
-def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,">;
-def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,">;
-def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,">;
+def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> { let Defs = [A]; let Uses = [A]; }
+def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,"> { let Defs = [A]; let Uses = [A]; }
+def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,"> { let Defs = [A]; let Uses = [A]; }
+def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,"> { let Defs = [A]; let Uses = [A]; }
 def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,">;
 def SUBB_A_RN : MCS51RnInst<0b10001, "subb a,">;
 def MOV_RN_A  : MCS51RnDefInst<0b11111, "mov">;
@@ -247,3 +249,40 @@ def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
   let Pattern = [(set MCS51GPR8:$rn, MCS51Imm8:$imm)];
 }
 def MOV_RN_RM : MCS51RegCopyInst;
+
+class MCS51ALUPseudoRR<SDNode node> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51AReg:$dst,
+                      (node MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
+}
+
+class MCS51ALUPseudoRI<SDNode node> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Imm8:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51AReg:$dst,
+                      (node MCS51GPR8:$lhs, MCS51Imm8:$rhs))];
+}
+
+def ADD8rr : MCS51ALUPseudoRR<add>;
+def AND8rr : MCS51ALUPseudoRR<and>;
+def OR8rr  : MCS51ALUPseudoRR<or>;
+def XOR8rr : MCS51ALUPseudoRR<xor>;
+def ADD8ri : MCS51ALUPseudoRI<add>;
+def AND8ri : MCS51ALUPseudoRI<and>;
+def OR8ri  : MCS51ALUPseudoRI<or>;
+def XOR8ri : MCS51ALUPseudoRI<xor>;
