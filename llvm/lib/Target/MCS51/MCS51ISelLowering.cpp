@@ -195,6 +195,9 @@ SDValue MCS51TargetLowering::LowerReturn(
       report_fatal_error("unsupported MCS-51 return type");
     }
   }
+  if (!Outs.empty() && Outs.front().VT == MVT::i16 &&
+      !Outs.front().Flags.isZExt() && !Outs.front().Flags.isSExt())
+    return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain);
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
 }
 
@@ -203,6 +206,20 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::RET16) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RET))
+        .addReg(MCS51::DPTR, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::INCDPTR16) {
+    Register Dst = MI.getOperand(0).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
   auto getNextDirectAddress = [](MachineOperand Addr) {
     if (Addr.isImm())
       Addr.setImm(Addr.getImm() + 1);

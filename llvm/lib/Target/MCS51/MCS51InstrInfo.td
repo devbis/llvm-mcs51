@@ -2,6 +2,7 @@
 // operands and multi-byte encodings are described separately below.
 def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDTNone, [SDNPHasChain]>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -97,7 +98,19 @@ def MOVX_IND_RI_A : MCS51IndirectStoreInst<0xF2, "movx">;
 def MOVX_AR0 : MCS51Inst<0xE2, "movx a, @r0">;
 def MOVX_AR1 : MCS51Inst<0xE3, "movx a, @r1">;
 def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a"> {
-  let Uses = [A, DPTR];
+  let Uses = [A];
+}
+def RET16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let isReturn = 1;
+  let isTerminator = 1;
 }
 def MOVX_R0A : MCS51Inst<0xF2, "movx @r0, a">;
 def MOVX_R1A : MCS51Inst<0xF3, "movx @r1, a">;
@@ -118,6 +131,7 @@ def RETI : MCS51Inst<0x32, "reti"> {
 }
 
 def : Pat<(MCS51retglue), (RET)>;
+def : Pat<(MCS51retword), (RET16)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
@@ -438,6 +452,18 @@ def MOV_DPTR_IMM : Instruction {
   let Inst{7-0} = 0x90;
   let Inst{23-8} = imm;
   let Pattern = [(set MCS51PTR:$dst, MCS51Imm16:$imm)];
+}
+
+def INCDPTR16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$src, (i16 1)))];
 }
 
 // The MCS-51 has no PC-relative unconditional branch with a long enough
