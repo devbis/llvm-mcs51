@@ -62,6 +62,20 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     Opcode = MCS51ISD::BR_UGE;
     std::swap(LHS, RHS);
     break;
+  case ISD::SETLT:
+    Opcode = MCS51ISD::BR_SLT;
+    break;
+  case ISD::SETGE:
+    Opcode = MCS51ISD::BR_SGE;
+    break;
+  case ISD::SETGT:
+    Opcode = MCS51ISD::BR_SLT;
+    std::swap(LHS, RHS);
+    break;
+  case ISD::SETLE:
+    Opcode = MCS51ISD::BR_SGE;
+    std::swap(LHS, RHS);
+    break;
   default:
     report_fatal_error("unsupported MCS-51 conditional branch predicate");
   }
@@ -560,7 +574,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       MI.getOpcode() == MCS51::BR_ULT8ri ||
       MI.getOpcode() == MCS51::BR_ULT8rr ||
       MI.getOpcode() == MCS51::BR_UGE8ri ||
-      MI.getOpcode() == MCS51::BR_UGE8rr) {
+      MI.getOpcode() == MCS51::BR_UGE8rr ||
+      MI.getOpcode() == MCS51::BR_SLT8ri ||
+      MI.getOpcode() == MCS51::BR_SLT8rr ||
+      MI.getOpcode() == MCS51::BR_SGE8ri ||
+      MI.getOpcode() == MCS51::BR_SGE8rr) {
     Register LHS = MI.getOperand(0).getReg();
     const MachineOperand &RHS = MI.getOperand(1);
     MachineBasicBlock *Target = MI.getOperand(2).getMBB();
@@ -569,8 +587,36 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     bool IsNotEqual = MI.getOpcode() == MCS51::BR_NE8ri ||
                       MI.getOpcode() == MCS51::BR_NE8rr;
     bool IsUnsignedLess = MI.getOpcode() == MCS51::BR_ULT8ri ||
-                          MI.getOpcode() == MCS51::BR_ULT8rr;
+                          MI.getOpcode() == MCS51::BR_ULT8rr ||
+                          MI.getOpcode() == MCS51::BR_SLT8ri ||
+                          MI.getOpcode() == MCS51::BR_SLT8rr;
+    bool IsSigned = MI.getOpcode() == MCS51::BR_SLT8ri ||
+                    MI.getOpcode() == MCS51::BR_SLT8rr ||
+                    MI.getOpcode() == MCS51::BR_SGE8ri ||
+                    MI.getOpcode() == MCS51::BR_SGE8rr;
     if (!IsEqual && !IsNotEqual) {
+      if (IsSigned) {
+        if (RHS.isImm())
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+              .addImm(RHS.getImm());
+        else
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(RHS.getReg());
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+            .addImm(0x80);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+            .addReg(MCS51::R1, RegState::Define);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+            .addImm(0x80);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN))
+            .addReg(MCS51::R1);
+        BuildMI(*MBB, MII, DL,
+                TII.get(IsUnsignedLess ? MCS51::JC : MCS51::JNC))
+            .addMBB(Target);
+        MI.eraseFromParent();
+        return MBB;
+      }
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
       if (RHS.isImm())
