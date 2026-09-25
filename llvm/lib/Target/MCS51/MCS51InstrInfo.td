@@ -116,13 +116,15 @@ def RETI : MCS51Inst<0x32, "reti"> {
 
 def : Pat<(MCS51retglue), (RET)>;
 
-def MCS51Imm8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
+def MCS51Imm8 : Operand<i8>,
+                ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm8OpValue";
   let DecoderMethod = "DecodeImm8";
 }
 
-def MCS51Direct8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
+def MCS51Direct8 : Operand<i8>,
+                   ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm8OpValue";
   let DecoderMethod = "DecodeImm8";
@@ -267,6 +269,30 @@ def LOADCODE8 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let mayLoad = 1;
+}
+
+def LOADDIRECT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+}
+
+def STOREDIRECT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
 }
 
 def STOREX8 : Instruction {
