@@ -1,4 +1,5 @@
 ; RUN: llc -O0 -mtriple=mcs51 -o - %s | FileCheck %s
+; RUN: llc -O2 -mtriple=mcs51 -o - %s | FileCheck %s --check-prefix=OPT
 ; RUN: llc -O0 -mtriple=mcs51 -filetype=obj %s -o %t.o
 ; RUN: llvm-objdump -d %t.o | FileCheck %s --check-prefix=DIS
 
@@ -22,6 +23,13 @@ no:
 ; CHECK: ret
 ; CHECK: mov a, #2
 ; CHECK: ret
+
+; OPT-LABEL: choose:
+; OPT: mov a, r7
+; OPT: jz
+; OPT-NOT: ljmp
+; OPT: mov a, #1
+; OPT: ret
 
 ; DIS-LABEL: <choose>:
 ; DIS: mov a, r7
