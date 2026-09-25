@@ -25,5 +25,6 @@ def R7   : MCS51Reg<7, "r7">;
 
 def MCS51GPR8 : RegisterClass<"MCS51", [i8], 8,
                               (add R0, R1, R2, R3, R4, R5, R6, R7)>;
+def MCS51Indirect8 : RegisterClass<"MCS51", [i8], 8, (add R0, R1)>;
 def MCS51AReg : RegisterClass<"MCS51", [i8], 8, (add A)>;
 def MCS51PTR : RegisterClass<"MCS51", [i16], 16, (add DPTR)>;
