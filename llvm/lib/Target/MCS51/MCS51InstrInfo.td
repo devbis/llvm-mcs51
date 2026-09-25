@@ -29,6 +29,7 @@ def SDT_MCS51PushArg16 : SDTypeProfile<0, 1, [SDTCisVT<0, i16>]>;
 def MCS51pusharg16 : SDNode<"MCS51ISD::PUSH_ARG16", SDT_MCS51PushArg16,
                             [SDNPHasChain]>;
 def MCS51poparg8 : SDNode<"MCS51ISD::POP_ARG8", SDTNone, [SDNPHasChain]>;
+def MCS51pushpad8 : SDNode<"MCS51ISD::PUSH_PAD8", SDTNone, [SDNPHasChain]>;
 
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -522,6 +523,19 @@ def PUSHARG16 : Instruction {
   let hasSideEffects = 1;
   let Defs = [A, SP];
   let Uses = [DPTR, SP];
+}
+
+def PUSHPAD8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [A, SP];
 }
 
 def POPARG8 : Instruction {

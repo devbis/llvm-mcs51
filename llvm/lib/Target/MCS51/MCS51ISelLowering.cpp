@@ -7,6 +7,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <algorithm>
 
 using namespace llvm;
 
@@ -142,14 +143,32 @@ SDValue MCS51TargetLowering::LowerCall(
   }
 
   // Preserve stack argument values before register argument copies can
-  // overwrite the physical registers that currently hold those values.
+  // overwrite the physical registers that currently hold those values. The
+  // hardware stack grows upward, so push arguments in descending ABI offset.
+  // Emit zero-valued bytes for alignment holes between arguments.
+  std::sort(StackArgs.begin(), StackArgs.end(),
+            [](const auto &A, const auto &B) { return A.first < B.first; });
+  unsigned StackCursor = CCInfo.getStackSize();
+  auto PushPadding = [&]() {
+    Chain = DAG.getNode(MCS51ISD::PUSH_PAD8, DL, MVT::Other, Chain);
+    --StackCursor;
+  };
   for (auto I = StackArgs.rbegin(), E = StackArgs.rend(); I != E; ++I) {
+    unsigned ArgSize = I->second.getValueType().getSizeInBits() / 8;
+    unsigned ArgEnd = I->first + ArgSize;
+    if (ArgEnd > StackCursor)
+      report_fatal_error("overlapping MCS-51 stack arguments");
+    while (StackCursor > ArgEnd)
+      PushPadding();
     SDValue Ops[] = {Chain, I->second};
     unsigned Opcode = I->second.getValueType() == MVT::i16
                           ? MCS51ISD::PUSH_ARG16
                           : MCS51ISD::PUSH_ARG8;
     Chain = DAG.getNode(Opcode, DL, MVT::Other, Ops);
+    StackCursor = I->first;
   }
+  while (StackCursor)
+    PushPadding();
 
   for (const auto &[Reg, Value] : RegsToPass) {
     Chain = DAG.getCopyToReg(Chain, DL, Reg, Value, InGlue);
@@ -284,17 +303,34 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::PUSHARG8) {
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
         .addReg(MI.getOperand(0).getReg());
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::Implicit);
     MI.eraseFromParent();
     return MBB;
   }
   if (MI.getOpcode() == MCS51::PUSHARG16) {
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x83);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::Implicit);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::PUSHPAD8) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IMM))
+        .addImm(0xE0)
+        .addImm(0)
+        .addReg(MCS51::A, RegState::ImplicitDefine);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::Implicit);
     MI.eraseFromParent();
     return MBB;
   }

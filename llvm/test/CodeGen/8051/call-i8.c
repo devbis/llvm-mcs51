@@ -9,6 +9,9 @@ extern unsigned char callee5(unsigned char, unsigned char, unsigned char,
                              unsigned char, unsigned char);
 extern unsigned int callee6_word(unsigned char, unsigned char, unsigned char,
                                  unsigned char, unsigned int, unsigned int);
+extern void callee_mixed_stack(unsigned char, unsigned char, unsigned char,
+                               unsigned char, unsigned char, unsigned int,
+                               unsigned int);
 
 unsigned char caller(void) { return callee(42); }
 unsigned int caller_word(void) { return callee_word(); }
@@ -32,6 +35,10 @@ unsigned int sixth_word(unsigned char a, unsigned char b, unsigned char c,
 unsigned int caller6_word(unsigned char a, unsigned char b, unsigned char c,
                           unsigned char d, unsigned int e, unsigned int f) {
   return callee6_word(a, b, c, d, 0, f);
+}
+void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
+                        unsigned char d) {
+  callee_mixed_stack(a, b, c, d, 0x5a, 0, 0x1234);
 }
 
 // CHECK-LABEL: caller:
@@ -100,6 +107,22 @@ unsigned int caller6_word(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: push 224
 // CHECK: mov dptr, #0
 // CHECK: lcall callee6_word
+// CHECK: pop 240
+// CHECK: pop 240
+// CHECK: ret
+
+// CHECK-LABEL: caller_mixed_stack:
+// CHECK: mov a, 131
+// CHECK: push 224
+// CHECK: mov a, 130
+// CHECK: push 224
+// CHECK: mov 224, #0
+// CHECK: push 224
+// CHECK: mov a, r{{[0-7]}}
+// CHECK: push 224
+// CHECK: lcall callee_mixed_stack
+// CHECK: pop 240
+// CHECK: pop 240
 // CHECK: pop 240
 // CHECK: pop 240
 // CHECK: ret
