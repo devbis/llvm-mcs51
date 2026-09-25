@@ -1551,6 +1551,14 @@ void Clang::RenderTargetOptions(const llvm::Triple &EffectiveTriple,
   default:
     break;
 
+  case llvm::Triple::mcs51:
+    if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
+      A->claim();
+      CmdArgs.push_back("-target-cpu");
+      CmdArgs.push_back(Args.MakeArgString(A->getValue()));
+    }
+    break;
+
   case llvm::Triple::arm:
   case llvm::Triple::armeb:
   case llvm::Triple::thumb:
