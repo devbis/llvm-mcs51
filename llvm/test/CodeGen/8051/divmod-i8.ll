@@ -14,13 +14,13 @@ entry:
 
 ; CHECK-LABEL: divide:
 ; CHECK: mov a, r7
-; CHECK: mov b, r6
+; CHECK: mov 240, r6
 ; CHECK: div ab
 ; CHECK: ret
 
 ; CHECK-LABEL: remainder:
 ; CHECK: mov a, r7
-; CHECK: mov b, r6
+; CHECK: mov 240, r6
 ; CHECK: div ab
 ; CHECK: mov a, 240
 ; CHECK: ret
