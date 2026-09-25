@@ -114,6 +114,7 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: ret
 
 // CHECK-LABEL: caller_mixed_stack:
+// CHECK: mov dptr, #4660
 // CHECK: mov a, 131
 // CHECK: push 224
 // CHECK: mov a, 130
