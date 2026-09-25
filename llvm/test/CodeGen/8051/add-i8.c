@@ -23,6 +23,15 @@ unsigned char subtract_values(unsigned char lhs, unsigned char rhs) {
   return lhs - rhs;
 }
 
+// CHECK-LABEL: multiply_values:
+// CHECK: mov a, r6
+// CHECK: mov b, r7
+// CHECK: mul ab
+// CHECK: ret
+unsigned char multiply_values(unsigned char lhs, unsigned char rhs) {
+  return lhs * rhs;
+}
+
 // CHECK-LABEL: mask_low:
 // CHECK: mov a, r7
 // CHECK: anl a, #15
