@@ -1,4 +1,5 @@
 #include "MCS51MCTargetDesc.h"
+#include "MCS51FixupKinds.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
@@ -22,11 +23,16 @@ public:
   }
 
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
+    if (Kind == MCS51::fixup_8)
+      return {"fixup_8", 0, 8, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 
-  void applyFixup(const MCFragment &, const MCFixup &, const MCValue &,
-                  uint8_t *, uint64_t, bool) override {}
+  void applyFixup(const MCFragment &, const MCFixup &Fixup, const MCValue &,
+                  uint8_t *Data, uint64_t Value, bool) override {
+    if (Fixup.getKind() == MCS51::fixup_8)
+      Data[Fixup.getOffset()] = static_cast<uint8_t>(Value);
+  }
 
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *) const override {
