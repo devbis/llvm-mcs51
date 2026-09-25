@@ -198,6 +198,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  auto getNextDirectAddress = [](MachineOperand Addr) {
+    if (Addr.isImm())
+      Addr.setImm(Addr.getImm() + 1);
+    else if (Addr.isGlobal() || Addr.isSymbol())
+      Addr.setOffset(Addr.getOffset() + 1);
+    else
+      report_fatal_error("unsupported MCS-51 direct address operand");
+    return Addr;
+  };
   if (MI.getOpcode() == MCS51::LOADX16 ||
       MI.getOpcode() == MCS51::LOADCODE16) {
     Register Dst = MI.getOperand(0).getReg();
@@ -232,11 +241,58 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADDIRECT16) {
+    Register Dst = MI.getOperand(0).getReg();
+    MachineOperand AddrLow = MI.getOperand(1);
+    MachineOperand AddrHigh = getNextDirectAddress(AddrLow);
+    Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register HighByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .add(AddrLow);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LowByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .add(AddrHigh);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), HighByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(HighByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::STOREDIRECT8) {
     Register Src = MI.getOperand(1).getReg();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A))
         .add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREDIRECT16) {
+    MachineOperand AddrLow = MI.getOperand(0);
+    MachineOperand AddrHigh = getNextDirectAddress(AddrLow);
+    Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register HighByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LowByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), HighByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).add(AddrLow);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(HighByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).add(AddrHigh);
     MI.eraseFromParent();
     return MBB;
   }

@@ -32,8 +32,13 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     auto *LD = cast<LoadSDNode>(N);
     unsigned AS = LD->getAddressSpace();
     if (AS == MCS51::Data || AS == MCS51::SFR) {
-      if (LD->getMemoryVT() != MVT::i8)
-        report_fatal_error("MCS-51 direct memory supports byte loads only");
+      unsigned Opcode;
+      if (LD->getMemoryVT() == MVT::i8)
+        Opcode = MCS51::LOADDIRECT8;
+      else if (LD->getMemoryVT() == MVT::i16)
+        Opcode = MCS51::LOADDIRECT16;
+      else
+        report_fatal_error("unsupported MCS-51 direct memory load width");
       SDValue Addr = LD->getBasePtr();
       if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
         Addr = CurDAG->getTargetGlobalAddress(
@@ -43,7 +48,7 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
         return false;
       SDValue Ops[] = {Addr, LD->getChain()};
-      SDNode *Res = CurDAG->getMachineNode(MCS51::LOADDIRECT8, DL,
+      SDNode *Res = CurDAG->getMachineNode(Opcode, DL,
                                            N->getVTList(), Ops);
       CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
       ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
@@ -80,8 +85,13 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   if (AS == MCS51::Code)
     report_fatal_error("cannot store to MCS-51 code memory");
   if (AS == MCS51::Data || AS == MCS51::SFR) {
-    if (ST->getMemoryVT() != MVT::i8)
-      report_fatal_error("MCS-51 direct memory supports byte stores only");
+    unsigned Opcode;
+    if (ST->getMemoryVT() == MVT::i8)
+      Opcode = MCS51::STOREDIRECT8;
+    else if (ST->getMemoryVT() == MVT::i16)
+      Opcode = MCS51::STOREDIRECT16;
+    else
+      report_fatal_error("unsupported MCS-51 direct memory store width");
     SDValue Addr = ST->getBasePtr();
     if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
       Addr = CurDAG->getTargetGlobalAddress(
@@ -91,7 +101,7 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
       return false;
     SDValue Ops[] = {Addr, ST->getValue(), ST->getChain()};
-    SDNode *Res = CurDAG->getMachineNode(MCS51::STOREDIRECT8, DL,
+    SDNode *Res = CurDAG->getMachineNode(Opcode, DL,
                                          MVT::Other, Ops);
     CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
     ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
