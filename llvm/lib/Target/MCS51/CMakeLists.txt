@@ -5,8 +5,26 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 # built up. This component will eventually be superseded by MCS51CodeGen.
 add_llvm_component_library(LLVMMCS51
   MCS51.cpp
+  PARTIAL_SOURCES_INTENDED
   LINK_COMPONENTS Support TargetParser
   ADD_TO_COMPONENT MCS51
+)
+
+add_llvm_target(MCS51CodeGen
+  MCS51TargetMachine.cpp
+
+  LINK_COMPONENTS
+  CodeGen
+  Core
+  MC
+  MCS51Desc
+  MCS51Info
+  Support
+  Target
+  TargetParser
+
+  ADD_TO_COMPONENT
+  MCS51
 )
 
 set(LLVM_TARGET_DEFINITIONS MCS51.td)
