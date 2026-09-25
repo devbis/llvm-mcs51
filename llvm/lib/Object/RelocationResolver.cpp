@@ -382,6 +382,22 @@ static uint64_t resolveAVR(uint64_t Type, uint64_t Offset, uint64_t S,
   }
 }
 
+static bool supportsMCS51(uint64_t Type) {
+  return Type == ELF::R_8051_8 || Type == ELF::R_8051_16;
+}
+
+static uint64_t resolveMCS51(uint64_t Type, uint64_t, uint64_t S, uint64_t,
+                             int64_t Addend) {
+  switch (Type) {
+  case ELF::R_8051_8:
+    return (S + Addend) & 0xff;
+  case ELF::R_8051_16:
+    return (S + Addend) & 0xffff;
+  default:
+    llvm_unreachable("Invalid relocation type");
+  }
+}
+
 static bool supportsLanai(uint64_t Type) {
   return Type == ELF::R_LANAI_32;
 }
@@ -863,6 +879,8 @@ getRelocationResolver(const ObjectFile &Obj) {
       return {supportsARM, resolveARM};
     case Triple::avr:
       return {supportsAVR, resolveAVR};
+    case Triple::mcs51:
+      return {supportsMCS51, resolveMCS51};
     case Triple::lanai:
       return {supportsLanai, resolveLanai};
     case Triple::loongarch32:
