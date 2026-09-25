@@ -52,10 +52,14 @@ def SETB_C : MCS51Inst<0xD3, "setb c">;
 def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr">;
 def MOVC_ADPTR : MCS51Inst<0x93, "movc a, @a+dptr">;
 def MOVC_APC : MCS51Inst<0x83, "movc a, @a+pc">;
-def MOVX_ADPTR : MCS51Inst<0xE0, "movx a, @dptr">;
+def MOVX_ADPTR : MCS51Inst<0xE0, "movx a, @dptr"> {
+  let Defs = [A]; let Uses = [DPTR];
+}
 def MOVX_AR0 : MCS51Inst<0xE2, "movx a, @r0">;
 def MOVX_AR1 : MCS51Inst<0xE3, "movx a, @r1">;
-def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a">;
+def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a"> {
+  let Uses = [A, DPTR];
+}
 def MOVX_R0A : MCS51Inst<0xF2, "movx @r0, a">;
 def MOVX_R1A : MCS51Inst<0xF3, "movx @r1, a">;
 def MOV_A_R0_IND : MCS51Inst<0xE6, "mov a, @r0">;
@@ -204,6 +208,30 @@ def BR_ULT8ri : MCS51BrCCImmPseudo<MCS51br_ult>;
 def BR_ULT8rr : MCS51BrCCRegPseudo<MCS51br_ult>;
 def BR_UGE8ri : MCS51BrCCImmPseudo<MCS51br_uge>;
 def BR_UGE8rr : MCS51BrCCRegPseudo<MCS51br_uge>;
+
+def LOADX8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51PTR:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+}
+
+def STOREX8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51PTR:$addr, MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+}
 
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
     : Instruction {
