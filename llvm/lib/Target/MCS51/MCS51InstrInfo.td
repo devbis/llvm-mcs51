@@ -911,6 +911,21 @@ class MCS51DirectInst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{15-8} = addr;
 }
 
+def MOV_DIRECT_DIRECT : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$dst, MCS51Direct8:$src);
+  let AsmString = "mov $dst, $src";
+  let Size = 3;
+  let hasSideEffects = 1;
+  bits<8> dst;
+  bits<8> src;
+  bits<24> Inst;
+  let Inst{7-0} = 0x85;
+  let Inst{15-8} = src;
+  let Inst{23-16} = dst;
+}
+
 class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -1019,23 +1034,6 @@ class MCS51RnDefInst<bits<5> opcode, string mnemonic> : Instruction {
   let Uses = [A];
 }
 
-class MCS51RegCopyInst : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51GPR8:$src);
-  let AsmString = "mov $dst, $src";
-  let Size = 3;
-  let hasSideEffects = 0;
-  bits<3> dst;
-  bits<3> src;
-  bits<24> Inst;
-  let Inst{7-0} = 0x85;
-  let Inst{15-11} = 0;
-  let Inst{10-8} = src;
-  let Inst{23-19} = 0;
-  let Inst{18-16} = dst;
-}
-
 def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,"> { let Defs = [A]; }
 def MOV_B_RN  : MCS51RnInst<0b10001, "mov b,"> { let Defs = [B]; }
 def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> { let Defs = [A]; let Uses = [A]; }
@@ -1053,7 +1051,6 @@ def INC_RN : MCS51RnInst<0b00001, "inc"> { let hasSideEffects = 1; }
 def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
   let Pattern = [(set MCS51GPR8:$rn, MCS51Imm8:$imm)];
 }
-def MOV_RN_RM : MCS51RegCopyInst;
 
 class MCS51ALUPseudoRR<SDNode node> : Instruction {
   let Namespace = "MCS51";
