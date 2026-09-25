@@ -1,4 +1,5 @@
 #include "MCS51MCTargetDesc.h"
+#include "MCS51FixupKinds.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -27,7 +28,7 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
   }
 
   uint32_t getImm8OpValue(const MCInst &MI, unsigned OpNo,
-                          SmallVectorImpl<MCFixup> &,
+                          SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &) const {
     const MCOperand &Op = MI.getOperand(OpNo);
     if (Op.isImm())
@@ -35,7 +36,18 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     int64_t Value = 0;
     if (Op.isExpr() && Op.getExpr()->evaluateAsAbsolute(Value))
       return static_cast<uint8_t>(Value);
-    report_fatal_error("symbolic MCS-51 immediates need relocations");
+    if (Op.isExpr()) {
+      // This operand method is shared by byte fields at different positions.
+      // MCS51DirectImmInst has its immediate in byte 2; every other use is
+      // the second byte of a two-byte instruction.
+      unsigned Offset = MI.getOpcode() == MCS51::MOV_DIRECT_IMM && OpNo == 1
+                            ? 2
+                            : 1;
+      Fixups.push_back(
+          MCFixup::create(Offset, Op.getExpr(), MCS51::fixup_8));
+      return 0;
+    }
+    report_fatal_error("unsupported MCS-51 immediate operand");
   }
 
   uint64_t getBinaryCodeForInstr(const MCInst &MI,

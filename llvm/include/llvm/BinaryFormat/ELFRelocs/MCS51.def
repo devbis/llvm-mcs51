@@ -1,0 +1,4 @@
+// MCS-51 ELF relocation types.
+// These values define LLVM's initial relocation ABI for EM_8051.
+ELF_RELOC(R_8051_NONE, 0)
+ELF_RELOC(R_8051_8, 1)
