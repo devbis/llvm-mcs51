@@ -81,10 +81,14 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
   for (const CCValAssign &VA : ArgLocs) {
     if (!VA.isRegLoc())
       report_fatal_error("MCS-51 stack arguments are not implemented");
-    if (VA.getLocVT() != MVT::i8 || VA.getValVT() != MVT::i8)
+    if (EVT(VA.getLocVT()) != VA.getValVT() ||
+        (VA.getValVT() != MVT::i8 && VA.getValVT() != MVT::i16))
       report_fatal_error("unsupported MCS-51 argument type");
+    const TargetRegisterClass *RC = VA.getLocVT() == MVT::i16
+                                        ? &MCS51::MCS51PTRRegClass
+                                        : &MCS51::MCS51GPR8RegClass;
     Register LiveIn = MF.addLiveIn(VA.getLocReg(),
-                                   &MCS51::MCS51GPR8RegClass);
+                                   RC);
     SDValue Value = DAG.getCopyFromReg(Chain, DL, LiveIn, VA.getLocVT());
     if (VA.getLocInfo() != CCValAssign::Full)
       report_fatal_error("unsupported MCS-51 argument extension");
@@ -113,8 +117,9 @@ SDValue MCS51TargetLowering::LowerCall(
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
   for (unsigned I = 0; I < ArgLocs.size(); ++I) {
     const CCValAssign &VA = ArgLocs[I];
-    if (!VA.isRegLoc() || VA.getLocVT() != MVT::i8 ||
-        CLI.OutVals[I].getValueType() != MVT::i8)
+    EVT VT = CLI.OutVals[I].getValueType();
+    if (!VA.isRegLoc() || EVT(VA.getLocVT()) != VT ||
+        (VT != MVT::i8 && VT != MVT::i16))
       report_fatal_error("unsupported MCS-51 call argument");
     RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
   }

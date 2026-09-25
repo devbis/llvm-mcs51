@@ -4,10 +4,15 @@
 
 extern unsigned char callee(unsigned char);
 extern unsigned int callee_word(void);
+extern unsigned int callee_word_arg(unsigned int);
 
 unsigned char caller(void) { return callee(42); }
 unsigned int caller_word(void) { return callee_word(); }
 unsigned int caller_promoted(void) { return callee(42); }
+unsigned int caller_word_arg(unsigned int value) {
+  return callee_word_arg(value);
+}
+unsigned int echo_word(unsigned int value) { return value; }
 
 // CHECK-LABEL: caller:
 // CHECK: mov a, #42
@@ -25,5 +30,13 @@ unsigned int caller_promoted(void) { return callee(42); }
 // CHECK: mov 130, a
 // CHECK: ret
 
+// CHECK-LABEL: caller_word_arg:
+// CHECK: lcall callee_word_arg
+// CHECK: ret
+
+// CHECK-LABEL: echo_word:
+// CHECK: ret
+
 // RELOC: R_8051_16 callee 0x0
 // RELOC: R_8051_16 callee_word 0x0
+// RELOC: R_8051_16 callee_word_arg 0x0
