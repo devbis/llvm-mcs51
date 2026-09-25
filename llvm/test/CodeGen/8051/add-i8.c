@@ -25,7 +25,7 @@ unsigned char subtract_values(unsigned char lhs, unsigned char rhs) {
 
 // CHECK-LABEL: multiply_values:
 // CHECK: mov a, r6
-// CHECK: mov b, r7
+// CHECK: mov 240, r7
 // CHECK: mul ab
 // CHECK: ret
 unsigned char multiply_values(unsigned char lhs, unsigned char rhs) {
