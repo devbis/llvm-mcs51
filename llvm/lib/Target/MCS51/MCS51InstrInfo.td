@@ -6,6 +6,10 @@ def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                         SDNPVariadic]>;
+def SDT_MCS51Br : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
+                                       SDTCisVT<1, OtherVT>]>;
+def MCS51br_eq : SDNode<"MCS51ISD::BR_EQ", SDT_MCS51Br, [SDNPHasChain]>;
+def MCS51br_ne : SDNode<"MCS51ISD::BR_NE", SDT_MCS51Br, [SDNPHasChain]>;
 
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -139,6 +143,39 @@ def JNC : MCS51RelBranch<0x50, "jnc"> { let Uses = [C]; }
 def JB : MCS51BitRelBranch<0x20, "jb">;
 def JNB : MCS51BitRelBranch<0x30, "jnb">;
 def JBC : MCS51BitRelBranch<0x10, "jbc">;
+
+def BRCOND8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$cond, MCS51Addr16:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(brcond MCS51GPR8:$cond, bb:$target)];
+}
+
+class MCS51BrCCPseudo<SDNode Node> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Addr16:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(Node MCS51GPR8:$lhs, bb:$target)];
+}
+
+def BR_EQ8 : MCS51BrCCPseudo<MCS51br_eq>;
+def BR_NE8 : MCS51BrCCPseudo<MCS51br_ne>;
 
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
     : Instruction {
