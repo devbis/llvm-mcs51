@@ -1,6 +1,7 @@
 include "llvm/Target/Target.td"
 include "MCS51RegisterInfo.td"
 include "MCS51InstrInfo.td"
+include "MCS51CallingConv.td"
 
 defm : RemapAllTargetPseudoPointerOperands<MCS51PTR>;
 

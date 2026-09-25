@@ -10,6 +10,11 @@
 #define LLVM_LIB_TARGET_MCS51_MCS51_H
 
 namespace llvm {
+
+class PassRegistry;
+void initializeMCS51AsmPrinterPass(PassRegistry &);
+void initializeMCS51DAGToDAGISelLegacyPass(PassRegistry &);
+
 namespace MCS51 {
 
 /// LLVM IR address spaces used by the MCS-51 target. Address space zero is

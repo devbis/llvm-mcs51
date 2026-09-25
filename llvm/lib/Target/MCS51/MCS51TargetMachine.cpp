@@ -1,6 +1,10 @@
 #include "MCS51TargetMachine.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/PassRegistry.h"
 #include "llvm/Support/Compiler.h"
 
 using namespace llvm;
@@ -11,6 +15,23 @@ constexpr StringLiteral MCS51DataLayout =
     "i1:8-i8:8-i16:8-i32:8-i64:8-f32:8-f64:8-n8:16";
 }
 
+namespace {
+class MCS51PassConfig final : public TargetPassConfig {
+public:
+  MCS51PassConfig(MCS51TargetMachine &TM, PassManagerBase &PM)
+      : TargetPassConfig(TM, PM) {}
+
+  MCS51TargetMachine &getMCS51TargetMachine() const {
+    return getTM<MCS51TargetMachine>();
+  }
+
+  bool addInstSelector() override {
+    addPass(createMCS51ISelDag(getMCS51TargetMachine(), getOptLevel()));
+    return false;
+  }
+};
+} // namespace
+
 MCS51TargetMachine::MCS51TargetMachine(
     const Target &T, const Triple &TT, StringRef CPU, StringRef FS,
     const TargetOptions &Options, std::optional<Reloc::Model> RM,
@@ -18,18 +39,27 @@ MCS51TargetMachine::MCS51TargetMachine(
     : CodeGenTargetMachineImpl(
           T, MCS51DataLayout, TT, CPU, FS, Options,
           RM.value_or(Reloc::Static),
-          getEffectiveCodeModel(CM, CodeModel::Small), OL) {
+          getEffectiveCodeModel(CM, CodeModel::Small), OL),
+      TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
+      Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();
 }
 
 bool MCS51TargetMachine::addPassesToEmitFile(
-    PassManagerBase &, raw_pwrite_stream &, raw_pwrite_stream *,
-    CodeGenFileType, bool, MachineModuleInfoWrapperPass *) {
-  // The SelectionDAG lowering and assembly printer are added with the MCS-51
-  // code generator. Do not silently emit an empty output file in the meantime.
-  return true;
+    PassManagerBase &PM, raw_pwrite_stream &Out, raw_pwrite_stream *DwoOut,
+    CodeGenFileType FileType, bool DisableVerify,
+    MachineModuleInfoWrapperPass *MMIWP) {
+  return CodeGenTargetMachineImpl::addPassesToEmitFile(
+      PM, Out, DwoOut, FileType, DisableVerify, MMIWP);
+}
+
+TargetPassConfig *MCS51TargetMachine::createPassConfig(PassManagerBase &PM) {
+  return new MCS51PassConfig(*this, PM);
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMCS51Target() {
   RegisterTargetMachine<MCS51TargetMachine> X(getTheMCS51Target());
+  PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeMCS51AsmPrinterPass(PR);
+  initializeMCS51DAGToDAGISelLegacyPass(PR);
 }
