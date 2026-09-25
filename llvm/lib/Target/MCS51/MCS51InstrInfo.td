@@ -39,6 +39,7 @@ def RLC_A : MCS51Inst<0x33, "rlc a"> {
 def MUL_AB : MCS51Inst<0xA4, "mul ab"> {
   let Defs = [A, B]; let Uses = [A, B];
 }
+let Defs = [A, B], Uses = [A, B] in
 def DIV_AB : MCS51Inst<0x84, "div ab">;
 def SWAP_A : MCS51Inst<0xC4, "swap a">;
 def DA_A : MCS51Inst<0xD4, "da a">;
@@ -497,6 +498,23 @@ def MUL8rr : Instruction {
   let Pattern = [(set MCS51AReg:$dst,
                       (mul MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
 }
+
+class MCS51DivModPseudo<SDNode node> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51AReg:$dst,
+                      (node MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
+}
+
+def UDIV8rr : MCS51DivModPseudo<udiv>;
+def UREM8rr : MCS51DivModPseudo<urem>;
 
 class MCS51ShiftPseudo<SDNode node> : Instruction {
   let Namespace = "MCS51";
