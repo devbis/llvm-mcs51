@@ -138,6 +138,18 @@ def MOV_R0_IND_A : MCS51Inst<0xF6, "mov @r0, a">;
 def MOV_R1_IND_A : MCS51Inst<0xF7, "mov @r1, a">;
 def INC_R0_IND : MCS51Inst<0x06, "inc @r0">;
 def INC_R1_IND : MCS51Inst<0x07, "inc @r1">;
+def ADD_A_R0_IND : MCS51Inst<0x26, "add a, @r0">;
+def ADD_A_R1_IND : MCS51Inst<0x27, "add a, @r1">;
+def ADDC_A_R0_IND : MCS51Inst<0x36, "addc a, @r0">;
+def ADDC_A_R1_IND : MCS51Inst<0x37, "addc a, @r1">;
+def SUBB_A_R0_IND : MCS51Inst<0x96, "subb a, @r0">;
+def SUBB_A_R1_IND : MCS51Inst<0x97, "subb a, @r1">;
+def ANL_A_R0_IND : MCS51Inst<0x56, "anl a, @r0">;
+def ANL_A_R1_IND : MCS51Inst<0x57, "anl a, @r1">;
+def ORL_A_R0_IND : MCS51Inst<0x46, "orl a, @r0">;
+def ORL_A_R1_IND : MCS51Inst<0x47, "orl a, @r1">;
+def XRL_A_R0_IND : MCS51Inst<0x66, "xrl a, @r0">;
+def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1">;
 def RET  : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
   let isTerminator = 1;
