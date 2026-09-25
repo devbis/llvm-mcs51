@@ -198,6 +198,21 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::LOADX8) {
+    Register Dst = MI.getOperand(0).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREX8) {
+    Register Src = MI.getOperand(1).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::BRCOND8) {
     Register Cond = MI.getOperand(0).getReg();
     MachineBasicBlock *Target = MI.getOperand(1).getMBB();
