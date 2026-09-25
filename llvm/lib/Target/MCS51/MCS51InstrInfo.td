@@ -592,6 +592,33 @@ def SPILL_STORE16 : Instruction {
   let Uses = [DPTR, SP];
 }
 
+def LOAD_FRAME8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def STORE_FRAME8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
 def POPARG8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
