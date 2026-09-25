@@ -33,7 +33,8 @@ bool MCS51TargetLowering::CanLowerReturn(
     CallingConv::ID, MachineFunction &, bool,
     const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &,
     const Type *) const {
-  return Outs.empty();
+  return Outs.empty() ||
+         (Outs.size() == 1 && Outs.front().VT == MVT::i8);
 }
 
 SDValue MCS51TargetLowering::LowerReturn(
@@ -41,7 +42,12 @@ SDValue MCS51TargetLowering::LowerReturn(
     const SmallVectorImpl<ISD::OutputArg> &Outs,
     const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
     SelectionDAG &DAG) const {
-  if (!Outs.empty() || !OutVals.empty())
+  if (Outs.empty() != OutVals.empty())
+    report_fatal_error("MCS-51 return value lowering mismatch");
+  if (OutVals.size() > 1 ||
+      (!OutVals.empty() && OutVals.front().getValueType() != MVT::i8))
     report_fatal_error("MCS-51 value return lowering is not implemented");
+  if (!OutVals.empty())
+    Chain = DAG.getCopyToReg(Chain, DL, MCS51::A, OutVals.front());
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
 }

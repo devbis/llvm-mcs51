@@ -15,6 +15,7 @@ public:
       : SelectionDAGISel(TM, OL) {}
 
   void SelectCode(SDNode *N);
+  bool CheckNodePredicate(SDValue Op, unsigned PredNo) const override;
   void Select(SDNode *N) override { SelectCode(N); }
 };
 

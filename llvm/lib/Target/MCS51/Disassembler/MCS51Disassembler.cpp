@@ -30,6 +30,14 @@ static DecodeStatus DecodeMCS51GPR8RegisterClass(
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeMCS51ARegRegisterClass(
+    MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
+  if (RegNo != 0)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(MCS51::A));
+  return MCDisassembler::Success;
+}
+
 #define GET_DISASSEMBLER_TABLE
 #include "MCS51GenDisassemblerTables.inc"
 
@@ -47,6 +55,17 @@ public:
       return Fail;
     }
     uint8_t Opcode = Bytes[0];
+    if (Opcode == 0x85) { // MOV direct,direct (register-bank copy)
+      if (Bytes.size() < 3) {
+        Size = 0;
+        return Fail;
+      }
+      Size = 3;
+      uint32_t InstBits = uint32_t(Bytes[0]) | (uint32_t(Bytes[1]) << 8) |
+                          (uint32_t(Bytes[2]) << 16);
+      return decodeInstruction(DecoderTable24, Inst, InstBits, Address, this,
+                               STI);
+    }
     switch (Opcode) {
     case 0x24: // ADD A,#data
     case 0x34: // ADDC A,#data
@@ -55,6 +74,14 @@ public:
     case 0x64: // XRL A,#data
     case 0x74: // MOV A,#data
     case 0x94: // SUBB A,#data
+    case 0x78: // MOV R0-R7,#data
+    case 0x79:
+    case 0x7a:
+    case 0x7b:
+    case 0x7c:
+    case 0x7d:
+    case 0x7e:
+    case 0x7f:
       if (Bytes.size() < 2) {
         Size = 0;
         return Fail;
