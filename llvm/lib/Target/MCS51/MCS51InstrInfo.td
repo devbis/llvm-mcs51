@@ -11,6 +11,8 @@ def SDT_MCS51Br : SDTypeProfile<0, 3, [SDTCisVT<0, i8>,
                                        SDTCisVT<2, OtherVT>]>;
 def MCS51br_eq : SDNode<"MCS51ISD::BR_EQ", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_ne : SDNode<"MCS51ISD::BR_NE", SDT_MCS51Br, [SDNPHasChain]>;
+def MCS51br_ult : SDNode<"MCS51ISD::BR_ULT", SDT_MCS51Br, [SDNPHasChain]>;
+def MCS51br_uge : SDNode<"MCS51ISD::BR_UGE", SDT_MCS51Br, [SDNPHasChain]>;
 
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -196,6 +198,10 @@ def BR_EQ8ri : MCS51BrCCImmPseudo<MCS51br_eq>;
 def BR_EQ8rr : MCS51BrCCRegPseudo<MCS51br_eq>;
 def BR_NE8ri : MCS51BrCCImmPseudo<MCS51br_ne>;
 def BR_NE8rr : MCS51BrCCRegPseudo<MCS51br_ne>;
+def BR_ULT8ri : MCS51BrCCImmPseudo<MCS51br_ult>;
+def BR_ULT8rr : MCS51BrCCRegPseudo<MCS51br_ult>;
+def BR_UGE8ri : MCS51BrCCImmPseudo<MCS51br_uge>;
+def BR_UGE8rr : MCS51BrCCRegPseudo<MCS51br_uge>;
 
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
     : Instruction {
