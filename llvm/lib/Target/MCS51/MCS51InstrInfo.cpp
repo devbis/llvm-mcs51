@@ -2,6 +2,8 @@
 #include "MCS51Subtarget.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "MCS51GenInstrInfo.inc"
@@ -37,6 +39,79 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return;
   }
   llvm_unreachable("unsupported MCS-51 physical register copy");
+}
+
+void MCS51InstrInfo::storeRegToStackSlot(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register SrcReg,
+    bool IsKill, int FrameIndex, const TargetRegisterClass *RC, Register,
+    MachineInstr::MIFlag Flags) const {
+  bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
+  bool IsWord = RC == &MCS51::MCS51PTRRegClass;
+  if (!IsByte && !IsWord)
+    llvm_unreachable("unsupported MCS-51 spill register class");
+  MachineFunction &MF = *MBB.getParent();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  MachineMemOperand *MMO = MF.getMachineMemOperand(
+      MachinePointerInfo::getFixedStack(MF, FrameIndex),
+      MachineMemOperand::MOStore, MFI.getObjectSize(FrameIndex),
+      MFI.getObjectAlign(FrameIndex));
+  BuildMI(MBB, MI, DebugLoc(), get(IsByte ? MCS51::SPILL_STORE8
+                                          : MCS51::SPILL_STORE16))
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .addReg(SrcReg, getKillRegState(IsKill))
+      .addMemOperand(MMO)
+      .setMIFlags(Flags);
+}
+
+void MCS51InstrInfo::loadRegFromStackSlot(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI, Register DestReg,
+    int FrameIndex, const TargetRegisterClass *RC, Register, unsigned SubReg,
+    MachineInstr::MIFlag Flags) const {
+  bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
+  bool IsWord = RC == &MCS51::MCS51PTRRegClass;
+  if ((!IsByte && !IsWord) || SubReg)
+    llvm_unreachable("unsupported MCS-51 reload register class");
+  MachineFunction &MF = *MBB.getParent();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  MachineMemOperand *MMO = MF.getMachineMemOperand(
+      MachinePointerInfo::getFixedStack(MF, FrameIndex),
+      MachineMemOperand::MOLoad, MFI.getObjectSize(FrameIndex),
+      MFI.getObjectAlign(FrameIndex));
+  BuildMI(MBB, MI, DebugLoc(), get(IsByte ? MCS51::SPILL_LOAD8
+                                          : MCS51::SPILL_LOAD16), DestReg)
+      .addFrameIndex(FrameIndex)
+      .addImm(0)
+      .addMemOperand(MMO)
+      .setMIFlags(Flags);
+}
+
+bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  unsigned Opcode = MI.getOpcode();
+  if (Opcode != MCS51::LOADSTACKARG8)
+    return false;
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const DebugLoc &DL = MI.getDebugLoc();
+  Register Dst = MI.getOperand(0).getReg();
+  int64_t Offset = static_cast<int8_t>(MI.getOperand(1).getImm()) -
+                   MFI.getStackSize();
+  if (Offset < -128 || Offset > 127)
+    report_fatal_error("MCS-51 stack arguments exceed 128-byte displacement");
+
+  auto I = MI.getIterator();
+  BuildMI(MBB, I, DL, get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x81);
+  BuildMI(MBB, I, DL, get(MCS51::ADD_A_IMM), MCS51::A).addImm(Offset);
+  BuildMI(MBB, I, DL, get(MCS51::MOV_RN_A))
+      .addReg(MCS51::R0, RegState::Define);
+  BuildMI(MBB, I, DL, get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
+
+  BuildMI(MBB, I, DL, get(MCS51::MOV_RN_A), Dst);
+
+  MI.eraseFromParent();
+  return true;
 }
 
 namespace {

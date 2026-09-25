@@ -156,6 +156,8 @@ def MCS51Imm8 : Operand<i8>,
   let DecoderMethod = "DecodeImm8";
 }
 
+def MCS51FrameIndex : Operand<i16>;
+
 def MCS51Direct8 : Operand<i8>,
                    ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
   let ParserMatchClass = ImmAsmOperand;
@@ -478,9 +480,8 @@ def LOADSTACKARG8 : Instruction {
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
   let mayLoad = 1;
-  let Defs = [A, R0];
+  let Defs = [A, R1];
   let Uses = [SP];
 }
 
@@ -536,6 +537,59 @@ def PUSHPAD8 : Instruction {
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
   let Defs = [A, SP];
+}
+
+def SPILL_LOAD8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def SPILL_STORE8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def SPILL_LOAD16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [A, R1, DPTR];
+}
+
+def SPILL_STORE16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [A, R1];
+  let Uses = [DPTR, SP];
 }
 
 def POPARG8 : Instruction {
@@ -690,6 +744,7 @@ def POP_DIRECT : MCS51DirectInst<0xD0, "pop"> {
   let Defs = [SP]; let Uses = [SP];
 }
 def INC_DIRECT : MCS51DirectInst<0x05, "inc">;
+def DEC_DIRECT : MCS51DirectInst<0x15, "dec">;
 def MOV_R0_IND_IMM : MCS51IndirectImmInst<0x76, "mov @r0,">;
 def MOV_R1_IND_IMM : MCS51IndirectImmInst<0x77, "mov @r1,">;
 

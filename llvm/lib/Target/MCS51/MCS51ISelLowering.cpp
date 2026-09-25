@@ -265,37 +265,28 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::LOADSTACKARG8) {
-    Register Dst = MI.getOperand(0).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x81);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
-        .add(MI.getOperand(1));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(MCS51::R0, RegState::Define);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-        .addReg(MCS51::A);
-    MI.eraseFromParent();
-    return MBB;
-  }
   if (MI.getOpcode() == MCS51::LOADSTACKARG16) {
     Register Dst = MI.getOperand(0).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+    auto Setup = [](MachineInstrBuilder MIB) {
+      return MIB.setMIFlag(MachineInstr::FrameSetup);
+    };
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A))
         .addImm(0x81);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A))
         .add(MI.getOperand(1));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)))
         .addReg(MCS51::R0, RegState::Define);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(MCS51::R0);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)))
+        .addReg(MCS51::R0);
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A))).addImm(0x82);
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))).addReg(MCS51::R0);
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A)));
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)))
         .addReg(MCS51::R0, RegState::Define);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)))
+        .addReg(MCS51::R0);
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A))).addImm(0x83);
+    Setup(BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst))
         .addReg(MCS51::DPTR);
     MI.eraseFromParent();
     return MBB;
