@@ -72,15 +72,19 @@ class MCS51AccImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{15-8} = imm;
 }
 
+class MCS51AccImmALUInst<bits<8> opcode, string mnemonic,
+                         SDNode node> : MCS51AccImmInst<opcode, mnemonic> {
+  let Pattern = [(set MCS51AReg:$dst,
+                      (node A, MCS51Imm8:$imm))];
+}
+
 def MOV_A_IMM : MCS51AccImmInst<0x74, "mov"> {
   let Pattern = [(set MCS51AReg:$dst, MCS51Imm8:$imm)];
 }
-def ADD_A_IMM : MCS51AccImmInst<0x24, "add">;
-def ADDC_A_IMM : MCS51AccImmInst<0x34, "addc">;
-def SUBB_A_IMM : MCS51AccImmInst<0x94, "subb">;
-def ANL_A_IMM : MCS51AccImmInst<0x54, "anl">;
-def ORL_A_IMM : MCS51AccImmInst<0x44, "orl">;
-def XRL_A_IMM : MCS51AccImmInst<0x64, "xrl">;
+def ADD_A_IMM : MCS51AccImmALUInst<0x24, "add", add>;
+def ANL_A_IMM : MCS51AccImmALUInst<0x54, "anl", and>;
+def ORL_A_IMM : MCS51AccImmALUInst<0x44, "orl", or>;
+def XRL_A_IMM : MCS51AccImmALUInst<0x64, "xrl", xor>;
 
 class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -143,11 +147,11 @@ class MCS51RegCopyInst : Instruction {
 
 def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,"> { let Defs = [A]; }
 def ADD_A_RN  : MCS51RnInst<0b00101, "add a,">;
-def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,">;
-def SUBB_A_RN : MCS51RnInst<0b10001, "subb a,">;
 def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,">;
 def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,">;
 def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,">;
+def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,">;
+def SUBB_A_RN : MCS51RnInst<0b10001, "subb a,">;
 def MOV_RN_A  : MCS51RnDefInst<0b11111, "mov">;
 def INC_RN : MCS51RnInst<0b00001, "inc">;
 def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
