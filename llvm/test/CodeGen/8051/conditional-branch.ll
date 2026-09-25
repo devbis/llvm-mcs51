@@ -39,6 +39,18 @@ no:
   ret i8 2
 }
 
+define i8 @choose_signed_less(i8 %lhs, i8 %rhs) {
+entry:
+  %test = icmp slt i8 %lhs, %rhs
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
 ; CHECK-LABEL: choose:
 ; CHECK: mov a, r7
 ; CHECK: j{{n?z}}
@@ -69,3 +81,9 @@ no:
 ; CHECK: mov a, r7
 ; CHECK: xrl a, r6
 ; CHECK: j{{n?z}}
+
+; CHECK-LABEL: choose_signed_less:
+; CHECK: xrl a, #128
+; CHECK: xrl a, #128
+; CHECK: subb a,
+; CHECK: jnc
