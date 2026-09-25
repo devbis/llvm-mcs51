@@ -44,13 +44,17 @@ let Defs = [A, B, C], Uses = [A, B] in
 def DIV_AB : MCS51Inst<0x84, "div ab"> { let hasSideEffects = 0; }
 def SWAP_A : MCS51Inst<0xC4, "swap a">;
 def DA_A : MCS51Inst<0xD4, "da a">;
-def CLR_A : MCS51Inst<0xE4, "clr a">;
+def CLR_A : MCS51Inst<0xE4, "clr a"> {
+  let Defs = [A]; let hasSideEffects = 0;
+}
 def CPL_A : MCS51Inst<0xF4, "cpl a">;
 def CLR_C : MCS51Inst<0xC3, "clr c"> { let Defs = [C]; }
 def CPL_C : MCS51Inst<0xB3, "cpl c">;
 def SETB_C : MCS51Inst<0xD3, "setb c">;
 def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr">;
-def MOVC_ADPTR : MCS51Inst<0x93, "movc a, @a+dptr">;
+def MOVC_ADPTR : MCS51Inst<0x93, "movc a, @a+dptr"> {
+  let Defs = [A]; let Uses = [A, DPTR];
+}
 def MOVC_APC : MCS51Inst<0x83, "movc a, @a+pc">;
 def MOVX_ADPTR : MCS51Inst<0xE0, "movx a, @dptr"> {
   let Defs = [A]; let Uses = [DPTR];
@@ -242,6 +246,18 @@ def BR_UGE8ri : MCS51BrCCImmPseudo<MCS51br_uge>;
 def BR_UGE8rr : MCS51BrCCRegPseudo<MCS51br_uge>;
 
 def LOADX8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51PTR:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+}
+
+def LOADCODE8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51PTR:$addr);

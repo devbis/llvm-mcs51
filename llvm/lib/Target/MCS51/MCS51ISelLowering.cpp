@@ -206,6 +206,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADCODE8) {
+    Register Dst = MI.getOperand(0).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVC_ADPTR));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::STOREX8) {
     Register Src = MI.getOperand(1).getReg();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);

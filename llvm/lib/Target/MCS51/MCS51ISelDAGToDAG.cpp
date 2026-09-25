@@ -31,12 +31,14 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   if (N->getOpcode() == ISD::LOAD) {
     auto *LD = cast<LoadSDNode>(N);
     unsigned AS = LD->getAddressSpace();
-    if (AS != MCS51::IData && AS != MCS51::PData && AS != MCS51::XData)
+    if (AS != MCS51::IData && AS != MCS51::PData &&
+        AS != MCS51::XData && AS != MCS51::Code)
       return false;
     if (LD->getMemoryVT() != MVT::i8)
-      report_fatal_error("MCS-51 data spaces currently support byte loads only");
+      report_fatal_error("MCS-51 memory spaces currently support byte loads only");
     unsigned Opcode = AS == MCS51::IData ? MCS51::LOADI8 :
-                      AS == MCS51::PData ? MCS51::LOADP8 : MCS51::LOADX8;
+                      AS == MCS51::PData ? MCS51::LOADP8 :
+                      AS == MCS51::Code ? MCS51::LOADCODE8 : MCS51::LOADX8;
     SDValue Ops[] = {LD->getBasePtr(), LD->getChain()};
     SDNode *Res = CurDAG->getMachineNode(Opcode, DL, N->getVTList(), Ops);
     CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
@@ -48,6 +50,8 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
 
   auto *ST = cast<StoreSDNode>(N);
   unsigned AS = ST->getAddressSpace();
+  if (AS == MCS51::Code)
+    report_fatal_error("cannot store to MCS-51 code memory");
   if (AS != MCS51::IData && AS != MCS51::PData && AS != MCS51::XData)
     return false;
   if (ST->getMemoryVT() != MVT::i8)

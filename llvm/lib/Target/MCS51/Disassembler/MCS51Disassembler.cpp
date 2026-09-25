@@ -48,6 +48,14 @@ static DecodeStatus DecodeMCS51GPR8RegisterClass(
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeMCS51Indirect8RegisterClass(
+    MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
+  if (RegNo >= 2)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(RegNo == 0 ? MCS51::R0 : MCS51::R1));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus DecodeMCS51ARegRegisterClass(
     MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
   if (RegNo != 0)
