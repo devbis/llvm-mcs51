@@ -83,14 +83,15 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
         (VA.getValVT() != MVT::i8 && VA.getValVT() != MVT::i16))
       report_fatal_error("unsupported MCS-51 argument type");
     if (VA.isMemLoc()) {
-      if (VA.getValVT() != MVT::i8)
-        report_fatal_error("MCS-51 stack arguments currently support i8 only");
       int64_t SPAdjust = -(VA.getLocMemOffset() + 2);
       SDValue Offset = DAG.getTargetConstant(static_cast<uint8_t>(SPAdjust),
                                              DL, MVT::i8);
       SDValue Ops[] = {Chain, Offset};
-      SDVTList VTs = DAG.getVTList(MVT::i8, MVT::Other);
-      SDValue Load = DAG.getNode(MCS51ISD::LOAD_STACK8, DL, VTs, Ops);
+      bool IsWord = VA.getValVT() == MVT::i16;
+      SDVTList VTs = DAG.getVTList(VA.getValVT(), MVT::Other);
+      SDValue Load = DAG.getNode(IsWord ? MCS51ISD::LOAD_STACK16
+                                        : MCS51ISD::LOAD_STACK8,
+                                 DL, VTs, Ops);
       InVals.push_back(Load);
       Chain = Load.getValue(1);
       continue;
@@ -134,7 +135,7 @@ SDValue MCS51TargetLowering::LowerCall(
       report_fatal_error("unsupported MCS-51 call argument");
     if (VA.isRegLoc())
       RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
-    else if (VA.isMemLoc() && VT == MVT::i8)
+    else if (VA.isMemLoc())
       StackArgs.emplace_back(VA.getLocMemOffset(), CLI.OutVals[I]);
     else
       report_fatal_error("unsupported MCS-51 call argument location");
@@ -144,7 +145,10 @@ SDValue MCS51TargetLowering::LowerCall(
   // overwrite the physical registers that currently hold those values.
   for (auto I = StackArgs.rbegin(), E = StackArgs.rend(); I != E; ++I) {
     SDValue Ops[] = {Chain, I->second};
-    Chain = DAG.getNode(MCS51ISD::PUSH_ARG8, DL, MVT::Other, Ops);
+    unsigned Opcode = I->second.getValueType() == MVT::i16
+                          ? MCS51ISD::PUSH_ARG16
+                          : MCS51ISD::PUSH_ARG8;
+    Chain = DAG.getNode(Opcode, DL, MVT::Other, Ops);
   }
 
   for (const auto &[Reg, Value] : RegsToPass) {
@@ -256,9 +260,40 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADSTACKARG16) {
+    Register Dst = MI.getOperand(0).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x81);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R0, RegState::Define);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(MCS51::R0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R0, RegState::Define);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::PUSHARG8) {
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
         .addReg(MI.getOperand(0).getReg());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::PUSHARG16) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
     MI.eraseFromParent();
     return MBB;

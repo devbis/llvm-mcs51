@@ -29,9 +29,26 @@ public:
       CurDAG->RemoveDeadNode(N);
       return;
     }
+    if (N->getOpcode() == MCS51ISD::LOAD_STACK16) {
+      SDValue Ops[] = {N->getOperand(1), N->getOperand(0)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOADSTACKARG16, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
     if (N->getOpcode() == MCS51ISD::PUSH_ARG8) {
       SDValue Ops[] = {N->getOperand(1), N->getOperand(0)};
       SDNode *Res = CurDAG->getMachineNode(MCS51::PUSHARG8, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
+    if (N->getOpcode() == MCS51ISD::PUSH_ARG16) {
+      SDValue Ops[] = {N->getOperand(1), N->getOperand(0)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::PUSHARG16, DL,
                                            N->getVTList(), Ops);
       ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
       CurDAG->RemoveDeadNode(N);
