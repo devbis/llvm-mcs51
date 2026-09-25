@@ -2,6 +2,10 @@
 // operands and multi-byte encodings are described separately below.
 def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
+def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
+                       [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                        SDNPVariadic]>;
 
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -136,10 +140,11 @@ def JB : MCS51BitRelBranch<0x20, "jb">;
 def JNB : MCS51BitRelBranch<0x30, "jnb">;
 def JBC : MCS51BitRelBranch<0x10, "jbc">;
 
-class MCS51Abs16Inst<bits<8> opcode, string mnemonic> : Instruction {
+class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
+    : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51Addr16:$addr);
+  let InOperandList = (ins Address:$addr);
   let AsmString = mnemonic # " $addr";
   let Size = 3;
   let hasSideEffects = 1;
@@ -149,10 +154,17 @@ class MCS51Abs16Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{23-8} = addr;
 }
 
-def LJMP : MCS51Abs16Inst<0x02, "ljmp"> {
+def LJMP : MCS51Abs16Inst<0x02, "ljmp", MCS51Addr16> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
-def LCALL : MCS51Abs16Inst<0x12, "lcall"> { let isCall = 1; }
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+    Uses = [SP, R7, R6, R5, R4], isCall = 1 in
+def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16> {
+  let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
+}
+
+def : Pat<(MCS51call (i16 texternalsym:$addr)),
+          (LCALL texternalsym:$addr)>;
 
 def MOV_DPTR_IMM : Instruction {
   let Namespace = "MCS51";
