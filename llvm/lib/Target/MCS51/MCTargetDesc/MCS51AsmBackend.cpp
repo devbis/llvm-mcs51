@@ -5,6 +5,7 @@
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCValue.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
@@ -28,10 +29,20 @@ public:
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 
-  void applyFixup(const MCFragment &, const MCFixup &Fixup, const MCValue &,
-                  uint8_t *Data, uint64_t Value, bool) override {
-    if (Fixup.getKind() == MCS51::fixup_8)
-      Data[Fixup.getOffset()] = static_cast<uint8_t>(Value);
+  void applyFixup(const MCFragment &F, const MCFixup &Fixup,
+                  const MCValue &Target, uint8_t *Data, uint64_t Value,
+                  bool IsResolved) override {
+    if (!IsResolved)
+      Asm->getWriter().recordRelocation(F, Fixup, Target, Value);
+    if (mc::isRelocation(Fixup.getKind()))
+      return;
+
+    MCFixupKindInfo Info = getFixupKindInfo(Fixup.getKind());
+    unsigned NumBits = Info.TargetSize + Info.TargetOffset;
+    unsigned NumBytes = (NumBits + 7) / 8;
+    Value <<= Info.TargetOffset;
+    for (unsigned I = 0; I < NumBytes; ++I)
+      Data[I] |= static_cast<uint8_t>(Value >> (I * 8));
   }
 
   bool writeNopData(raw_ostream &OS, uint64_t Count,
