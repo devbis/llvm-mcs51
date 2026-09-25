@@ -19,6 +19,32 @@ public:
   bool CheckNodePredicate(SDValue Op, unsigned PredNo) const override;
   bool selectXDataMemory(SDNode *N);
   void Select(SDNode *N) override {
+    SDLoc DL(N);
+    if (N->getOpcode() == MCS51ISD::LOAD_STACK8) {
+      SDValue Ops[] = {N->getOperand(1), N->getOperand(0)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOADSTACKARG8, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
+    if (N->getOpcode() == MCS51ISD::PUSH_ARG8) {
+      SDValue Ops[] = {N->getOperand(1), N->getOperand(0)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::PUSHARG8, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
+    if (N->getOpcode() == MCS51ISD::POP_ARG8) {
+      SDValue Ops[] = {N->getOperand(0)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::POPARG8, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
     if ((N->getOpcode() == ISD::LOAD || N->getOpcode() == ISD::STORE) &&
         selectXDataMemory(N))
       return;
