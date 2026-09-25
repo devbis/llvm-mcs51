@@ -279,6 +279,27 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADBIT8) {
+    Register Dst = MI.getOperand(0).getReg();
+    // Materialize the addressed bit as the canonical byte value 0 or 1.
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT))
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A), Dst);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREBIT8) {
+    // Bit-address space stores consume the low bit of the source byte.
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
+        .addReg(MI.getOperand(1).getReg());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT)).addImm(0xE0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_BIT_C))
+        .add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::LOADSTACKARG16) {
     Register Dst = MI.getOperand(0).getReg();
     auto Setup = [](MachineInstrBuilder MIB) {
