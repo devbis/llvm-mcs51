@@ -17,6 +17,7 @@ namespace MCS51 {
 enum Fixups {
   fixup_8 = FirstTargetFixupKind,
   fixup_16,
+  fixup_pcrel8,
   NumTargetFixupKinds
 };
 

@@ -34,6 +34,8 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   case R_8051_8:
   case R_8051_16:
     return R_ABS;
+  case R_8051_PCREL8:
+    return R_PC;
   default:
     Err(ctx) << "unsupported MCS-51 relocation type " << type;
     return R_NONE;
@@ -51,6 +53,10 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_8051_16:
     checkUInt(ctx, loc, val, 16, rel);
     write16le(loc, val);
+    break;
+  case R_8051_PCREL8:
+    checkInt(ctx, loc, val, 8, rel);
+    *loc = val;
     break;
   default:
     Err(ctx) << "unrecognized MCS-51 relocation type " << rel.type;

@@ -25,6 +25,13 @@ static DecodeStatus DecodeImm16(MCInst &Inst, unsigned Imm, uint64_t,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeRel8(MCInst &Inst, unsigned Imm, uint64_t Address,
+                               const MCDisassembler *) {
+  Inst.addOperand(MCOperand::createImm(
+      static_cast<int64_t>(Address + 2 + static_cast<int8_t>(Imm))));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus DecodeMCS51GPR8RegisterClass(
     MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
   static constexpr MCRegister Registers[] = {
@@ -61,8 +68,9 @@ public:
       return Fail;
     }
     uint8_t Opcode = Bytes[0];
-    if (Opcode == 0x02 || Opcode == 0x12 || Opcode == 0x85 || Opcode == 0x75) {
-      // LJMP, LCALL, MOV direct,direct, and MOV direct,#data are three bytes.
+    if (Opcode == 0x02 || Opcode == 0x12 || Opcode == 0x10 || Opcode == 0x20 ||
+        Opcode == 0x30 || Opcode == 0x75 || Opcode == 0x85) {
+      // Long branches, bit branches, and three-byte MOV instructions.
       if (Bytes.size() < 3) {
         Size = 0;
         return Fail;
@@ -75,6 +83,11 @@ public:
     }
     switch (Opcode) {
     case 0x05: // INC direct
+    case 0x40: // JC rel
+    case 0x50: // JNC rel
+    case 0x60: // JZ rel
+    case 0x70: // JNZ rel
+    case 0x80: // SJMP rel
     case 0xE5: // MOV A,direct
     case 0xF5: // MOV direct,A
     case 0x24: // ADD A,#data
