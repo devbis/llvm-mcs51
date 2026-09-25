@@ -125,6 +125,22 @@ using namespace clang::driver;
 using namespace clang;
 using namespace llvm::opt;
 
+namespace {
+class MCS51ToolChain final : public toolchains::Generic_ELF {
+public:
+  MCS51ToolChain(const Driver &D, const llvm::Triple &Triple,
+                 const ArgList &Args)
+      : Generic_ELF(D, Triple, Args) {}
+
+  const char *getDefaultLinker() const override { return "ld.lld"; }
+
+protected:
+  Tool *buildLinker() const override {
+    return new tools::gnutools::Linker(*this);
+  }
+};
+} // namespace
+
 template <typename F> static bool usesInput(const ArgList &Args, F &&Fn) {
   return llvm::any_of(Args, [&](Arg *A) {
     return (A->getOption().matches(options::OPT_x) &&
@@ -7103,7 +7119,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
 
   auto &TC = ToolChains[Target.str()];
   if (!TC) {
-    switch (Target.getOS()) {
+    if (Target.getArch() == llvm::Triple::mcs51) {
+      TC = std::make_unique<MCS51ToolChain>(*this, Target, Args);
+    } else switch (Target.getOS()) {
     case llvm::Triple::AIX:
       TC = std::make_unique<toolchains::AIX>(*this, Target, Args);
       break;
