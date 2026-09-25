@@ -51,6 +51,54 @@ no:
   ret i8 2
 }
 
+define i8 @choose_signed_ge(i8 %lhs, i8 %rhs) {
+entry:
+  %test = icmp sge i8 %lhs, %rhs
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
+define i8 @choose_signed_greater(i8 %lhs, i8 %rhs) {
+entry:
+  %test = icmp sgt i8 %lhs, %rhs
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
+define i8 @choose_signed_le(i8 %lhs, i8 %rhs) {
+entry:
+  %test = icmp sle i8 %lhs, %rhs
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
+define i8 @choose_signed_const(i8 %lhs) {
+entry:
+  %test = icmp slt i8 %lhs, -5
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
 ; CHECK-LABEL: choose:
 ; CHECK: mov a, r7
 ; CHECK: j{{n?z}}
@@ -87,3 +135,23 @@ no:
 ; CHECK: xrl a, #128
 ; CHECK: subb a,
 ; CHECK: jnc
+
+; CHECK-LABEL: choose_signed_ge:
+; CHECK: xrl a, #128
+; CHECK: xrl a, #128
+; CHECK: subb a,
+
+; CHECK-LABEL: choose_signed_greater:
+; CHECK: xrl a, #128
+; CHECK: xrl a, #128
+; CHECK: subb a,
+
+; CHECK-LABEL: choose_signed_le:
+; CHECK: xrl a, #128
+; CHECK: xrl a, #128
+; CHECK: subb a,
+
+; CHECK-LABEL: choose_signed_const:
+; CHECK: mov a, #-6
+; CHECK: xrl a, #128
+; CHECK: subb a,
