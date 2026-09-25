@@ -20,6 +20,7 @@
         mov a, r0
         mov a, r7
         inc r7
+        dec r3
         mov r4, #0x5a
         mov 0x20, 0x21
         mov a, 0x80
@@ -97,6 +98,7 @@
 # ASM: mov a, r0{{.*}}encoding: [0xe8]
 # ASM: mov a, r7{{.*}}encoding: [0xef]
 # ASM: inc r7{{.*}}encoding: [0x0f]
+# ASM: dec r3{{.*}}encoding: [0x1b]
 # ASM: mov r4, #90{{.*}}encoding: [0x7c,0x5a]
 # ASM: mov 32, 33{{.*}}encoding: [0x85,0x21,0x20]
 # ASM: mov a, 128{{.*}}encoding: [0xe5,0x80]
@@ -167,6 +169,7 @@
 # DIS: mov a, r0
 # DIS: mov a, r7
 # DIS: inc r7
+# DIS: dec r3
 # DIS: mov r4, #90
 # DIS: mov 32, 33
 # DIS: mov a, 128

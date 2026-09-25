@@ -1047,7 +1047,21 @@ def SUBB_A_RN : MCS51RnInst<0b10011, "subb a,"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
 def MOV_RN_A  : MCS51RnDefInst<0b11111, "mov">;
-def INC_RN : MCS51RnInst<0b00001, "inc"> { let hasSideEffects = 1; }
+class MCS51ModifyRn<bits<5> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$src);
+  let AsmString = mnemonic # " $src";
+  let Size = 1;
+  let Constraints = "$dst = $src";
+  let hasSideEffects = 1;
+  bits<3> dst;
+  bits<8> Inst;
+  let Inst{7-3} = opcode;
+  let Inst{2-0} = dst;
+}
+def INC_RN : MCS51ModifyRn<0b00001, "inc">;
+def DEC_RN : MCS51ModifyRn<0b00011, "dec">;
 def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
   let Pattern = [(set MCS51GPR8:$rn, MCS51Imm8:$imm)];
 }
