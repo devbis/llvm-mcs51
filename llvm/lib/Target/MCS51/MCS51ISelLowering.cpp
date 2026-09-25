@@ -22,6 +22,12 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 }
 
+EVT MCS51TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
+                                            EVT VT) const {
+  assert(!VT.isVector() && "MCS-51 does not support vector comparisons");
+  return MVT::i8;
+}
+
 SDValue MCS51TargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,

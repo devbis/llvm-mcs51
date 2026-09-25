@@ -14,6 +14,9 @@ public:
   MCS51TargetLowering(const TargetMachine &TM,
                       const MCS51Subtarget &STI);
 
+  EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
+                         EVT VT) const override;
+
   SDValue LowerFormalArguments(SDValue Chain, CallingConv::ID CallConv,
                                bool IsVarArg,
                                const SmallVectorImpl<ISD::InputArg> &Ins,
