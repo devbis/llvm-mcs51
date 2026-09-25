@@ -6,12 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/Compiler.h"
-
 namespace llvm {
 void initializeMCS51Target() {}
 } // namespace llvm
-
-extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMCS51Target() {
-  // TargetMachine registration is provided by the MCS-51 code generator.
-}
