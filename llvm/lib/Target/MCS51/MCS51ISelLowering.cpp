@@ -17,6 +17,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
                                          const MCS51Subtarget &STI)
     : TargetLowering(TM, STI), STI(STI) {
   addRegisterClass(MVT::i8, &MCS51::MCS51GPR8RegClass);
+  addRegisterClass(MVT::i16, &MCS51::MCS51PTRRegClass);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -60,7 +61,8 @@ bool MCS51TargetLowering::CanLowerReturn(
     const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &,
     const Type *) const {
   return Outs.empty() ||
-         (Outs.size() == 1 && Outs.front().VT == MVT::i8);
+         (Outs.size() == 1 &&
+          (Outs.front().VT == MVT::i8 || Outs.front().VT == MVT::i16));
 }
 
 SDValue MCS51TargetLowering::LowerReturn(
@@ -71,10 +73,15 @@ SDValue MCS51TargetLowering::LowerReturn(
   if (Outs.empty() != OutVals.empty())
     report_fatal_error("MCS-51 return value lowering mismatch");
   if (OutVals.size() > 1 ||
-      (!OutVals.empty() && OutVals.front().getValueType() != MVT::i8))
+      (!OutVals.empty() && OutVals.front().getValueType() != MVT::i8 &&
+       OutVals.front().getValueType() != MVT::i16))
     report_fatal_error("MCS-51 value return lowering is not implemented");
   if (!OutVals.empty())
-    Chain = DAG.getCopyToReg(Chain, DL, MCS51::A, OutVals.front());
+    Chain = DAG.getCopyToReg(Chain, DL,
+                             OutVals.front().getValueType() == MVT::i8
+                                 ? MCS51::A
+                                 : MCS51::DPTR,
+                             OutVals.front());
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
 }
 
