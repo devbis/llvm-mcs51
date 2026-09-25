@@ -3,6 +3,7 @@
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -29,6 +30,9 @@ public:
         Inst.addOperand(MCOperand::createReg(MO.getReg()));
       else if (MO.isImm())
         Inst.addOperand(MCOperand::createImm(MO.getImm()));
+      else if (MO.isMBB())
+        Inst.addOperand(MCOperand::createExpr(
+            MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), OutContext)));
       else
         report_fatal_error("unsupported MCS-51 machine operand in AsmPrinter");
     }
