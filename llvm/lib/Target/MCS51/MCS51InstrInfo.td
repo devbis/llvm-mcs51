@@ -37,10 +37,11 @@ def RLC_A : MCS51Inst<0x33, "rlc a"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
 def MUL_AB : MCS51Inst<0xA4, "mul ab"> {
-  let Defs = [A, B]; let Uses = [A, B];
+  let Defs = [A, B, C]; let Uses = [A, B];
+  let hasSideEffects = 0;
 }
-let Defs = [A, B], Uses = [A, B] in
-def DIV_AB : MCS51Inst<0x84, "div ab">;
+let Defs = [A, B, C], Uses = [A, B] in
+def DIV_AB : MCS51Inst<0x84, "div ab"> { let hasSideEffects = 0; }
 def SWAP_A : MCS51Inst<0xC4, "swap a">;
 def DA_A : MCS51Inst<0xD4, "da a">;
 def CLR_A : MCS51Inst<0xE4, "clr a">;
@@ -236,7 +237,7 @@ def MOV_DPTR_IMM : Instruction {
   let InOperandList = (ins MCS51Imm16:$imm);
   let AsmString = "mov dptr, #$imm";
   let Size = 3;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   bits<1> dst;
   let dst = 0;
   bits<16> imm;
@@ -261,7 +262,7 @@ class MCS51AccImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let InOperandList = (ins MCS51Imm8:$imm);
   let AsmString = mnemonic # " a, #$imm";
   let Size = 2;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   bits<1> dst;
   let dst = 0;
   bits<8> imm;
@@ -382,7 +383,7 @@ class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let InOperandList = (ins MCS51GPR8:$rn);
   let AsmString = mnemonic # " $rn";
   let Size = 1;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   bits<3> rn;
   bits<8> Inst;
   let Inst{7-3} = opcode;
@@ -395,7 +396,7 @@ class MCS51RnImmInst<bits<5> opcode, string mnemonic> : Instruction {
   let InOperandList = (ins MCS51Imm8:$imm);
   let AsmString = mnemonic # " $rn, #$imm";
   let Size = 2;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   bits<3> rn;
   bits<8> imm;
   bits<16> Inst;
@@ -410,7 +411,7 @@ class MCS51RnDefInst<bits<5> opcode, string mnemonic> : Instruction {
   let InOperandList = (ins);
   let AsmString = mnemonic # " $rn, a";
   let Size = 1;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   bits<3> rn;
   bits<8> Inst;
   let Inst{7-3} = opcode;
@@ -424,7 +425,7 @@ class MCS51RegCopyInst : Instruction {
   let InOperandList = (ins MCS51GPR8:$src);
   let AsmString = "mov $dst, $src";
   let Size = 3;
-  let hasSideEffects = 1;
+  let hasSideEffects = 0;
   bits<3> dst;
   bits<3> src;
   bits<24> Inst;
@@ -441,12 +442,14 @@ def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> { let Defs = [A]; let Uses = [A];
 def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,"> { let Defs = [A]; let Uses = [A]; }
 def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,"> { let Defs = [A]; let Uses = [A]; }
 def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,"> { let Defs = [A]; let Uses = [A]; }
-def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,">;
+def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
 def SUBB_A_RN : MCS51RnInst<0b10011, "subb a,"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
 def MOV_RN_A  : MCS51RnDefInst<0b11111, "mov">;
-def INC_RN : MCS51RnInst<0b00001, "inc">;
+def INC_RN : MCS51RnInst<0b00001, "inc"> { let hasSideEffects = 1; }
 def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
   let Pattern = [(set MCS51GPR8:$rn, MCS51Imm8:$imm)];
 }
