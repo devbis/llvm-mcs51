@@ -16,4 +16,6 @@ void MCS51TargetInfo::getTargetDefines(const LangOptions &,
                                       MacroBuilder &Builder) const {
   Builder.defineMacro("__mcs51__");
   Builder.defineMacro("__8051__");
+  if (IsCC2530)
+    Builder.defineMacro("__CC2530__");
 }

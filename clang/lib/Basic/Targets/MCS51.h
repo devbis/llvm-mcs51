@@ -16,9 +16,11 @@ namespace clang {
 namespace targets {
 
 class LLVM_LIBRARY_VISIBILITY MCS51TargetInfo : public TargetInfo {
+  bool IsCC2530;
+
 public:
-  MCS51TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
-      : TargetInfo(Triple) {
+  MCS51TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : TargetInfo(Triple), IsCC2530(Opts.CPU == "cc2530") {
     TLSSupported = false;
     PointerWidth = 16;
     PointerAlign = 8;
@@ -53,6 +55,20 @@ public:
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
     return TargetInfo::VoidPtrBuiltinVaList;
+  }
+
+  bool isValidCPUName(StringRef Name) const override {
+    return Name == "generic" || Name == "cc2530";
+  }
+  bool setCPU(StringRef Name) override {
+    if (!isValidCPUName(Name))
+      return false;
+    IsCC2530 = Name == "cc2530";
+    return true;
+  }
+  void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override {
+    Values.push_back("generic");
+    Values.push_back("cc2530");
   }
 
   bool allowsLargerPreferedTypeAlignment() const override { return false; }
