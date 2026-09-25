@@ -57,6 +57,12 @@ def MCS51Imm8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
   let DecoderMethod = "DecodeImm8";
 }
 
+def MCS51Direct8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm8OpValue";
+  let DecoderMethod = "DecodeImm8";
+}
+
 class MCS51AccImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51AReg:$dst);
@@ -85,6 +91,68 @@ def ADD_A_IMM : MCS51AccImmALUInst<0x24, "add", add>;
 def ANL_A_IMM : MCS51AccImmALUInst<0x54, "anl", and>;
 def ORL_A_IMM : MCS51AccImmALUInst<0x44, "orl", or>;
 def XRL_A_IMM : MCS51AccImmALUInst<0x64, "xrl", xor>;
+
+class MCS51AccDirectInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = mnemonic # " a, $addr";
+  let Size = 2;
+  let hasSideEffects = 1;
+  bits<1> dst;
+  let dst = 0;
+  bits<8> addr;
+  bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = addr;
+}
+
+class MCS51DirectAccInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = mnemonic # " $addr, a";
+  let Size = 2;
+  let hasSideEffects = 1;
+  let Uses = [A];
+  bits<8> addr;
+  bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = addr;
+}
+
+class MCS51DirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51Imm8:$imm);
+  let AsmString = mnemonic # " $addr, #$imm";
+  let Size = 3;
+  let hasSideEffects = 1;
+  bits<8> addr;
+  bits<8> imm;
+  bits<24> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = addr;
+  let Inst{23-16} = imm;
+}
+
+class MCS51DirectInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = mnemonic # " $addr";
+  let Size = 2;
+  let hasSideEffects = 1;
+  bits<8> addr;
+  bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = addr;
+}
+
+def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov">;
+def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
+def MOV_DIRECT_IMM : MCS51DirectImmInst<0x75, "mov">;
+def INC_DIRECT : MCS51DirectInst<0x05, "inc">;
 
 class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";

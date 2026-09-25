@@ -55,7 +55,8 @@ public:
       return Fail;
     }
     uint8_t Opcode = Bytes[0];
-    if (Opcode == 0x85) { // MOV direct,direct (register-bank copy)
+    if (Opcode == 0x85 || Opcode == 0x75) {
+      // MOV direct,direct and MOV direct,#data are three bytes long.
       if (Bytes.size() < 3) {
         Size = 0;
         return Fail;
@@ -67,6 +68,9 @@ public:
                                STI);
     }
     switch (Opcode) {
+    case 0x05: // INC direct
+    case 0xE5: // MOV A,direct
+    case 0xF5: // MOV direct,A
     case 0x24: // ADD A,#data
     case 0x34: // ADDC A,#data
     case 0x44: // ORL A,#data
