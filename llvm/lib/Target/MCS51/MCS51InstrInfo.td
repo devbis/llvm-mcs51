@@ -1,5 +1,8 @@
 // Fixed-width implicit-operand instructions use this compact record. Explicit
 // operands and multi-byte encodings are described separately below.
+def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
+                          [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -44,6 +47,8 @@ def RETI : MCS51Inst<0x32, "reti"> {
   let isReturn = 1;
   let isTerminator = 1;
 }
+
+def : Pat<(MCS51retglue), (RET)>;
 
 def MCS51Imm8 : Operand<i8> {
   let ParserMatchClass = ImmAsmOperand;
