@@ -6,8 +6,9 @@ def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                         SDNPVariadic]>;
-def SDT_MCS51Br : SDTypeProfile<0, 2, [SDTCisVT<0, i8>,
-                                       SDTCisVT<1, OtherVT>]>;
+def SDT_MCS51Br : SDTypeProfile<0, 3, [SDTCisVT<0, i8>,
+                                       SDTCisSameAs<0, 1>,
+                                       SDTCisVT<2, OtherVT>]>;
 def MCS51br_eq : SDNode<"MCS51ISD::BR_EQ", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_ne : SDNode<"MCS51ISD::BR_NE", SDT_MCS51Br, [SDNPHasChain]>;
 
@@ -159,10 +160,11 @@ def BRCOND8 : Instruction {
   let Pattern = [(brcond MCS51GPR8:$cond, bb:$target)];
 }
 
-class MCS51BrCCPseudo<SDNode Node> : Instruction {
+class MCS51BrCCImmPseudo<SDNode Node> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Addr16:$target);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Imm8:$rhs,
+                           MCS51Addr16:$target);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -171,11 +173,29 @@ class MCS51BrCCPseudo<SDNode Node> : Instruction {
   let isTerminator = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(Node MCS51GPR8:$lhs, bb:$target)];
+  let Pattern = [(Node MCS51GPR8:$lhs, MCS51Imm8:$rhs, bb:$target)];
 }
 
-def BR_EQ8 : MCS51BrCCPseudo<MCS51br_eq>;
-def BR_NE8 : MCS51BrCCPseudo<MCS51br_ne>;
+class MCS51BrCCRegPseudo<SDNode Node> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs,
+                           MCS51Addr16:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(Node MCS51GPR8:$lhs, MCS51GPR8:$rhs, bb:$target)];
+}
+
+def BR_EQ8ri : MCS51BrCCImmPseudo<MCS51br_eq>;
+def BR_EQ8rr : MCS51BrCCRegPseudo<MCS51br_eq>;
+def BR_NE8ri : MCS51BrCCImmPseudo<MCS51br_ne>;
+def BR_NE8rr : MCS51BrCCRegPseudo<MCS51br_ne>;
 
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
     : Instruction {
