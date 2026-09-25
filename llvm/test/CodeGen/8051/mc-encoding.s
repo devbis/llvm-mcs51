@@ -36,6 +36,15 @@
         mov @r1, #0x5a
         inc @r0
         inc @r1
+        mov c, 0x20
+        mov 0x20, c
+        clr 0x20
+        setb 0x20
+        cpl 0x20
+        anl c, 0x20
+        anl c, /0x20
+        orl c, 0x20
+        orl c, /0x20
         ret
         reti
 
@@ -73,6 +82,15 @@
 # ASM: mov @r1, #90{{.*}}encoding: [0x77,0x5a]
 # ASM: inc @r0{{.*}}encoding: [0x06]
 # ASM: inc @r1{{.*}}encoding: [0x07]
+# ASM: mov c, 32{{.*}}encoding: [0xa2,0x20]
+# ASM: mov 32, c{{.*}}encoding: [0x92,0x20]
+# ASM: clr 32{{.*}}encoding: [0xc2,0x20]
+# ASM: setb 32{{.*}}encoding: [0xd2,0x20]
+# ASM: cpl 32{{.*}}encoding: [0xb2,0x20]
+# ASM: anl c, 32{{.*}}encoding: [0x82,0x20]
+# ASM: anl c, /32{{.*}}encoding: [0xb0,0x20]
+# ASM: orl c, 32{{.*}}encoding: [0x72,0x20]
+# ASM: orl c, /32{{.*}}encoding: [0xa0,0x20]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -109,5 +127,14 @@
 # DIS: mov @r1, #90
 # DIS: inc @r0
 # DIS: inc @r1
+# DIS: mov c, 32
+# DIS: mov 32, c
+# DIS: clr 32
+# DIS: setb 32
+# DIS: cpl 32
+# DIS: anl c, 32
+# DIS: anl c, /32
+# DIS: orl c, 32
+# DIS: orl c, /32
 # DIS: ret
 # DIS: reti
