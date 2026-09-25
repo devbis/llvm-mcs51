@@ -248,6 +248,9 @@ class MCS51DirectAccInst<bits<8> opcode, string mnemonic> : Instruction {
   let Size = 2;
   let hasSideEffects = 1;
   let Uses = [A];
+  // Direct addresses 0x82 and 0x83 alias DPL and DPH. Conservatively model
+  // direct stores as clobbering the 16-bit DPTR value.
+  let Defs = [DPTR];
   bits<8> addr;
   bits<16> Inst;
   let Inst{7-0} = opcode;
@@ -261,6 +264,7 @@ class MCS51DirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let AsmString = mnemonic # " $addr, #$imm";
   let Size = 3;
   let hasSideEffects = 1;
+  let Defs = [DPTR];
   bits<8> addr;
   bits<8> imm;
   bits<24> Inst;
@@ -447,3 +451,29 @@ class MCS51ShiftPseudo<SDNode node> : Instruction {
 
 def SHL8ri : MCS51ShiftPseudo<shl>;
 def SRL8ri : MCS51ShiftPseudo<srl>;
+
+def ZEXT8TO16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst, (zext MCS51GPR8:$src))];
+}
+
+def TRUNC16TO8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51AReg:$dst, (trunc MCS51PTR:$src))];
+}
