@@ -366,6 +366,12 @@ class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
 def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov">;
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
 def MOV_DIRECT_IMM : MCS51DirectImmInst<0x75, "mov">;
+def PUSH_DIRECT : MCS51DirectInst<0xC0, "push"> {
+  let Defs = [SP]; let Uses = [SP];
+}
+def POP_DIRECT : MCS51DirectInst<0xD0, "pop"> {
+  let Defs = [SP]; let Uses = [SP];
+}
 def INC_DIRECT : MCS51DirectInst<0x05, "inc">;
 def MOV_R0_IND_IMM : MCS51IndirectImmInst<0x76, "mov @r0,">;
 def MOV_R1_IND_IMM : MCS51IndirectImmInst<0x77, "mov @r1,">;
