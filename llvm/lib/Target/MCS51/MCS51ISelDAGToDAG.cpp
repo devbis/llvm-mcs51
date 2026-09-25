@@ -10,6 +10,29 @@
 using namespace llvm;
 
 namespace {
+static bool getFrameAddress(SDValue Ptr, int &FI, int64_t &Offset) {
+  Offset = 0;
+  if (Ptr.getOpcode() == ISD::FrameIndex) {
+    FI = cast<FrameIndexSDNode>(Ptr)->getIndex();
+    return true;
+  }
+  if (Ptr.getOpcode() != ISD::ADD)
+    return false;
+  SDValue Base = Ptr.getOperand(0);
+  SDValue Displacement = Ptr.getOperand(1);
+  if (Base.getOpcode() != ISD::FrameIndex) {
+    std::swap(Base, Displacement);
+    if (Base.getOpcode() != ISD::FrameIndex)
+      return false;
+  }
+  auto *C = dyn_cast<ConstantSDNode>(Displacement);
+  if (!C)
+    return false;
+  FI = cast<FrameIndexSDNode>(Base)->getIndex();
+  Offset = C->getSExtValue();
+  return Offset >= -128 && Offset <= 127;
+}
+
 class MCS51DAGToDAGISel final : public SelectionDAGISel {
 public:
   MCS51DAGToDAGISel(MCS51TargetMachine &TM, CodeGenOptLevel OL)
@@ -82,12 +105,13 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   if (N->getOpcode() == ISD::LOAD) {
     auto *LD = cast<LoadSDNode>(N);
     unsigned AS = LD->getAddressSpace();
+    int FI;
+    int64_t Offset;
     if (AS == MCS51::Default && LD->getMemoryVT() == MVT::i8 &&
-        LD->getBasePtr().getOpcode() == ISD::FrameIndex) {
-      int FI = cast<FrameIndexSDNode>(LD->getBasePtr())->getIndex();
+        getFrameAddress(LD->getBasePtr(), FI, Offset)) {
       SDValue Ops[] = {
           CurDAG->getTargetFrameIndex(FI, MVT::i16),
-          CurDAG->getTargetConstant(0, DL, MVT::i8), LD->getChain()};
+          CurDAG->getTargetConstant(Offset, DL, MVT::i8), LD->getChain()};
       SDNode *Res = CurDAG->getMachineNode(MCS51::LOAD_FRAME8, DL,
                                            N->getVTList(), Ops);
       CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
@@ -153,11 +177,12 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   unsigned AS = ST->getAddressSpace();
   if (AS == MCS51::Code)
     report_fatal_error("cannot store to MCS-51 code memory");
+  int FI;
+  int64_t Offset;
   if (AS == MCS51::Default && ST->getMemoryVT() == MVT::i8 &&
-      ST->getBasePtr().getOpcode() == ISD::FrameIndex) {
-    int FI = cast<FrameIndexSDNode>(ST->getBasePtr())->getIndex();
+      getFrameAddress(ST->getBasePtr(), FI, Offset)) {
     SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
-                     CurDAG->getTargetConstant(0, DL, MVT::i8),
+                     CurDAG->getTargetConstant(Offset, DL, MVT::i8),
                      ST->getValue(), ST->getChain()};
     SDNode *Res = CurDAG->getMachineNode(MCS51::STORE_FRAME8, DL,
                                          MVT::Other, Ops);
