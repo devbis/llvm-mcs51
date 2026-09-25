@@ -54,11 +54,18 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     if (AS != MCS51::IData && AS != MCS51::PData &&
         AS != MCS51::XData && AS != MCS51::Code)
       return false;
-    if (LD->getMemoryVT() != MVT::i8)
-      report_fatal_error("MCS-51 memory spaces currently support byte loads only");
-    unsigned Opcode = AS == MCS51::IData ? MCS51::LOADI8 :
-                      AS == MCS51::PData ? MCS51::LOADP8 :
-                      AS == MCS51::Code ? MCS51::LOADCODE8 : MCS51::LOADX8;
+    unsigned Opcode;
+    if (LD->getMemoryVT() == MVT::i8) {
+      Opcode = AS == MCS51::IData ? MCS51::LOADI8 :
+               AS == MCS51::PData ? MCS51::LOADP8 :
+               AS == MCS51::Code ? MCS51::LOADCODE8 : MCS51::LOADX8;
+    } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::XData) {
+      Opcode = MCS51::LOADX16;
+    } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::Code) {
+      Opcode = MCS51::LOADCODE16;
+    } else {
+      report_fatal_error("unsupported MCS-51 memory load width/address space");
+    }
     SDValue Ops[] = {LD->getBasePtr(), LD->getChain()};
     SDNode *Res = CurDAG->getMachineNode(Opcode, DL, N->getVTList(), Ops);
     CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
