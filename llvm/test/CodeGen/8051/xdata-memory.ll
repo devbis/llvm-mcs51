@@ -58,6 +58,22 @@ entry:
   ret i8 %value
 }
 
+define i16 @read_xdata_word(i8 %address) {
+entry:
+  %wide = zext i8 %address to i16
+  %pointer = inttoptr i16 %wide to ptr addrspace(4)
+  %value = load i16, ptr addrspace(4) %pointer, align 1
+  ret i16 %value
+}
+
+define i16 @read_code_word(i8 %address) {
+entry:
+  %wide = zext i8 %address to i16
+  %pointer = inttoptr i16 %wide to ptr addrspace(5)
+  %value = load i16, ptr addrspace(5) %pointer, align 1
+  ret i16 %value
+}
+
 define i8 @read_sfr() {
 entry:
   %value = load i8, ptr addrspace(7) @sfr_port, align 1
@@ -126,6 +142,26 @@ entry:
 ; CHECK: movc a, @a+dptr
 ; CHECK: ret
 
+; CHECK-LABEL: read_xdata_word:
+; CHECK: movx a, @dptr
+; CHECK: mov r0, a
+; CHECK: inc dptr
+; CHECK: movx a, @dptr
+; CHECK: mov 131, a
+; CHECK: mov a, r0
+; CHECK: mov 130, a
+; CHECK: ret
+
+; CHECK-LABEL: read_code_word:
+; CHECK: movc a, @a+dptr
+; CHECK: mov r0, a
+; CHECK: inc dptr
+; CHECK: movc a, @a+dptr
+; CHECK: mov 131, a
+; CHECK: mov a, r0
+; CHECK: mov 130, a
+; CHECK: ret
+
 ; CHECK-LABEL: read_sfr:
 ; CHECK: mov a, sfr_port
 ; CHECK: ret
@@ -152,6 +188,14 @@ entry:
 ; DIS-LABEL: <write_pdata>:
 ; DIS: movx @r0, a
 ; DIS-LABEL: <read_code>:
+; DIS: movc a, @a+dptr
+; DIS-LABEL: <read_xdata_word>:
+; DIS: movx a, @dptr
+; DIS: inc dptr
+; DIS: movx a, @dptr
+; DIS-LABEL: <read_code_word>:
+; DIS: movc a, @a+dptr
+; DIS: inc dptr
 ; DIS: movc a, @a+dptr
 ; DIS-LABEL: <read_direct_constant>:
 ; DIS: mov a, 144
