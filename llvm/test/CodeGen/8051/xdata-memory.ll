@@ -38,6 +38,20 @@ entry:
   ret void
 }
 
+define i16 @read_idata_word(i8 %address) {
+entry:
+  %pointer = inttoptr i8 %address to ptr addrspace(2)
+  %value = load i16, ptr addrspace(2) %pointer, align 1
+  ret i16 %value
+}
+
+define void @write_idata_word(i8 %address) {
+entry:
+  %pointer = inttoptr i8 %address to ptr addrspace(2)
+  store i16 4660, ptr addrspace(2) %pointer, align 1
+  ret void
+}
+
 define i8 @read_pdata(i8 %address) {
 entry:
   %pointer = inttoptr i8 %address to ptr addrspace(3)
@@ -49,6 +63,20 @@ define void @write_pdata(i8 %address, i8 %value) {
 entry:
   %pointer = inttoptr i8 %address to ptr addrspace(3)
   store i8 %value, ptr addrspace(3) %pointer, align 1
+  ret void
+}
+
+define i16 @read_pdata_word(i8 %address) {
+entry:
+  %pointer = inttoptr i8 %address to ptr addrspace(3)
+  %value = load i16, ptr addrspace(3) %pointer, align 1
+  ret i16 %value
+}
+
+define void @write_pdata_word(i8 %address) {
+entry:
+  %pointer = inttoptr i8 %address to ptr addrspace(3)
+  store i16 4660, ptr addrspace(3) %pointer, align 1
   ret void
 }
 
@@ -139,6 +167,33 @@ entry:
 ; CHECK: mov @r{{[01]}}, a
 ; CHECK: ret
 
+; CHECK-LABEL: read_idata_word:
+; CHECK: mov a, @r{{[01]}}
+; CHECK: inc a
+; CHECK: mov r{{[01]}}, a
+; CHECK: mov a, @r{{[01]}}
+; CHECK: mov 131, a
+; CHECK: dec a
+; CHECK: mov r{{[01]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov 130, a
+; CHECK: ret
+
+; CHECK-LABEL: write_idata_word:
+; CHECK: mov a, 130
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, 131
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov @r{{[01]}}, a
+; CHECK: inc a
+; CHECK: mov r{{[01]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov @r{{[01]}}, a
+; CHECK: dec a
+; CHECK: mov r{{[01]}}, a
+; CHECK: ret
+
 ; CHECK-LABEL: read_pdata:
 ; CHECK: movx a, @r{{[01]}}
 ; CHECK: ret
@@ -146,6 +201,33 @@ entry:
 ; CHECK-LABEL: write_pdata:
 ; CHECK: mov a, r6
 ; CHECK: movx @r{{[01]}}, a
+; CHECK: ret
+
+; CHECK-LABEL: read_pdata_word:
+; CHECK: movx a, @r{{[01]}}
+; CHECK: inc a
+; CHECK: mov r{{[01]}}, a
+; CHECK: movx a, @r{{[01]}}
+; CHECK: mov 131, a
+; CHECK: dec a
+; CHECK: mov r{{[01]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov 130, a
+; CHECK: ret
+
+; CHECK-LABEL: write_pdata_word:
+; CHECK: mov a, 130
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, 131
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: movx @r{{[01]}}, a
+; CHECK: inc a
+; CHECK: mov r{{[01]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: movx @r{{[01]}}, a
+; CHECK: dec a
+; CHECK: mov r{{[01]}}, a
 ; CHECK: ret
 
 ; CHECK-LABEL: read_code:

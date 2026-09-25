@@ -320,6 +320,62 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADI16 || MI.getOpcode() == MCS51::LOADP16) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register Addr = MI.getOperand(1).getReg();
+    Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    unsigned LoadOpcode = MI.getOpcode() == MCS51::LOADI16
+                              ? MCS51::MOV_A_IND_RI
+                              : MCS51::MOVX_A_IND_RI;
+    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LowByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREI16 || MI.getOpcode() == MCS51::STOREP16) {
+    Register Addr = MI.getOperand(0).getReg();
+    Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register HighByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    unsigned StoreOpcode = MI.getOpcode() == MCS51::STOREI16
+                               ? MCS51::MOV_IND_RI_A
+                               : MCS51::MOVX_IND_RI_A;
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LowByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), HighByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
+    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(HighByte);
+    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::LOADI8 || MI.getOpcode() == MCS51::LOADP8) {
     Register Dst = MI.getOperand(0).getReg();
     Register Addr = MI.getOperand(1).getReg();
