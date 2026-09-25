@@ -310,10 +310,34 @@ def LOADDIRECT8 : Instruction {
   let mayLoad = 1;
 }
 
+def LOADDIRECT16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+}
+
 def STOREDIRECT8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51Direct8:$addr, MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+}
+
+def STOREDIRECT16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51PTR:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
