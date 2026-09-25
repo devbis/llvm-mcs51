@@ -88,6 +88,7 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: mov r0, a
 // CHECK: mov a, @r0
 // CHECK: mov 131, a
+// CHECK: inc 129
 // CHECK: ret
 
 // CHECK-LABEL: caller6_word:
@@ -101,6 +102,7 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: mov r0, a
 // CHECK: mov a, @r0
 // CHECK: mov 131, a
+// CHECK: inc 129
 // CHECK: mov a, 131
 // CHECK: push 224
 // CHECK: mov a, 130
