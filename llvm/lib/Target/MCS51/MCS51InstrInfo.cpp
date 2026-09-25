@@ -38,3 +38,116 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   llvm_unreachable("unsupported MCS-51 physical register copy");
 }
+
+namespace {
+bool isMCS51CondBranch(unsigned Opcode) {
+  return Opcode == MCS51::JZ || Opcode == MCS51::JNZ;
+}
+
+bool isMCS51UncondBranch(unsigned Opcode) {
+  return Opcode == MCS51::LJMP || Opcode == MCS51::SJMP;
+}
+} // namespace
+
+bool MCS51InstrInfo::analyzeBranch(
+    MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
+    SmallVectorImpl<MachineOperand> &Cond, bool AllowModify) const {
+  TBB = FBB = nullptr;
+  Cond.clear();
+  auto I = MBB.getLastNonDebugInstr();
+  if (I == MBB.end())
+    return false;
+
+  unsigned Opcode = I->getOpcode();
+  if (isMCS51UncondBranch(Opcode)) {
+    TBB = I->getOperand(0).getMBB();
+    if (I == MBB.begin())
+      return false;
+    auto Prev = std::prev(I);
+    while (Prev != MBB.begin() && Prev->isDebugInstr())
+      --Prev;
+    if (isMCS51CondBranch(Prev->getOpcode())) {
+      FBB = TBB;
+      TBB = Prev->getOperand(0).getMBB();
+      Cond.push_back(MachineOperand::CreateImm(Prev->getOpcode()));
+    }
+    if (AllowModify && !Cond.empty() && MBB.isLayoutSuccessor(FBB)) {
+      I->eraseFromParent();
+      FBB = nullptr;
+    }
+    return false;
+  }
+
+  if (isMCS51CondBranch(Opcode)) {
+    TBB = I->getOperand(0).getMBB();
+    Cond.push_back(MachineOperand::CreateImm(Opcode));
+    return false;
+  }
+
+  return I->isBranch();
+}
+
+unsigned MCS51InstrInfo::removeBranch(MachineBasicBlock &MBB,
+                                     int *BytesRemoved) const {
+  if (BytesRemoved)
+    *BytesRemoved = 0;
+  unsigned Removed = 0;
+  while (true) {
+    auto I = MBB.getLastNonDebugInstr();
+    if (I == MBB.end())
+      break;
+    unsigned Opcode = I->getOpcode();
+    if (!isMCS51CondBranch(Opcode) && !isMCS51UncondBranch(Opcode))
+      break;
+    if (BytesRemoved)
+      *BytesRemoved += get(Opcode).getSize();
+    I->eraseFromParent();
+    ++Removed;
+  }
+  return Removed;
+}
+
+unsigned MCS51InstrInfo::insertBranch(
+    MachineBasicBlock &MBB, MachineBasicBlock *TBB, MachineBasicBlock *FBB,
+    ArrayRef<MachineOperand> Cond, const DebugLoc &DL,
+    int *BytesAdded) const {
+  assert(TBB && "insertBranch requires a target");
+  if (BytesAdded)
+    *BytesAdded = 0;
+  unsigned Count = 0;
+  if (Cond.empty()) {
+    BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(TBB);
+    Count = 1;
+    if (BytesAdded)
+      *BytesAdded = 3;
+  } else {
+    assert(Cond.size() == 1 && Cond[0].isImm() &&
+           "unsupported MCS-51 branch condition");
+    unsigned Opcode = Cond[0].getImm();
+    assert(isMCS51CondBranch(Opcode) && "invalid MCS-51 branch condition");
+    BuildMI(&MBB, DL, get(Opcode)).addMBB(TBB);
+    Count = 1;
+    if (BytesAdded)
+      *BytesAdded = 2;
+    if (FBB) {
+      BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(FBB);
+      ++Count;
+      if (BytesAdded)
+        *BytesAdded += 3;
+    }
+  }
+  return Count;
+}
+
+bool MCS51InstrInfo::reverseBranchCondition(
+    SmallVectorImpl<MachineOperand> &Cond) const {
+  if (Cond.size() != 1 || !Cond[0].isImm())
+    return true;
+  if (Cond[0].getImm() == MCS51::JZ)
+    Cond[0].setImm(MCS51::JNZ);
+  else if (Cond[0].getImm() == MCS51::JNZ)
+    Cond[0].setImm(MCS51::JZ);
+  else
+    return true;
+  return false;
+}
