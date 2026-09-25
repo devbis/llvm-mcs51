@@ -1,4 +1,4 @@
-// RUN: %clang -target mcs51 -S -O1 %s -o - | FileCheck %s
+// RUN: clang -target mcs51 -S -O1 %s -o - | FileCheck %s
 
 // CHECK-LABEL: add_one:
 // CHECK: mov a, r7

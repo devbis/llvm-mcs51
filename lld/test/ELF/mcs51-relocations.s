@@ -18,7 +18,7 @@ entry:
         .globl code_symbol
         .globl branch_symbol
 
-# CHECK: 0x00000000 74200234 12123412 80162020 1380fe
+# CHECK: 0x00000000 74200234 12123412 80162020 13
 
+# DIS: sjmp 32
 # DIS: jb 32, 32
-# DIS: sjmp 13
