@@ -46,6 +46,14 @@ entry:
   ret void
 }
 
+define i8 @read_code(i8 %address) {
+entry:
+  %wide = zext i8 %address to i16
+  %pointer = inttoptr i16 %wide to ptr addrspace(5)
+  %value = load i8, ptr addrspace(5) %pointer, align 1
+  ret i8 %value
+}
+
 ; CHECK-LABEL: read_xdata:
 ; CHECK: mov 131, #0
 ; CHECK: mov a, r7
@@ -81,6 +89,14 @@ entry:
 ; CHECK: movx @r{{[01]}}, a
 ; CHECK: ret
 
+; CHECK-LABEL: read_code:
+; CHECK: mov 131, #0
+; CHECK: mov a, r7
+; CHECK: mov 130, a
+; CHECK: clr a
+; CHECK: movc a, @a+dptr
+; CHECK: ret
+
 ; DIS-LABEL: <read_idata>:
 ; DIS: mov a, @r0
 ; DIS-LABEL: <write_idata>:
@@ -89,3 +105,5 @@ entry:
 ; DIS: movx a, @r0
 ; DIS-LABEL: <write_pdata>:
 ; DIS: movx @r0, a
+; DIS-LABEL: <read_code>:
+; DIS: movc a, @a+dptr
