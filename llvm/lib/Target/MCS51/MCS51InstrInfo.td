@@ -21,7 +21,9 @@ def RRC_A : MCS51Inst<0x13, "rrc a">;
 def DEC_A : MCS51Inst<0x14, "dec a">;
 def RL_A : MCS51Inst<0x23, "rl a">;
 def RLC_A : MCS51Inst<0x33, "rlc a">;
-def MUL_AB : MCS51Inst<0xA4, "mul ab">;
+def MUL_AB : MCS51Inst<0xA4, "mul ab"> {
+  let Defs = [A, B]; let Uses = [A, B];
+}
 def DIV_AB : MCS51Inst<0x84, "div ab">;
 def SWAP_A : MCS51Inst<0xC4, "swap a">;
 def DA_A : MCS51Inst<0xD4, "da a">;
@@ -240,6 +242,7 @@ class MCS51RegCopyInst : Instruction {
 }
 
 def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,"> { let Defs = [A]; }
+def MOV_B_RN  : MCS51RnInst<0b10001, "mov b,"> { let Defs = [B]; }
 def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> { let Defs = [A]; let Uses = [A]; }
 def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,"> { let Defs = [A]; let Uses = [A]; }
 def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,"> { let Defs = [A]; let Uses = [A]; }
@@ -293,3 +296,17 @@ def AND8ri : MCS51ALUPseudoRI<and>;
 def OR8ri  : MCS51ALUPseudoRI<or>;
 def XOR8ri : MCS51ALUPseudoRI<xor>;
 def SUB8ri : MCS51ALUPseudoRI<sub>;
+
+def MUL8rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51AReg:$dst,
+                      (mul MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
+}
