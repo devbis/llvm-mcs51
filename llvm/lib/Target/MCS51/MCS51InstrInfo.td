@@ -14,6 +14,14 @@ def MCS51br_eq : SDNode<"MCS51ISD::BR_EQ", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_ne : SDNode<"MCS51ISD::BR_NE", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_ult : SDNode<"MCS51ISD::BR_ULT", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_uge : SDNode<"MCS51ISD::BR_UGE", SDT_MCS51Br, [SDNPHasChain]>;
+def SDT_MCS51LoadStack8 : SDTypeProfile<1, 1, [SDTCisVT<0, i8>,
+                                               SDTCisVT<1, i8>]>;
+def MCS51loadstack8 : SDNode<"MCS51ISD::LOAD_STACK8", SDT_MCS51LoadStack8,
+                             [SDNPHasChain]>;
+def SDT_MCS51PushArg8 : SDTypeProfile<0, 1, [SDTCisVT<0, i8>]>;
+def MCS51pusharg8 : SDNode<"MCS51ISD::PUSH_ARG8", SDT_MCS51PushArg8,
+                           [SDNPHasChain]>;
+def MCS51poparg8 : SDNode<"MCS51ISD::POP_ARG8", SDTNone, [SDNPHasChain]>;
 
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -452,6 +460,46 @@ def MOV_DPTR_IMM : Instruction {
   let Inst{7-0} = 0x90;
   let Inst{23-8} = imm;
   let Pattern = [(set MCS51PTR:$dst, MCS51Imm16:$imm)];
+}
+
+def LOADSTACKARG8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Imm8:$spadjust);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, R0];
+  let Uses = [SP];
+}
+
+def PUSHARG8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [A];
+}
+
+def POPARG8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [B];
 }
 
 def INCDPTR16 : Instruction {

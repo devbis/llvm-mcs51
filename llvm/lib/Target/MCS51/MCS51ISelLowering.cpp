@@ -79,11 +79,24 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
   CCInfo.AnalyzeFormalArguments(Ins, CC_MCS51);
 
   for (const CCValAssign &VA : ArgLocs) {
-    if (!VA.isRegLoc())
-      report_fatal_error("MCS-51 stack arguments are not implemented");
     if (EVT(VA.getLocVT()) != VA.getValVT() ||
         (VA.getValVT() != MVT::i8 && VA.getValVT() != MVT::i16))
       report_fatal_error("unsupported MCS-51 argument type");
+    if (VA.isMemLoc()) {
+      if (VA.getValVT() != MVT::i8)
+        report_fatal_error("MCS-51 stack arguments currently support i8 only");
+      int64_t SPAdjust = -(VA.getLocMemOffset() + 2);
+      SDValue Offset = DAG.getTargetConstant(static_cast<uint8_t>(SPAdjust),
+                                             DL, MVT::i8);
+      SDValue Ops[] = {Chain, Offset};
+      SDVTList VTs = DAG.getVTList(MVT::i8, MVT::Other);
+      SDValue Load = DAG.getNode(MCS51ISD::LOAD_STACK8, DL, VTs, Ops);
+      InVals.push_back(Load);
+      Chain = Load.getValue(1);
+      continue;
+    }
+    if (!VA.isRegLoc())
+      report_fatal_error("unsupported MCS-51 argument location");
     const TargetRegisterClass *RC = VA.getLocVT() == MVT::i16
                                         ? &MCS51::MCS51PTRRegClass
                                         : &MCS51::MCS51GPR8RegClass;
@@ -109,25 +122,37 @@ SDValue MCS51TargetLowering::LowerCall(
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_MCS51);
-  if (CCInfo.getStackSize() != 0)
-    report_fatal_error("MCS-51 stack arguments are not implemented");
 
   SDValue Chain = CLI.Chain;
   SDValue InGlue;
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  SmallVector<std::pair<int64_t, SDValue>, 4> StackArgs;
   for (unsigned I = 0; I < ArgLocs.size(); ++I) {
     const CCValAssign &VA = ArgLocs[I];
     EVT VT = CLI.OutVals[I].getValueType();
-    if (!VA.isRegLoc() || EVT(VA.getLocVT()) != VT ||
-        (VT != MVT::i8 && VT != MVT::i16))
+    if (EVT(VA.getLocVT()) != VT || (VT != MVT::i8 && VT != MVT::i16))
       report_fatal_error("unsupported MCS-51 call argument");
-    RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+    if (VA.isRegLoc())
+      RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+    else if (VA.isMemLoc() && VT == MVT::i8)
+      StackArgs.emplace_back(VA.getLocMemOffset(), CLI.OutVals[I]);
+    else
+      report_fatal_error("unsupported MCS-51 call argument location");
+  }
+
+  // Preserve stack argument values before register argument copies can
+  // overwrite the physical registers that currently hold those values.
+  for (auto I = StackArgs.rbegin(), E = StackArgs.rend(); I != E; ++I) {
+    SDValue Ops[] = {Chain, I->second};
+    Chain = DAG.getNode(MCS51ISD::PUSH_ARG8, DL, MVT::Other, Ops);
   }
 
   for (const auto &[Reg, Value] : RegsToPass) {
     Chain = DAG.getCopyToReg(Chain, DL, Reg, Value, InGlue);
     InGlue = Chain.getValue(1);
   }
+  if (!StackArgs.empty())
+    InGlue = SDValue();
 
   SDValue Callee = CLI.Callee;
   if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee))
@@ -147,6 +172,11 @@ SDValue MCS51TargetLowering::LowerCall(
   SDVTList CallVTs = DAG.getVTList(MVT::Other, MVT::Glue);
   Chain = DAG.getNode(MCS51ISD::CALL, DL, CallVTs, Ops);
   InGlue = Chain.getValue(1);
+
+  for (unsigned I = 0; I < CCInfo.getStackSize(); ++I)
+    Chain = DAG.getNode(MCS51ISD::POP_ARG8, DL, MVT::Other, Chain);
+  if (CCInfo.getStackSize() != 0)
+    InGlue = SDValue();
 
   SmallVector<CCValAssign, 2> RetLocs;
   CCState RetInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
@@ -209,6 +239,34 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::RET16) {
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RET))
         .addReg(MCS51::DPTR, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::LOADSTACKARG8) {
+    Register Dst = MI.getOperand(0).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x81);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R0, RegState::Define);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R0);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::PUSHARG8) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
+        .addReg(MI.getOperand(0).getReg());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::POPARG8) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::POP_DIRECT))
+        .addImm(0xF0)
+        .addReg(MCS51::B, RegState::ImplicitDefine);
     MI.eraseFromParent();
     return MBB;
   }
@@ -355,12 +413,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addReg(MCS51::A);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(Addr, RegState::Define);
     BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(Addr, RegState::Define);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
@@ -389,7 +449,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(Addr, RegState::Define);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(HighByte);
     BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);

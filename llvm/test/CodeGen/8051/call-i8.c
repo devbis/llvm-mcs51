@@ -5,6 +5,8 @@
 extern unsigned char callee(unsigned char);
 extern unsigned int callee_word(void);
 extern unsigned int callee_word_arg(unsigned int);
+extern unsigned char callee5(unsigned char, unsigned char, unsigned char,
+                             unsigned char, unsigned char);
 
 unsigned char caller(void) { return callee(42); }
 unsigned int caller_word(void) { return callee_word(); }
@@ -13,6 +15,14 @@ unsigned int caller_word_arg(unsigned int value) {
   return callee_word_arg(value);
 }
 unsigned int echo_word(unsigned int value) { return value; }
+unsigned char fifth_arg(unsigned char a, unsigned char b, unsigned char c,
+                        unsigned char d, unsigned char e) {
+  return e;
+}
+unsigned char caller5(unsigned char a, unsigned char b, unsigned char c,
+                      unsigned char d, unsigned char e) {
+  return callee5(a, b, c, d, e);
+}
 
 // CHECK-LABEL: caller:
 // CHECK: mov a, #42
@@ -37,6 +47,20 @@ unsigned int echo_word(unsigned int value) { return value; }
 // CHECK-LABEL: echo_word:
 // CHECK: ret
 
+// CHECK-LABEL: fifth_arg:
+// CHECK: mov a, 129
+// CHECK: add a, #-2
+// CHECK: mov r0, a
+// CHECK: mov a, @r0
+// CHECK: ret
+
+// CHECK-LABEL: caller5:
+// CHECK: push
+// CHECK: lcall callee5
+// CHECK: pop
+// CHECK: ret
+
 // RELOC: R_8051_16 callee 0x0
 // RELOC: R_8051_16 callee_word 0x0
 // RELOC: R_8051_16 callee_word_arg 0x0
+// RELOC: R_8051_16 callee5 0x0
