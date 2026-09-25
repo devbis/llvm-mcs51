@@ -77,6 +77,16 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const DebugLoc &DL = MI.getDebugLoc();
   Register Dst = MI.getOperand(0).getReg();
   Register LHS = MI.getOperand(1).getReg();
+  if (MI.getOpcode() == MCS51::MUL8rr) {
+    Register RHS = MI.getOperand(2).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_RN)).addReg(RHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
   unsigned AccOpcode;
   bool IsImmediate = MI.getOpcode() == MCS51::ADD8ri ||
                      MI.getOpcode() == MCS51::SUB8ri ||

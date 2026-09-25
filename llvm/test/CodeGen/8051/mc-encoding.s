@@ -11,6 +11,7 @@
         add a, #1
         subb a, #1
         mov a, r3
+        mov b, r3
         add a, r3
         subb a, r3
         mov r3, a
@@ -44,6 +45,7 @@
 # ASM: add a, #1{{.*}}encoding: [0x24,0x01]
 # ASM: subb a, #1{{.*}}encoding: [0x94,0x01]
 # ASM: mov a, r3{{.*}}encoding: [0xeb]
+# ASM: mov b, r3{{.*}}encoding: [0x8b]
 # ASM: add a, r3{{.*}}encoding: [0x2b]
 # ASM: subb a, r3{{.*}}encoding: [0x9b]
 # ASM: mov r3, a{{.*}}encoding: [0xfb]
@@ -76,6 +78,7 @@
 # DIS: add a, #1
 # DIS: subb a, #1
 # DIS: mov a, r3
+# DIS: mov b, r3
 # DIS: add a, r3
 # DIS: subb a, r3
 # DIS: mov r3, a
