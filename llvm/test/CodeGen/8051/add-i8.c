@@ -49,3 +49,25 @@ unsigned char set_low(unsigned char value) { return value | 15; }
 // CHECK: xrl a, #15
 // CHECK: ret
 unsigned char toggle_low(unsigned char value) { return value ^ 15; }
+
+// CHECK-LABEL: shift_left_two:
+// CHECK: mov a, r7
+// CHECK: clr c
+// CHECK: rlc a
+// CHECK: clr c
+// CHECK: rlc a
+// CHECK: ret
+unsigned char shift_left_two(unsigned char value) {
+  return (unsigned char)(value << 2);
+}
+
+// CHECK-LABEL: shift_right_two:
+// CHECK: mov a, r7
+// CHECK: clr c
+// CHECK: rrc a
+// CHECK: clr c
+// CHECK: rrc a
+// CHECK: ret
+unsigned char shift_right_two(unsigned char value) {
+  return (unsigned char)(value >> 2);
+}
