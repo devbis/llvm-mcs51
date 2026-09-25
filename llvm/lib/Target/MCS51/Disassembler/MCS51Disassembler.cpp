@@ -1,4 +1,5 @@
 #include "TargetInfo/MCS51TargetInfo.h"
+#include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDecoder.h"
 #include "llvm/MC/MCDecoderOps.h"
@@ -15,6 +16,17 @@ using DecodeStatus = MCDisassembler::DecodeStatus;
 static DecodeStatus DecodeImm8(MCInst &Inst, unsigned Imm, uint64_t,
                                const MCDisassembler *) {
   Inst.addOperand(MCOperand::createImm(Imm));
+  return MCDisassembler::Success;
+}
+
+static DecodeStatus DecodeMCS51GPR8RegisterClass(
+    MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
+  static constexpr MCRegister Registers[] = {
+      MCS51::R0, MCS51::R1, MCS51::R2, MCS51::R3,
+      MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7};
+  if (RegNo >= 8)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(Registers[RegNo]));
   return MCDisassembler::Success;
 }
 

@@ -5,6 +5,7 @@
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -13,6 +14,17 @@ using namespace llvm;
 namespace {
 class MCS51MCCodeEmitter final : public MCCodeEmitter {
   const MCInstrInfo &MII;
+  const MCRegisterInfo &MRI;
+
+  uint32_t getMachineOpValue(const MCInst &, const MCOperand &Op,
+                             SmallVectorImpl<MCFixup> &,
+                             const MCSubtargetInfo &) const {
+    if (Op.isReg())
+      return MRI.getEncodingValue(Op.getReg());
+    if (Op.isImm())
+      return static_cast<uint32_t>(Op.getImm());
+    report_fatal_error("unsupported MCS-51 machine operand encoding");
+  }
 
   uint32_t getImm8OpValue(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &,
@@ -31,7 +43,9 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
                                  const MCSubtargetInfo &STI) const;
 
 public:
-  explicit MCS51MCCodeEmitter(const MCInstrInfo &MII) : MII(MII) {}
+  explicit MCS51MCCodeEmitter(const MCInstrInfo &MII,
+                              const MCRegisterInfo &MRI)
+      : MII(MII), MRI(MRI) {}
 
   void encodeInstruction(const MCInst &MI, SmallVectorImpl<char> &Bytes,
                          SmallVectorImpl<MCFixup> &Fixups,
@@ -48,6 +62,6 @@ public:
 #include "MCS51GenMCCodeEmitter.inc"
 
 MCCodeEmitter *llvm::createMCS51MCCodeEmitter(const MCInstrInfo &MII,
-                                               MCContext &) {
-  return new MCS51MCCodeEmitter(MII);
+                                               MCContext &Ctx) {
+  return new MCS51MCCodeEmitter(MII, *Ctx.getRegisterInfo());
 }
