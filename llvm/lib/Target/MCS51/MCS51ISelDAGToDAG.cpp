@@ -175,6 +175,26 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return true;
     }
+    if (AS == MCS51::Bit) {
+      if (LD->getMemoryVT() != MVT::i8)
+        report_fatal_error("unsupported MCS-51 bit memory load width");
+      SDValue Addr = LD->getBasePtr();
+      if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+        Addr = CurDAG->getTargetGlobalAddress(
+            GA->getGlobal(), DL, MVT::i8, GA->getOffset(), GA->getTargetFlags());
+      else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+        Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
+      else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
+        return false;
+      SDValue Ops[] = {Addr, LD->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOADBIT8, DL,
+                                           N->getVTList(), Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
     if (AS != MCS51::IData && AS != MCS51::PData &&
         AS != MCS51::XData && AS != MCS51::Code)
       return false;
@@ -207,6 +227,35 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   unsigned AS = ST->getAddressSpace();
   if (AS == MCS51::Code)
     report_fatal_error("cannot store to MCS-51 code memory");
+  if (AS == MCS51::Bit) {
+    if (ST->getMemoryVT() != MVT::i8)
+      report_fatal_error("unsupported MCS-51 bit memory store width");
+    SDValue Addr = ST->getBasePtr();
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+      Addr = CurDAG->getTargetGlobalAddress(
+          GA->getGlobal(), DL, MVT::i8, GA->getOffset(), GA->getTargetFlags());
+    else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+      Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
+    else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
+      return false;
+    if (auto *C = dyn_cast<ConstantSDNode>(ST->getValue())) {
+      unsigned Opcode = (C->getZExtValue() & 1) ? MCS51::SETB_BIT
+                                                : MCS51::CLR_BIT;
+      SDValue Ops[] = {Addr, ST->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(Opcode, DL, MVT::Other, Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
+    SDValue Ops[] = {Addr, ST->getValue(), ST->getChain()};
+    SDNode *Res = CurDAG->getMachineNode(MCS51::STOREBIT8, DL, MVT::Other,
+                                         Ops);
+    CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+    ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+    CurDAG->RemoveDeadNode(N);
+    return true;
+  }
   int FI;
   int64_t Offset;
   SDValue Index;
