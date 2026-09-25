@@ -3,5 +3,6 @@ def CC_MCS51 : CallingConv<[
   CCIfType<[i8], CCAssignToStack<1, 1>>
 ]>;
 def RetCC_MCS51 : CallingConv<[
-  CCIfType<[i8], CCAssignToReg<[A]>>
+  CCIfType<[i8], CCAssignToReg<[A]>>,
+  CCIfType<[i16], CCAssignToReg<[DPTR]>>
 ]>;

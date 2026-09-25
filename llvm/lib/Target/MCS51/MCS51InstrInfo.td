@@ -81,6 +81,12 @@ def MCS51Addr16 : Operand<OtherVT> {
   let DecoderMethod = "DecodeImm16";
 }
 
+def MCS51Imm16 : Operand<i16>, ImmLeaf<i16, "return isUInt<16>(Imm);"> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm16OpValue";
+  let DecoderMethod = "DecodeImm16";
+}
+
 def MCS51Rel8 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getRel8OpValue";
@@ -147,6 +153,22 @@ def LJMP : MCS51Abs16Inst<0x02, "ljmp"> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
 def LCALL : MCS51Abs16Inst<0x12, "lcall"> { let isCall = 1; }
+
+def MOV_DPTR_IMM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51Imm16:$imm);
+  let AsmString = "mov dptr, #$imm";
+  let Size = 3;
+  let hasSideEffects = 1;
+  bits<1> dst;
+  let dst = 0;
+  bits<16> imm;
+  bits<24> Inst;
+  let Inst{7-0} = 0x90;
+  let Inst{23-8} = imm;
+  let Pattern = [(set MCS51PTR:$dst, MCS51Imm16:$imm)];
+}
 
 // The MCS-51 has no PC-relative unconditional branch with a long enough
 // range for arbitrary basic blocks. Use LJMP until branch relaxation can
