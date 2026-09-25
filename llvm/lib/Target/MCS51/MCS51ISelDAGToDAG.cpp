@@ -33,6 +33,22 @@ static bool getFrameAddress(SDValue Ptr, int &FI, int64_t &Offset) {
   return Offset >= -128 && Offset <= 127;
 }
 
+static bool getIndexedFrameAddress(SDValue Ptr, int &FI, SDValue &Index) {
+  if (Ptr.getOpcode() != ISD::ADD)
+    return false;
+  SDValue Base = Ptr.getOperand(0);
+  Index = Ptr.getOperand(1);
+  if (Base.getOpcode() != ISD::FrameIndex) {
+    std::swap(Base, Index);
+    if (Base.getOpcode() != ISD::FrameIndex)
+      return false;
+  }
+  if (isa<ConstantSDNode>(Index))
+    return false;
+  FI = cast<FrameIndexSDNode>(Base)->getIndex();
+  return Index.getValueType() == MVT::i16;
+}
+
 class MCS51DAGToDAGISel final : public SelectionDAGISel {
 public:
   MCS51DAGToDAGISel(MCS51TargetMachine &TM, CodeGenOptLevel OL)
@@ -107,6 +123,20 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     unsigned AS = LD->getAddressSpace();
     int FI;
     int64_t Offset;
+    SDValue Index;
+    if (AS == MCS51::Default && LD->getMemoryVT() == MVT::i8 &&
+        getIndexedFrameAddress(LD->getBasePtr(), FI, Index)) {
+      SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
+                       CurDAG->getTargetConstant(0, DL, MVT::i8), Index,
+                       LD->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOAD_FRAME8_INDEX, DL,
+                                           N->getVTList(), Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
     if (AS == MCS51::Default && LD->getMemoryVT() == MVT::i8 &&
         getFrameAddress(LD->getBasePtr(), FI, Offset)) {
       SDValue Ops[] = {
@@ -179,6 +209,19 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     report_fatal_error("cannot store to MCS-51 code memory");
   int FI;
   int64_t Offset;
+  SDValue Index;
+  if (AS == MCS51::Default && ST->getMemoryVT() == MVT::i8 &&
+      getIndexedFrameAddress(ST->getBasePtr(), FI, Index)) {
+    SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
+                     CurDAG->getTargetConstant(0, DL, MVT::i8), Index,
+                     ST->getValue(), ST->getChain()};
+    SDNode *Res = CurDAG->getMachineNode(MCS51::STORE_FRAME8_INDEX, DL,
+                                         MVT::Other, Ops);
+    CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+    ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+    CurDAG->RemoveDeadNode(N);
+    return true;
+  }
   if (AS == MCS51::Default && ST->getMemoryVT() == MVT::i8 &&
       getFrameAddress(ST->getBasePtr(), FI, Offset)) {
     SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
