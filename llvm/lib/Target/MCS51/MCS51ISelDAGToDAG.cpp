@@ -62,6 +62,14 @@ public:
       CurDAG->RemoveDeadNode(N);
       return;
     }
+    if (N->getOpcode() == MCS51ISD::PUSH_PAD8) {
+      SDValue Ops[] = {N->getOperand(0)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::PUSHPAD8, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
     if ((N->getOpcode() == ISD::LOAD || N->getOpcode() == ISD::STORE) &&
         selectXDataMemory(N))
       return;
