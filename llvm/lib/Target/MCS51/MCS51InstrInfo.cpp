@@ -41,7 +41,8 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
 namespace {
 bool isMCS51CondBranch(unsigned Opcode) {
-  return Opcode == MCS51::JZ || Opcode == MCS51::JNZ;
+  return Opcode == MCS51::JZ || Opcode == MCS51::JNZ ||
+         Opcode == MCS51::JC || Opcode == MCS51::JNC;
 }
 
 bool isMCS51UncondBranch(unsigned Opcode) {
@@ -128,7 +129,7 @@ unsigned MCS51InstrInfo::insertBranch(
     BuildMI(&MBB, DL, get(Opcode)).addMBB(TBB);
     Count = 1;
     if (BytesAdded)
-      *BytesAdded = 2;
+      *BytesAdded = get(Opcode).getSize();
     if (FBB) {
       BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(FBB);
       ++Count;
@@ -143,11 +144,13 @@ bool MCS51InstrInfo::reverseBranchCondition(
     SmallVectorImpl<MachineOperand> &Cond) const {
   if (Cond.size() != 1 || !Cond[0].isImm())
     return true;
-  if (Cond[0].getImm() == MCS51::JZ)
-    Cond[0].setImm(MCS51::JNZ);
-  else if (Cond[0].getImm() == MCS51::JNZ)
-    Cond[0].setImm(MCS51::JZ);
-  else
+  switch (Cond[0].getImm()) {
+  case MCS51::JZ: Cond[0].setImm(MCS51::JNZ); break;
+  case MCS51::JNZ: Cond[0].setImm(MCS51::JZ); break;
+  case MCS51::JC: Cond[0].setImm(MCS51::JNC); break;
+  case MCS51::JNC: Cond[0].setImm(MCS51::JC); break;
+  default:
     return true;
+  }
   return false;
 }
