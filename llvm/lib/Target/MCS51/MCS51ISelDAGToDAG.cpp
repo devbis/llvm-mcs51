@@ -82,6 +82,20 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   if (N->getOpcode() == ISD::LOAD) {
     auto *LD = cast<LoadSDNode>(N);
     unsigned AS = LD->getAddressSpace();
+    if (AS == MCS51::Default && LD->getMemoryVT() == MVT::i8 &&
+        LD->getBasePtr().getOpcode() == ISD::FrameIndex) {
+      int FI = cast<FrameIndexSDNode>(LD->getBasePtr())->getIndex();
+      SDValue Ops[] = {
+          CurDAG->getTargetFrameIndex(FI, MVT::i16),
+          CurDAG->getTargetConstant(0, DL, MVT::i8), LD->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOAD_FRAME8, DL,
+                                           N->getVTList(), Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
     if (AS == MCS51::Data || AS == MCS51::SFR) {
       unsigned Opcode;
       if (LD->getMemoryVT() == MVT::i8)
@@ -139,6 +153,19 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   unsigned AS = ST->getAddressSpace();
   if (AS == MCS51::Code)
     report_fatal_error("cannot store to MCS-51 code memory");
+  if (AS == MCS51::Default && ST->getMemoryVT() == MVT::i8 &&
+      ST->getBasePtr().getOpcode() == ISD::FrameIndex) {
+    int FI = cast<FrameIndexSDNode>(ST->getBasePtr())->getIndex();
+    SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
+                     CurDAG->getTargetConstant(0, DL, MVT::i8),
+                     ST->getValue(), ST->getChain()};
+    SDNode *Res = CurDAG->getMachineNode(MCS51::STORE_FRAME8, DL,
+                                         MVT::Other, Ops);
+    CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+    ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+    CurDAG->RemoveDeadNode(N);
+    return true;
+  }
   if (AS == MCS51::Data || AS == MCS51::SFR) {
     unsigned Opcode;
     if (ST->getMemoryVT() == MVT::i8)
