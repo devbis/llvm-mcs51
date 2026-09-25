@@ -75,6 +75,28 @@ def MCS51Direct8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
   let DecoderMethod = "DecodeImm8";
 }
 
+def MCS51Addr16 : Operand<i16> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm16OpValue";
+  let DecoderMethod = "DecodeImm16";
+}
+
+class MCS51Abs16Inst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Addr16:$addr);
+  let AsmString = mnemonic # " $addr";
+  let Size = 3;
+  let hasSideEffects = 1;
+  bits<16> addr;
+  bits<24> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{23-8} = addr;
+}
+
+def LJMP : MCS51Abs16Inst<0x02, "ljmp"> { let isTerminator = 1; }
+def LCALL : MCS51Abs16Inst<0x12, "lcall"> { let isCall = 1; }
+
 // C promotes shift counts to int, which is i16 in the MCS-51 ABI. This
 // immediate-only operand keeps supported constant counts visible to ISel.
 def MCS51ShiftAmount : Operand<i16>, ImmLeaf<i16, "return isUInt<8>(Imm);">;

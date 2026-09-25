@@ -211,6 +211,7 @@ void setARMTargetInfo(Ctx &);
 void setAVRTargetInfo(Ctx &);
 void setHexagonTargetInfo(Ctx &);
 void setLoongArchTargetInfo(Ctx &);
+void setMCS51TargetInfo(Ctx &);
 void setMSP430TargetInfo(Ctx &);
 void setMipsTargetInfo(Ctx &);
 void setPPC64TargetInfo(Ctx &);
