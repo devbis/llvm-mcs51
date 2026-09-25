@@ -40,7 +40,9 @@ public:
   SMLoc getStartLoc() const override { return Loc; }
   SMLoc getEndLoc() const override { return Loc; }
   void print(raw_ostream &OS, const MCAsmInfo &) const override { OS << Token; }
-  void addRegOperands(MCInst &, unsigned) const {}
+  void addRegOperands(MCInst &Inst, unsigned) const {
+    Inst.addOperand(MCOperand::createReg(Reg));
+  }
   void addImmOperands(MCInst &Inst, unsigned) const {
     if (const auto *CE = dyn_cast<MCConstantExpr>(Expr))
       Inst.addOperand(MCOperand::createImm(CE->getValue()));

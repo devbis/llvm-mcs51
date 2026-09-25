@@ -42,6 +42,7 @@ def MOVX_R1A : MCS51Inst<0xF3, "movx @r1, a">;
 def RET  : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
   let isTerminator = 1;
+  let Uses = [A];
 }
 def RETI : MCS51Inst<0x32, "reti"> {
   let isReturn = 1;
@@ -76,3 +77,29 @@ def SUBB_A_IMM : MCS51AccImmInst<0x94, "subb">;
 def ANL_A_IMM : MCS51AccImmInst<0x54, "anl">;
 def ORL_A_IMM : MCS51AccImmInst<0x44, "orl">;
 def XRL_A_IMM : MCS51AccImmInst<0x64, "xrl">;
+
+class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$rn);
+  let AsmString = mnemonic # " $rn";
+  let Size = 1;
+  let hasSideEffects = 1;
+  bits<3> rn;
+  bits<8> Inst;
+  let Inst{7-3} = opcode;
+  let Inst{2-0} = rn;
+}
+
+def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,">;
+def ADD_A_RN  : MCS51RnInst<0b00101, "add a,">;
+def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,">;
+def SUBB_A_RN : MCS51RnInst<0b10001, "subb a,">;
+def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,">;
+def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,">;
+def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,">;
+def MOV_RN_A  : MCS51RnInst<0b11111, "mov"> {
+  let AsmString = "mov $rn, a";
+  let Uses = [A];
+}
+def INC_RN : MCS51RnInst<0b00001, "inc">;
