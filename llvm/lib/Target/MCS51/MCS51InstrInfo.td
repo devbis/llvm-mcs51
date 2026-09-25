@@ -378,6 +378,26 @@ def STOREI8 : MCS51IndirectMemPseudo<0>;
 def LOADP8 : MCS51IndirectMemPseudo<1>;
 def STOREP8 : MCS51IndirectMemPseudo<0>;
 
+class MCS51IndirectWordPseudo<bits<1> IsLoad> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = !if(IsLoad, (outs MCS51PTR:$dst), (outs));
+  let InOperandList = !if(IsLoad,
+                          (ins MCS51Indirect8:$addr),
+                          (ins MCS51Indirect8:$addr, MCS51PTR:$src));
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = IsLoad;
+  let mayStore = !not(IsLoad);
+}
+
+def LOADI16 : MCS51IndirectWordPseudo<1>;
+def STOREI16 : MCS51IndirectWordPseudo<0>;
+def LOADP16 : MCS51IndirectWordPseudo<1>;
+def STOREP16 : MCS51IndirectWordPseudo<0>;
+
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
     : Instruction {
   let Namespace = "MCS51";

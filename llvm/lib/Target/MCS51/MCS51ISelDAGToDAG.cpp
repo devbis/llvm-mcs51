@@ -64,6 +64,10 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       Opcode = AS == MCS51::IData ? MCS51::LOADI8 :
                AS == MCS51::PData ? MCS51::LOADP8 :
                AS == MCS51::Code ? MCS51::LOADCODE8 : MCS51::LOADX8;
+    } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::IData) {
+      Opcode = MCS51::LOADI16;
+    } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::PData) {
+      Opcode = MCS51::LOADP16;
     } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::XData) {
       Opcode = MCS51::LOADX16;
     } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::Code) {
@@ -110,10 +114,16 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   }
   if (AS != MCS51::IData && AS != MCS51::PData && AS != MCS51::XData)
     return false;
-  if (ST->getMemoryVT() != MVT::i8)
-    report_fatal_error("MCS-51 data spaces currently support byte stores only");
-  unsigned Opcode = AS == MCS51::IData ? MCS51::STOREI8 :
-                    AS == MCS51::PData ? MCS51::STOREP8 : MCS51::STOREX8;
+  unsigned Opcode;
+  if (ST->getMemoryVT() == MVT::i8)
+    Opcode = AS == MCS51::IData ? MCS51::STOREI8 :
+             AS == MCS51::PData ? MCS51::STOREP8 : MCS51::STOREX8;
+  else if (ST->getMemoryVT() == MVT::i16 && AS == MCS51::IData)
+    Opcode = MCS51::STOREI16;
+  else if (ST->getMemoryVT() == MVT::i16 && AS == MCS51::PData)
+    Opcode = MCS51::STOREP16;
+  else
+    report_fatal_error("unsupported MCS-51 data memory store width");
   if (AS == MCS51::XData) {
     SDValue Ops[] = {ST->getBasePtr(), ST->getValue(), ST->getChain()};
     SDNode *Res = CurDAG->getMachineNode(Opcode, DL, MVT::Other, Ops);
