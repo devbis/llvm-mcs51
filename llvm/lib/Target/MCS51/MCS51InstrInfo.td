@@ -17,10 +17,14 @@ class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
 def NOP  : MCS51Inst<0x00, "nop"> { let hasSideEffects = 0; }
 def RR_A : MCS51Inst<0x03, "rr a">;
 def INC_A : MCS51Inst<0x04, "inc a">;
-def RRC_A : MCS51Inst<0x13, "rrc a">;
+def RRC_A : MCS51Inst<0x13, "rrc a"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
 def DEC_A : MCS51Inst<0x14, "dec a">;
 def RL_A : MCS51Inst<0x23, "rl a">;
-def RLC_A : MCS51Inst<0x33, "rlc a">;
+def RLC_A : MCS51Inst<0x33, "rlc a"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
 def MUL_AB : MCS51Inst<0xA4, "mul ab"> {
   let Defs = [A, B]; let Uses = [A, B];
 }
@@ -70,6 +74,10 @@ def MCS51Direct8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
   let EncoderMethod = "getImm8OpValue";
   let DecoderMethod = "DecodeImm8";
 }
+
+// C promotes shift counts to int, which is i16 in the MCS-51 ABI. This
+// immediate-only operand keeps supported constant counts visible to ISel.
+def MCS51ShiftAmount : Operand<i16>, ImmLeaf<i16, "return isUInt<8>(Imm);">;
 
 class MCS51AccImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
@@ -310,3 +318,20 @@ def MUL8rr : Instruction {
   let Pattern = [(set MCS51AReg:$dst,
                       (mul MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
 }
+
+class MCS51ShiftPseudo<SDNode node> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51ShiftAmount:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51AReg:$dst,
+                      (node MCS51GPR8:$lhs, MCS51ShiftAmount:$amount))];
+}
+
+def SHL8ri : MCS51ShiftPseudo<shl>;
+def SRL8ri : MCS51ShiftPseudo<srl>;

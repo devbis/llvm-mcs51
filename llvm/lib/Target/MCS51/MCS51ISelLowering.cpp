@@ -17,6 +17,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
                                          const MCS51Subtarget &STI)
     : TargetLowering(TM, STI), STI(STI) {
   addRegisterClass(MVT::i8, &MCS51::MCS51GPR8RegClass);
+  setOperationAction(ISD::SHL, MVT::i8, Legal);
+  setOperationAction(ISD::SRL, MVT::i8, Legal);
   setBooleanContents(ZeroOrOneBooleanContent);
   setStackPointerRegisterToSaveRestore(MCS51::SP);
   computeRegisterProperties(STI.getRegisterInfo());
@@ -83,6 +85,25 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const DebugLoc &DL = MI.getDebugLoc();
   Register Dst = MI.getOperand(0).getReg();
   Register LHS = MI.getOperand(1).getReg();
+  if (MI.getOpcode() == MCS51::SHL8ri || MI.getOpcode() == MCS51::SRL8ri) {
+    unsigned Amount = MI.getOperand(2).getImm();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    if (Amount >= 8) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+    } else {
+      unsigned RotateOpcode = MI.getOpcode() == MCS51::SHL8ri
+                                  ? MCS51::RLC_A
+                                  : MCS51::RRC_A;
+      while (Amount--) {
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+        BuildMI(*MBB, MII, DL, TII.get(RotateOpcode));
+      }
+    }
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::MUL8rr) {
     Register RHS = MI.getOperand(2).getReg();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
