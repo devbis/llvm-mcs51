@@ -138,12 +138,21 @@ SDValue MCS51TargetLowering::LowerReturn(
       (!OutVals.empty() && OutVals.front().getValueType() != MVT::i8 &&
        OutVals.front().getValueType() != MVT::i16))
     report_fatal_error("MCS-51 value return lowering is not implemented");
-  if (!OutVals.empty())
-    Chain = DAG.getCopyToReg(Chain, DL,
-                             OutVals.front().getValueType() == MVT::i8
-                                 ? MCS51::A
-                                 : MCS51::DPTR,
-                             OutVals.front());
+  if (!OutVals.empty()) {
+    SDValue RetVal = OutVals.front();
+    if (Outs.front().VT == MVT::i8 || Outs.front().Flags.isZExt() ||
+        Outs.front().Flags.isSExt()) {
+      if (RetVal.getValueType() == MVT::i16)
+        RetVal = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, RetVal);
+      Chain = DAG.getCopyToReg(Chain, DL, MCS51::A, RetVal);
+    } else if (Outs.front().VT == MVT::i16) {
+      if (RetVal.getValueType() == MVT::i8)
+        RetVal = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, RetVal);
+      Chain = DAG.getCopyToReg(Chain, DL, MCS51::DPTR, RetVal);
+    } else {
+      report_fatal_error("unsupported MCS-51 return type");
+    }
+  }
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
 }
 
@@ -154,6 +163,27 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const DebugLoc &DL = MI.getDebugLoc();
   Register Dst = MI.getOperand(0).getReg();
   Register LHS = MI.getOperand(1).getReg();
+  if (MI.getOpcode() == MCS51::TRUNC16TO8) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::ZEXT8TO16) {
+    // DPTR is exposed as one i16 register, while its byte halves are SFRs.
+    // Clear DPH and write the source byte to DPL through the accumulator.
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IMM))
+        .addImm(0x83)
+        .addImm(0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::SHL8ri || MI.getOpcode() == MCS51::SRL8ri) {
     unsigned Amount = MI.getOperand(2).getImm();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
