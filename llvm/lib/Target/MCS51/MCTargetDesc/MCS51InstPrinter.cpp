@@ -26,6 +26,11 @@ void MCS51InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     llvm_unreachable("unsupported MCS-51 operand");
 }
 
+void MCS51InstPrinter::printPCRelImm(const MCInst *MI, unsigned OpNo,
+                                     raw_ostream &OS) {
+  printOperand(MI, OpNo, OS);
+}
+
 void MCS51InstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                  StringRef Annot, const MCSubtargetInfo &,
                                  raw_ostream &OS) {

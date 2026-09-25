@@ -81,6 +81,55 @@ def MCS51Addr16 : Operand<i16> {
   let DecoderMethod = "DecodeImm16";
 }
 
+def MCS51Rel8 : Operand<OtherVT> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getRel8OpValue";
+  let DecoderMethod = "DecodeRel8";
+  let PrintMethod = "printPCRelImm";
+}
+
+class MCS51RelBranch<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Rel8:$target);
+  let AsmString = mnemonic # " $target";
+  let Size = 2;
+  let hasSideEffects = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  bits<8> target;
+  bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = target;
+}
+
+class MCS51BitRelBranch<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$bitaddr, MCS51Rel8:$target);
+  let AsmString = mnemonic # " $bitaddr, $target";
+  let Size = 3;
+  let hasSideEffects = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  bits<8> bitaddr;
+  bits<8> target;
+  bits<24> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = bitaddr;
+  let Inst{23-16} = target;
+}
+
+let isBarrier = 1 in
+def SJMP : MCS51RelBranch<0x80, "sjmp">;
+def JZ : MCS51RelBranch<0x60, "jz"> { let Uses = [A]; }
+def JNZ : MCS51RelBranch<0x70, "jnz"> { let Uses = [A]; }
+def JC : MCS51RelBranch<0x40, "jc"> { let Uses = [C]; }
+def JNC : MCS51RelBranch<0x50, "jnc"> { let Uses = [C]; }
+def JB : MCS51BitRelBranch<0x20, "jb">;
+def JNB : MCS51BitRelBranch<0x30, "jnb">;
+def JBC : MCS51BitRelBranch<0x10, "jbc">;
+
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -94,7 +143,9 @@ class MCS51Abs16Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{23-8} = addr;
 }
 
-def LJMP : MCS51Abs16Inst<0x02, "ljmp"> { let isTerminator = 1; }
+def LJMP : MCS51Abs16Inst<0x02, "ljmp"> {
+  let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
+}
 def LCALL : MCS51Abs16Inst<0x12, "lcall"> { let isCall = 1; }
 
 // C promotes shift counts to int, which is i16 in the MCS-51 ABI. This

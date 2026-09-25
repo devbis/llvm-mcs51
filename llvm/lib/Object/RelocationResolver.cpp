@@ -383,16 +383,20 @@ static uint64_t resolveAVR(uint64_t Type, uint64_t Offset, uint64_t S,
 }
 
 static bool supportsMCS51(uint64_t Type) {
-  return Type == ELF::R_8051_8 || Type == ELF::R_8051_16;
+  return Type == ELF::R_8051_8 || Type == ELF::R_8051_16 ||
+         Type == ELF::R_8051_PCREL8;
 }
 
-static uint64_t resolveMCS51(uint64_t Type, uint64_t, uint64_t S, uint64_t,
+static uint64_t resolveMCS51(uint64_t Type, uint64_t Offset, uint64_t S,
+                             uint64_t,
                              int64_t Addend) {
   switch (Type) {
   case ELF::R_8051_8:
     return (S + Addend) & 0xff;
   case ELF::R_8051_16:
     return (S + Addend) & 0xffff;
+  case ELF::R_8051_PCREL8:
+    return (S + Addend - Offset) & 0xff;
   default:
     llvm_unreachable("Invalid relocation type");
   }

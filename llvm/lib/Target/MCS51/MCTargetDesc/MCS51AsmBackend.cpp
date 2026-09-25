@@ -9,6 +9,7 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/Endian.h"
 
 using namespace llvm;
@@ -28,12 +29,18 @@ public:
       return {"fixup_8", 0, 8, 0};
     if (Kind == MCS51::fixup_16)
       return {"fixup_16", 0, 16, 0};
+    if (Kind == MCS51::fixup_pcrel8)
+      return {"fixup_pcrel8", 0, 8, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 
   void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data, uint64_t Value,
                   bool IsResolved) override {
+    if (Fixup.getKind() == MCS51::fixup_pcrel8 && IsResolved &&
+        !isInt<8>(static_cast<int64_t>(Value)))
+      getContext().reportError(Fixup.getLoc(),
+                               "MCS-51 relative branch is out of range");
     if (!IsResolved)
       Asm->getWriter().recordRelocation(F, Fixup, Target, Value);
     if (mc::isRelocation(Fixup.getKind()))
