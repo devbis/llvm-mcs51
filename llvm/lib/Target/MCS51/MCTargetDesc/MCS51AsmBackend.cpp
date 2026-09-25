@@ -26,6 +26,8 @@ public:
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     if (Kind == MCS51::fixup_8)
       return {"fixup_8", 0, 8, 0};
+    if (Kind == MCS51::fixup_16)
+      return {"fixup_16", 0, 16, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 

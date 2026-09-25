@@ -26,6 +26,7 @@ add_lld_library(lldELF
   Arch/AVR.cpp
   Arch/Hexagon.cpp
   Arch/LoongArch.cpp
+  Arch/MCS51.cpp
   Arch/Mips.cpp
   Arch/MipsArchTree.cpp
   Arch/MSP430.cpp

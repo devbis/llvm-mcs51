@@ -19,6 +19,12 @@ static DecodeStatus DecodeImm8(MCInst &Inst, unsigned Imm, uint64_t,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeImm16(MCInst &Inst, unsigned Imm, uint64_t,
+                                const MCDisassembler *) {
+  Inst.addOperand(MCOperand::createImm(Imm));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus DecodeMCS51GPR8RegisterClass(
     MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
   static constexpr MCRegister Registers[] = {
@@ -55,8 +61,8 @@ public:
       return Fail;
     }
     uint8_t Opcode = Bytes[0];
-    if (Opcode == 0x85 || Opcode == 0x75) {
-      // MOV direct,direct and MOV direct,#data are three bytes long.
+    if (Opcode == 0x02 || Opcode == 0x12 || Opcode == 0x85 || Opcode == 0x75) {
+      // LJMP, LCALL, MOV direct,direct, and MOV direct,#data are three bytes.
       if (Bytes.size() < 3) {
         Size = 0;
         return Fail;
