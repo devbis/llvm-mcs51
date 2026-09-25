@@ -2,6 +2,7 @@
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCParser/AsmLexer.h"
@@ -21,23 +22,31 @@ class MCS51Operand final : public MCParsedAsmOperand {
   SMLoc Loc;
   std::string Token;
   MCRegister Reg;
+  const MCExpr *Expr = nullptr;
 
 public:
   MCS51Operand(SMLoc Loc, StringRef Token)
       : Loc(Loc), Token(Token), Reg() {}
   MCS51Operand(SMLoc Loc, MCRegister Reg) : Loc(Loc), Reg(Reg) {}
+  MCS51Operand(SMLoc Loc, const MCExpr *Expr) : Loc(Loc), Expr(Expr) {}
 
-  bool isToken() const override { return !Reg.isValid(); }
+  bool isToken() const override { return !Reg.isValid() && !Expr; }
   bool isReg() const override { return Reg.isValid(); }
-  bool isImm() const override { return false; }
+  bool isImm() const override { return Expr != nullptr; }
   bool isMem() const override { return false; }
   MCRegister getReg() const override { return Reg; }
+  const MCExpr *getImm() const { return Expr; }
   StringRef getToken() const { return Token; }
   SMLoc getStartLoc() const override { return Loc; }
   SMLoc getEndLoc() const override { return Loc; }
   void print(raw_ostream &OS, const MCAsmInfo &) const override { OS << Token; }
   void addRegOperands(MCInst &, unsigned) const {}
-  void addImmOperands(MCInst &, unsigned) const {}
+  void addImmOperands(MCInst &Inst, unsigned) const {
+    if (const auto *CE = dyn_cast<MCConstantExpr>(Expr))
+      Inst.addOperand(MCOperand::createImm(CE->getValue()));
+    else
+      Inst.addOperand(MCOperand::createExpr(Expr));
+  }
 };
 
 class MCS51AsmParser final : public MCTargetAsmParser {
@@ -101,6 +110,16 @@ class MCS51AsmParser final : public MCTargetAsmParser {
           Parser.Lex();
         }
         Operands.push_back(std::make_unique<MCS51Operand>(Loc, Addressing));
+        continue;
+      }
+      if (Tok.is(AsmToken::Hash)) {
+        SMLoc ImmLoc = Tok.getLoc();
+        Operands.push_back(std::make_unique<MCS51Operand>(ImmLoc, "#"));
+        Parser.Lex();
+        const MCExpr *Expr = nullptr;
+        if (Parser.parseExpression(Expr))
+          return true;
+        Operands.push_back(std::make_unique<MCS51Operand>(ImmLoc, Expr));
         continue;
       }
       MCRegister Reg = Tok.is(AsmToken::Identifier)
