@@ -27,8 +27,13 @@ static DecodeStatus DecodeImm16(MCInst &Inst, unsigned Imm, uint64_t,
 
 static DecodeStatus DecodeRel8(MCInst &Inst, unsigned Imm, uint64_t Address,
                                const MCDisassembler *) {
-  Inst.addOperand(MCOperand::createImm(
-      static_cast<int64_t>(Address + 2 + static_cast<int8_t>(Imm))));
+  unsigned Size = Inst.getOpcode() == MCS51::JB ||
+                          Inst.getOpcode() == MCS51::JNB ||
+                          Inst.getOpcode() == MCS51::JBC
+                      ? 3
+                      : 2;
+  Inst.addOperand(MCOperand::createImm(static_cast<int64_t>(
+      Address + Size + static_cast<int8_t>(Imm))));
   return MCDisassembler::Success;
 }
 
