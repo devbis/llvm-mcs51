@@ -416,7 +416,7 @@ def LJMP : MCS51Abs16Inst<0x02, "ljmp", MCS51Addr16> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
 let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
-    Uses = [SP, R7, R6, R5, R4], isCall = 1 in
+    Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
 def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
 }
