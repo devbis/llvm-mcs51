@@ -67,6 +67,12 @@
         anl a, 0x20
         orl a, 0x20
         xrl a, 0x20
+        add a, @r0
+        addc a, @r1
+        subb a, @r0
+        anl a, @r1
+        orl a, @r0
+        xrl a, @r1
         anl 0x20, #0x12
         orl 0x20, #0x12
         xrl 0x20, #0x12
@@ -132,6 +138,12 @@
 # ASM: anl a, 32{{.*}}encoding: [0x55,0x20]
 # ASM: orl a, 32{{.*}}encoding: [0x45,0x20]
 # ASM: xrl a, 32{{.*}}encoding: [0x65,0x20]
+# ASM: add a, @r0{{.*}}encoding: [0x26]
+# ASM: addc a, @r1{{.*}}encoding: [0x37]
+# ASM: subb a, @r0{{.*}}encoding: [0x96]
+# ASM: anl a, @r1{{.*}}encoding: [0x57]
+# ASM: orl a, @r0{{.*}}encoding: [0x46]
+# ASM: xrl a, @r1{{.*}}encoding: [0x67]
 # ASM: anl 32, #18{{.*}}encoding: [0x53,0x20,0x12]
 # ASM: orl 32, #18{{.*}}encoding: [0x43,0x20,0x12]
 # ASM: xrl 32, #18{{.*}}encoding: [0x63,0x20,0x12]
@@ -196,6 +208,12 @@
 # DIS: anl a, 32
 # DIS: orl a, 32
 # DIS: xrl a, 32
+# DIS: add a, @r0
+# DIS: addc a, @r1
+# DIS: subb a, @r0
+# DIS: anl a, @r1
+# DIS: orl a, @r0
+# DIS: xrl a, @r1
 # DIS: anl 32, #18
 # DIS: orl 32, #18
 # DIS: xrl 32, #18
