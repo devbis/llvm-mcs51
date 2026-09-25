@@ -124,6 +124,16 @@ class MCS51AsmParser final : public MCTargetAsmParser {
         Operands.push_back(std::make_unique<MCS51Operand>(ImmLoc, Expr));
         continue;
       }
+      if (Tok.is(AsmToken::Slash)) {
+        SMLoc SlashLoc = Tok.getLoc();
+        Operands.push_back(std::make_unique<MCS51Operand>(SlashLoc, "/"));
+        Parser.Lex();
+        const MCExpr *Expr = nullptr;
+        if (Parser.parseExpression(Expr))
+          return true;
+        Operands.push_back(std::make_unique<MCS51Operand>(SlashLoc, Expr));
+        continue;
+      }
       MCRegister Reg = Tok.is(AsmToken::Identifier)
                            ? getRegister(Tok.getString())
                            : MCRegister();

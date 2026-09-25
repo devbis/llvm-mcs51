@@ -110,6 +110,15 @@ public:
     case 0x60: // JZ rel
     case 0x70: // JNZ rel
     case 0x80: // SJMP rel
+    case 0x82: // ANL C,bit
+    case 0x92: // MOV bit,C
+    case 0xA0: // ORL C,/bit
+    case 0xA2: // MOV C,bit
+    case 0xB0: // ANL C,/bit
+    case 0xB2: // CPL bit
+    case 0xC2: // CLR bit
+    case 0xD2: // SETB bit
+    case 0x72: // ORL C,bit
     case 0xE5: // MOV A,direct
     case 0xF5: // MOV direct,A
     case 0x24: // ADD A,#data
