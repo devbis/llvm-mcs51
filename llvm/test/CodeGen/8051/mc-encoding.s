@@ -37,6 +37,8 @@
         mov @r1, #0x5a
         inc @r0
         inc @r1
+        dec @r0
+        dec @r1
         mov c, 0x20
         mov 0x20, c
         clr 0x20
@@ -83,6 +85,9 @@
         mov @r1, 0x20
         mov 0x20, @r0
         mov 0x20, @r1
+        anl 0x20, a
+        orl 0x20, a
+        xrl 0x20, a
         ret
         reti
 
@@ -121,6 +126,8 @@
 # ASM: mov @r1, #90{{.*}}encoding: [0x77,0x5a]
 # ASM: inc @r0{{.*}}encoding: [0x06]
 # ASM: inc @r1{{.*}}encoding: [0x07]
+# ASM: dec @r0{{.*}}encoding: [0x16]
+# ASM: dec @r1{{.*}}encoding: [0x17]
 # ASM: mov c, 32{{.*}}encoding: [0xa2,0x20]
 # ASM: mov 32, c{{.*}}encoding: [0x92,0x20]
 # ASM: clr 32{{.*}}encoding: [0xc2,0x20]
@@ -161,6 +168,9 @@
 # ASM: mov @r1, 32{{.*}}encoding: [0xa7,0x20]
 # ASM: mov 32, @r0{{.*}}encoding: [0x86,0x20]
 # ASM: mov 32, @r1{{.*}}encoding: [0x87,0x20]
+# ASM: anl 32, a{{.*}}encoding: [0x52,0x20]
+# ASM: orl 32, a{{.*}}encoding: [0x42,0x20]
+# ASM: xrl 32, a{{.*}}encoding: [0x62,0x20]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -198,6 +208,8 @@
 # DIS: mov @r1, #90
 # DIS: inc @r0
 # DIS: inc @r1
+# DIS: dec @r0
+# DIS: dec @r1
 # DIS: mov c, 32
 # DIS: mov 32, c
 # DIS: clr 32
@@ -238,5 +250,8 @@
 # DIS: mov @r1, 32
 # DIS: mov 32, @r0
 # DIS: mov 32, @r1
+# DIS: anl 32, a
+# DIS: orl 32, a
+# DIS: xrl 32, a
 # DIS: ret
 # DIS: reti

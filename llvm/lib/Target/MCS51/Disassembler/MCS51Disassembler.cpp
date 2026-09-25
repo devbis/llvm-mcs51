@@ -144,6 +144,9 @@ public:
     case 0x94: // SUBB A,#data
     case 0xC0: // PUSH direct
     case 0xD0: // POP direct
+    case 0x52: // ANL direct,A
+    case 0x42: // ORL direct,A
+    case 0x62: // XRL direct,A
     case 0x78: // MOV R0-R7,#data
     case 0x79:
     case 0x7a:
