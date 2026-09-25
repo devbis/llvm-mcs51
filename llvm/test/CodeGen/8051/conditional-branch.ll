@@ -15,9 +15,33 @@ no:
   ret i8 2
 }
 
+define i8 @choose_const(i8 %value) {
+entry:
+  %test = icmp ne i8 %value, 5
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
+define i8 @choose_pair(i8 %lhs, i8 %rhs) {
+entry:
+  %test = icmp eq i8 %lhs, %rhs
+  br i1 %test, label %yes, label %no
+
+yes:
+  ret i8 1
+
+no:
+  ret i8 2
+}
+
 ; CHECK-LABEL: choose:
 ; CHECK: mov a, r7
-; CHECK: jz
+; CHECK: j{{n?z}}
 ; CHECK: ljmp
 ; CHECK: mov a, #1
 ; CHECK: ret
@@ -35,3 +59,13 @@ no:
 ; DIS: mov a, r7
 ; DIS: jz
 ; DIS: ljmp
+
+; CHECK-LABEL: choose_const:
+; CHECK: mov a, r7
+; CHECK: xrl a, #5
+; CHECK: j{{n?z}}
+
+; CHECK-LABEL: choose_pair:
+; CHECK: mov a, r7
+; CHECK: xrl a, r6
+; CHECK: j{{n?z}}

@@ -42,13 +42,13 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   SDValue LHS = Op.getOperand(2);
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
-  auto *Zero = dyn_cast<ConstantSDNode>(RHS);
-  if (!Zero || !Zero->isZero() || LHS.getValueType() != MVT::i8 ||
+  if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8 ||
       (CC != ISD::SETEQ && CC != ISD::SETNE))
     report_fatal_error("unsupported MCS-51 conditional branch");
 
   unsigned Opcode = CC == ISD::SETEQ ? MCS51ISD::BR_EQ : MCS51ISD::BR_NE;
-  return DAG.getNode(Opcode, DL, MVT::Other, Op.getOperand(0), LHS, Dest);
+  return DAG.getNode(Opcode, DL, MVT::Other, Op.getOperand(0), LHS, RHS,
+                     Dest);
 }
 
 SDValue MCS51TargetLowering::LowerFormalArguments(
@@ -189,12 +189,22 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::BR_EQ8 || MI.getOpcode() == MCS51::BR_NE8) {
+  if (MI.getOpcode() == MCS51::BR_EQ8ri ||
+      MI.getOpcode() == MCS51::BR_EQ8rr ||
+      MI.getOpcode() == MCS51::BR_NE8ri ||
+      MI.getOpcode() == MCS51::BR_NE8rr) {
     Register LHS = MI.getOperand(0).getReg();
-    MachineBasicBlock *Target = MI.getOperand(1).getMBB();
-    unsigned BranchOpcode = MI.getOpcode() == MCS51::BR_EQ8 ? MCS51::JZ
-                                                            : MCS51::JNZ;
+    const MachineOperand &RHS = MI.getOperand(1);
+    MachineBasicBlock *Target = MI.getOperand(2).getMBB();
+    bool IsEqual = MI.getOpcode() == MCS51::BR_EQ8ri ||
+                   MI.getOpcode() == MCS51::BR_EQ8rr;
+    unsigned BranchOpcode = IsEqual ? MCS51::JZ : MCS51::JNZ;
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    if (RHS.isImm())
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(RHS.getImm());
+    else
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_RN)).addReg(RHS.getReg());
     BuildMI(*MBB, MII, DL, TII.get(BranchOpcode)).addMBB(Target);
     MI.eraseFromParent();
     return MBB;
