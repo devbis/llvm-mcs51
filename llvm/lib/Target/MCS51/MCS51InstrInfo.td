@@ -27,7 +27,7 @@ def SWAP_A : MCS51Inst<0xC4, "swap a">;
 def DA_A : MCS51Inst<0xD4, "da a">;
 def CLR_A : MCS51Inst<0xE4, "clr a">;
 def CPL_A : MCS51Inst<0xF4, "cpl a">;
-def CLR_C : MCS51Inst<0xC3, "clr c">;
+def CLR_C : MCS51Inst<0xC3, "clr c"> { let Defs = [C]; }
 def CPL_C : MCS51Inst<0xB3, "cpl c">;
 def SETB_C : MCS51Inst<0xD3, "setb c">;
 def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr">;
@@ -89,6 +89,9 @@ def MOV_A_IMM : MCS51AccImmInst<0x74, "mov"> {
 }
 def ADD_A_IMM : MCS51AccImmInst<0x24, "add"> {
   let Defs = [A]; let Uses = [A];
+}
+def SUBB_A_IMM : MCS51AccImmInst<0x94, "subb"> {
+  let Defs = [A, C]; let Uses = [A, C];
 }
 def ANL_A_IMM : MCS51AccImmInst<0x54, "anl"> {
   let Defs = [A]; let Uses = [A];
@@ -242,7 +245,9 @@ def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,"> { let Defs = [A]; let Uses = [A];
 def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,"> { let Defs = [A]; let Uses = [A]; }
 def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,"> { let Defs = [A]; let Uses = [A]; }
 def ADDC_A_RN : MCS51RnInst<0b00111, "addc a,">;
-def SUBB_A_RN : MCS51RnInst<0b10001, "subb a,">;
+def SUBB_A_RN : MCS51RnInst<0b10011, "subb a,"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
 def MOV_RN_A  : MCS51RnDefInst<0b11111, "mov">;
 def INC_RN : MCS51RnInst<0b00001, "inc">;
 def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
@@ -282,7 +287,9 @@ def ADD8rr : MCS51ALUPseudoRR<add>;
 def AND8rr : MCS51ALUPseudoRR<and>;
 def OR8rr  : MCS51ALUPseudoRR<or>;
 def XOR8rr : MCS51ALUPseudoRR<xor>;
+def SUB8rr : MCS51ALUPseudoRR<sub>;
 def ADD8ri : MCS51ALUPseudoRI<add>;
 def AND8ri : MCS51ALUPseudoRI<and>;
 def OR8ri  : MCS51ALUPseudoRI<or>;
 def XOR8ri : MCS51ALUPseudoRI<xor>;
+def SUB8ri : MCS51ALUPseudoRI<sub>;

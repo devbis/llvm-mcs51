@@ -14,6 +14,15 @@ unsigned char add_values(unsigned char lhs, unsigned char rhs) {
   return lhs + rhs;
 }
 
+// CHECK-LABEL: subtract_values:
+// CHECK: mov a, r7
+// CHECK: clr c
+// CHECK: subb a, r6
+// CHECK: ret
+unsigned char subtract_values(unsigned char lhs, unsigned char rhs) {
+  return lhs - rhs;
+}
+
 // CHECK-LABEL: mask_low:
 // CHECK: mov a, r7
 // CHECK: anl a, #15
