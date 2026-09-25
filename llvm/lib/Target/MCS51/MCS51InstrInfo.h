@@ -15,6 +15,10 @@ class MCS51InstrInfo final : public MCS51GenInstrInfo {
 public:
   explicit MCS51InstrInfo(const MCS51Subtarget &STI);
   const MCS51RegisterInfo &getRegisterInfo() const { return RI; }
+  void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+                   const DebugLoc &DL, Register DestReg, Register SrcReg,
+                   bool KillSrc, bool RenamableDest = false,
+                   bool RenamableSrc = false) const override;
 
 private:
   const MCS51RegisterInfo RI;
