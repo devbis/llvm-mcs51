@@ -5,6 +5,8 @@
 
 @sfr_port = external addrspace(7) global i8
 @data_byte = external addrspace(1) global i8
+@sfr_word = external addrspace(7) global i16
+@data_word = external addrspace(1) global i16
 
 define i8 @read_xdata(i8 %address) {
 entry:
@@ -99,6 +101,18 @@ entry:
   ret i8 %value
 }
 
+define i16 @read_data_word() {
+entry:
+  %value = load i16, ptr addrspace(1) @data_word, align 1
+  ret i16 %value
+}
+
+define void @write_sfr_word() {
+entry:
+  store i16 4660, ptr addrspace(7) @sfr_word, align 1
+  ret void
+}
+
 ; CHECK-LABEL: read_xdata:
 ; CHECK: mov 131, #0
 ; CHECK: mov a, r7
@@ -179,6 +193,29 @@ entry:
 ; CHECK: mov a, data_byte
 ; CHECK: ret
 
+; CHECK-LABEL: read_data_word:
+; CHECK: mov a, data_word
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, data_word+1
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov 131, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov 130, a
+; CHECK: ret
+
+; CHECK-LABEL: write_sfr_word:
+; CHECK: mov dptr, #4660
+; CHECK: mov a, 130
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, 131
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov sfr_word, a
+; CHECK: mov a, r{{[0-7]}}
+; CHECK: mov sfr_word+1, a
+; CHECK: ret
+
 ; DIS-LABEL: <read_idata>:
 ; DIS: mov a, @r0
 ; DIS-LABEL: <write_idata>:
@@ -202,3 +239,7 @@ entry:
 
 ; RELOC: R_8051_8 sfr_port 0x0
 ; RELOC: R_8051_8 data_byte 0x0
+; RELOC: R_8051_8 data_word 0x0
+; RELOC: R_8051_8 data_word 0x1
+; RELOC: R_8051_8 sfr_word 0x0
+; RELOC: R_8051_8 sfr_word 0x1
