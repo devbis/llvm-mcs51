@@ -93,7 +93,8 @@ public:
     }
     uint8_t Opcode = Bytes[0];
     if (Opcode == 0x02 || Opcode == 0x12 || Opcode == 0x10 || Opcode == 0x20 ||
-        Opcode == 0x30 || Opcode == 0x75 || Opcode == 0x85 ||
+        Opcode == 0x30 || Opcode == 0x43 || Opcode == 0x53 ||
+        Opcode == 0x63 || Opcode == 0x75 || Opcode == 0x85 ||
         Opcode == 0x90 || (Opcode >= 0xB4 && Opcode <= 0xBF) ||
         Opcode == 0xD5) {
       // Long branches, bit branches, and three-byte MOV instructions.
@@ -127,6 +128,12 @@ public:
     case 0xF5: // MOV direct,A
     case 0xC5: // XCH A,direct
     case 0x24: // ADD A,#data
+    case 0x25: // ADD A,direct
+    case 0x35: // ADDC A,direct
+    case 0x45: // ORL A,direct
+    case 0x55: // ANL A,direct
+    case 0x65: // XRL A,direct
+    case 0x95: // SUBB A,direct
     case 0x34: // ADDC A,#data
     case 0x44: // ORL A,#data
     case 0x54: // ANL A,#data
