@@ -39,6 +39,12 @@ def MOVX_AR1 : MCS51Inst<0xE3, "movx a, @r1">;
 def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a">;
 def MOVX_R0A : MCS51Inst<0xF2, "movx @r0, a">;
 def MOVX_R1A : MCS51Inst<0xF3, "movx @r1, a">;
+def MOV_A_R0_IND : MCS51Inst<0xE6, "mov a, @r0">;
+def MOV_A_R1_IND : MCS51Inst<0xE7, "mov a, @r1">;
+def MOV_R0_IND_A : MCS51Inst<0xF6, "mov @r0, a">;
+def MOV_R1_IND_A : MCS51Inst<0xF7, "mov @r1, a">;
+def INC_R0_IND : MCS51Inst<0x06, "inc @r0">;
+def INC_R1_IND : MCS51Inst<0x07, "inc @r1">;
 def RET  : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
   let isTerminator = 1;
@@ -149,10 +155,25 @@ class MCS51DirectInst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{15-8} = addr;
 }
 
+class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$imm);
+  let AsmString = mnemonic # " #$imm";
+  let Size = 2;
+  let hasSideEffects = 1;
+  bits<8> imm;
+  bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = imm;
+}
+
 def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov">;
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
 def MOV_DIRECT_IMM : MCS51DirectImmInst<0x75, "mov">;
 def INC_DIRECT : MCS51DirectInst<0x05, "inc">;
+def MOV_R0_IND_IMM : MCS51IndirectImmInst<0x76, "mov @r0,">;
+def MOV_R1_IND_IMM : MCS51IndirectImmInst<0x77, "mov @r1,">;
 
 class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";

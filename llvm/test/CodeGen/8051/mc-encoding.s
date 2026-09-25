@@ -22,6 +22,14 @@
         mov 0x90, a
         mov 0x90, #0x5a
         inc 0x90
+        mov a, @r0
+        mov a, @r1
+        mov @r0, a
+        mov @r1, a
+        mov @r0, #0x5a
+        mov @r1, #0x5a
+        inc @r0
+        inc @r1
         ret
         reti
 
@@ -45,6 +53,14 @@
 # ASM: mov 144, a{{.*}}encoding: [0xf5,0x90]
 # ASM: mov 144, #90{{.*}}encoding: [0x75,0x90,0x5a]
 # ASM: inc 144{{.*}}encoding: [0x05,0x90]
+# ASM: mov a, @r0{{.*}}encoding: [0xe6]
+# ASM: mov a, @r1{{.*}}encoding: [0xe7]
+# ASM: mov @r0, a{{.*}}encoding: [0xf6]
+# ASM: mov @r1, a{{.*}}encoding: [0xf7]
+# ASM: mov @r0, #90{{.*}}encoding: [0x76,0x5a]
+# ASM: mov @r1, #90{{.*}}encoding: [0x77,0x5a]
+# ASM: inc @r0{{.*}}encoding: [0x06]
+# ASM: inc @r1{{.*}}encoding: [0x07]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -67,5 +83,13 @@
 # DIS: mov 144, a
 # DIS: mov 144, #90
 # DIS: inc 144
+# DIS: mov a, @r0
+# DIS: mov a, @r1
+# DIS: mov @r0, a
+# DIS: mov @r1, a
+# DIS: mov @r0, #90
+# DIS: mov @r1, #90
+# DIS: inc @r0
+# DIS: inc @r1
 # DIS: ret
 # DIS: reti
