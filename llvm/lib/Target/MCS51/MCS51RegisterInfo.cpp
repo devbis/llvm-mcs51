@@ -61,6 +61,28 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         .addReg(MCS51::R1, RegState::Define);
   };
 
+  if (MI->getOpcode() == MCS51::LOAD_FRAME8_INDEX ||
+      MI->getOpcode() == MCS51::STORE_FRAME8_INDEX) {
+    Register Src = MI->getOpcode() == MCS51::STORE_FRAME8_INDEX
+                       ? MI->getOperand(FIOperandNum + 3).getReg()
+                       : Register();
+    EmitAddress();
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x82);
+    BuildMI(MBB, I, DL, TII.get(MCS51::ADD_A_RN)).addReg(MCS51::R1);
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R1, RegState::Define);
+    if (MI->getOpcode() == MCS51::LOAD_FRAME8_INDEX) {
+      Register Dst = MI->getOperand(0).getReg();
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
+    } else {
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
+    }
+    MI->eraseFromParent();
+    return true;
+  }
+
   if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
       MI->getOpcode() == MCS51::LOAD_FRAME8 ||
       MI->getOpcode() == MCS51::SPILL_LOAD16) {
