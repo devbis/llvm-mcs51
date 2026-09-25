@@ -55,6 +55,38 @@ def MOVC_APC : MCS51Inst<0x83, "movc a, @a+pc">;
 def MOVX_ADPTR : MCS51Inst<0xE0, "movx a, @dptr"> {
   let Defs = [A]; let Uses = [DPTR];
 }
+class MCS51IndirectLoadInst<bits<8> opcode, string mnemonic>
+    : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Indirect8:$ri);
+  let AsmString = mnemonic # " @$ri";
+  let Size = 1;
+  let Defs = [A];
+  let mayLoad = 1;
+  bits<1> ri;
+  bits<8> Inst;
+  let Inst{7-1} = opcode{7-1};
+  let Inst{0} = ri;
+}
+class MCS51IndirectStoreInst<bits<8> opcode, string mnemonic>
+    : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Indirect8:$ri);
+  let AsmString = mnemonic # " @$ri, a";
+  let Size = 1;
+  let Uses = [A];
+  let mayStore = 1;
+  bits<1> ri;
+  bits<8> Inst;
+  let Inst{7-1} = opcode{7-1};
+  let Inst{0} = ri;
+}
+def MOV_A_IND_RI : MCS51IndirectLoadInst<0xE6, "mov a,">;
+def MOV_IND_RI_A : MCS51IndirectStoreInst<0xF6, "mov">;
+def MOVX_A_IND_RI : MCS51IndirectLoadInst<0xE2, "movx a,">;
+def MOVX_IND_RI_A : MCS51IndirectStoreInst<0xF2, "movx">;
 def MOVX_AR0 : MCS51Inst<0xE2, "movx a, @r0">;
 def MOVX_AR1 : MCS51Inst<0xE3, "movx a, @r1">;
 def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a"> {
@@ -232,6 +264,26 @@ def STOREX8 : Instruction {
   let usesCustomInserter = 1;
   let mayStore = 1;
 }
+
+class MCS51IndirectMemPseudo<bits<1> IsLoad> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = !if(IsLoad, (outs MCS51GPR8:$dst), (outs));
+  let InOperandList = !if(IsLoad,
+                          (ins MCS51Indirect8:$addr),
+                          (ins MCS51Indirect8:$addr, MCS51GPR8:$src));
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = IsLoad;
+  let mayStore = !not(IsLoad);
+}
+
+def LOADI8 : MCS51IndirectMemPseudo<1>;
+def STOREI8 : MCS51IndirectMemPseudo<0>;
+def LOADP8 : MCS51IndirectMemPseudo<1>;
+def STOREP8 : MCS51IndirectMemPseudo<0>;
 
 class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
     : Instruction {

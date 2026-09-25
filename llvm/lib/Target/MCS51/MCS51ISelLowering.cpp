@@ -213,6 +213,29 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADI8 || MI.getOpcode() == MCS51::LOADP8) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register Addr = MI.getOperand(1).getReg();
+    unsigned LoadOpcode = MI.getOpcode() == MCS51::LOADI8
+                              ? MCS51::MOV_A_IND_RI
+                              : MCS51::MOVX_A_IND_RI;
+    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREI8 || MI.getOpcode() == MCS51::STOREP8) {
+    Register Addr = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    unsigned StoreOpcode = MI.getOpcode() == MCS51::STOREI8
+                               ? MCS51::MOV_IND_RI_A
+                               : MCS51::MOVX_IND_RI_A;
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::BRCOND8) {
     Register Cond = MI.getOperand(0).getReg();
     MachineBasicBlock *Target = MI.getOperand(1).getMBB();
