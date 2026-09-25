@@ -56,6 +56,68 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
   return Chain;
 }
 
+SDValue MCS51TargetLowering::LowerCall(
+    CallLoweringInfo &CLI, SmallVectorImpl<SDValue> &InVals) const {
+  SelectionDAG &DAG = CLI.DAG;
+  const SDLoc &DL = CLI.DL;
+  MachineFunction &MF = DAG.getMachineFunction();
+  CallingConv::ID CallConv = CLI.CallConv;
+  bool IsVarArg = CLI.IsVarArg;
+  CLI.IsTailCall = false;
+
+  SmallVector<CCValAssign, 8> ArgLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_MCS51);
+  if (CCInfo.getStackSize() != 0)
+    report_fatal_error("MCS-51 stack arguments are not implemented");
+
+  SDValue Chain = CLI.Chain;
+  SDValue InGlue;
+  SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
+  for (unsigned I = 0; I < ArgLocs.size(); ++I) {
+    const CCValAssign &VA = ArgLocs[I];
+    if (!VA.isRegLoc() || VA.getLocVT() != MVT::i8 ||
+        CLI.OutVals[I].getValueType() != MVT::i8)
+      report_fatal_error("unsupported MCS-51 call argument");
+    RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+  }
+
+  for (const auto &[Reg, Value] : RegsToPass) {
+    Chain = DAG.getCopyToReg(Chain, DL, Reg, Value, InGlue);
+    InGlue = Chain.getValue(1);
+  }
+
+  SDValue Callee = CLI.Callee;
+  if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee))
+    Callee = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16);
+  else if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Callee))
+    Callee = DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i16);
+  else
+    report_fatal_error("unsupported MCS-51 indirect call");
+
+  SmallVector<SDValue, 12> Ops;
+  Ops.push_back(Chain);
+  Ops.push_back(Callee);
+  for (const auto &[Reg, Value] : RegsToPass)
+    Ops.push_back(DAG.getRegister(Reg, Value.getValueType()));
+  if (InGlue.getNode())
+    Ops.push_back(InGlue);
+  SDVTList CallVTs = DAG.getVTList(MVT::Other, MVT::Glue);
+  Chain = DAG.getNode(MCS51ISD::CALL, DL, CallVTs, Ops);
+  InGlue = Chain.getValue(1);
+
+  SmallVector<CCValAssign, 2> RetLocs;
+  CCState RetInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
+  RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_MCS51);
+  for (const CCValAssign &VA : RetLocs) {
+    Chain = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT(),
+                               InGlue);
+    InGlue = Chain.getValue(2);
+    InVals.push_back(Chain.getValue(0));
+  }
+  return Chain;
+}
+
 bool MCS51TargetLowering::CanLowerReturn(
     CallingConv::ID, MachineFunction &, bool,
     const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &,

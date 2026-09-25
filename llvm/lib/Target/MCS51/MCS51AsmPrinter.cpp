@@ -33,7 +33,23 @@ public:
       else if (MO.isMBB())
         Inst.addOperand(MCOperand::createExpr(
             MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), OutContext)));
-      else
+      else if (MO.isGlobal()) {
+        const MCExpr *Expr =
+            MCSymbolRefExpr::create(getSymbol(MO.getGlobal()), OutContext);
+        if (MO.getOffset())
+          Expr = MCBinaryExpr::createAdd(
+              Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
+              OutContext);
+        Inst.addOperand(MCOperand::createExpr(Expr));
+      } else if (MO.isSymbol()) {
+        const MCExpr *Expr = MCSymbolRefExpr::create(
+            GetExternalSymbolSymbol(MO.getSymbolName()), OutContext);
+        if (MO.getOffset())
+          Expr = MCBinaryExpr::createAdd(
+              Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
+              OutContext);
+        Inst.addOperand(MCOperand::createExpr(Expr));
+      } else
         report_fatal_error("unsupported MCS-51 machine operand in AsmPrinter");
     }
     EmitToStreamer(*OutStreamer, Inst);
