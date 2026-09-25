@@ -127,12 +127,21 @@ class MCS51AsmParser final : public MCTargetAsmParser {
       MCRegister Reg = Tok.is(AsmToken::Identifier)
                            ? getRegister(Tok.getString())
                            : MCRegister();
-      if (Reg)
+      if (Reg) {
         Operands.push_back(std::make_unique<MCS51Operand>(Tok.getLoc(), Reg));
-      else
+        Parser.Lex();
+      } else if (Tok.is(AsmToken::Identifier) &&
+                 Tok.getString().equals_insensitive("ab")) {
         Operands.push_back(
             std::make_unique<MCS51Operand>(Tok.getLoc(), Tok.getString()));
-      Parser.Lex();
+        Parser.Lex();
+      } else {
+        SMLoc ImmLoc = Tok.getLoc();
+        const MCExpr *Expr = nullptr;
+        if (Parser.parseExpression(Expr))
+          return true;
+        Operands.push_back(std::make_unique<MCS51Operand>(ImmLoc, Expr));
+      }
     }
     if (Parser.getTok().is(AsmToken::EndOfStatement))
       Parser.Lex();
