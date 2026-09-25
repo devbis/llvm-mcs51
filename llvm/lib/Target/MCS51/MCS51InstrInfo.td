@@ -18,9 +18,16 @@ def SDT_MCS51LoadStack8 : SDTypeProfile<1, 1, [SDTCisVT<0, i8>,
                                                SDTCisVT<1, i8>]>;
 def MCS51loadstack8 : SDNode<"MCS51ISD::LOAD_STACK8", SDT_MCS51LoadStack8,
                              [SDNPHasChain]>;
+def SDT_MCS51LoadStack16 : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
+                                                SDTCisVT<1, i8>]>;
+def MCS51loadstack16 : SDNode<"MCS51ISD::LOAD_STACK16", SDT_MCS51LoadStack16,
+                              [SDNPHasChain]>;
 def SDT_MCS51PushArg8 : SDTypeProfile<0, 1, [SDTCisVT<0, i8>]>;
 def MCS51pusharg8 : SDNode<"MCS51ISD::PUSH_ARG8", SDT_MCS51PushArg8,
                            [SDNPHasChain]>;
+def SDT_MCS51PushArg16 : SDTypeProfile<0, 1, [SDTCisVT<0, i16>]>;
+def MCS51pusharg16 : SDNode<"MCS51ISD::PUSH_ARG16", SDT_MCS51PushArg16,
+                            [SDNPHasChain]>;
 def MCS51poparg8 : SDNode<"MCS51ISD::POP_ARG8", SDTNone, [SDNPHasChain]>;
 
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
@@ -476,6 +483,20 @@ def LOADSTACKARG8 : Instruction {
   let Uses = [SP];
 }
 
+def LOADSTACKARG16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51Imm8:$spadjust);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, R0, DPTR];
+  let Uses = [SP];
+}
+
 def PUSHARG8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -487,6 +508,20 @@ def PUSHARG8 : Instruction {
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
   let Defs = [A];
+}
+
+def PUSHARG16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [A, SP];
+  let Uses = [DPTR, SP];
 }
 
 def POPARG8 : Instruction {
