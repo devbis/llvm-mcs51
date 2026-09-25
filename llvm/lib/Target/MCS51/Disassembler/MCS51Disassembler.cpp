@@ -12,6 +12,12 @@ using namespace llvm;
 using namespace llvm::MCD;
 using DecodeStatus = MCDisassembler::DecodeStatus;
 
+static DecodeStatus DecodeImm8(MCInst &Inst, unsigned Imm, uint64_t,
+                               const MCDisassembler *) {
+  Inst.addOperand(MCOperand::createImm(Imm));
+  return MCDisassembler::Success;
+}
+
 #define GET_DISASSEMBLER_TABLE
 #include "MCS51GenDisassemblerTables.inc"
 
@@ -28,9 +34,28 @@ public:
       Size = 0;
       return Fail;
     }
-    Size = 1;
-    return decodeInstruction(DecoderTable8, Inst, Bytes[0], Address, this,
-                             STI);
+    uint8_t Opcode = Bytes[0];
+    switch (Opcode) {
+    case 0x24: // ADD A,#data
+    case 0x34: // ADDC A,#data
+    case 0x44: // ORL A,#data
+    case 0x54: // ANL A,#data
+    case 0x64: // XRL A,#data
+    case 0x74: // MOV A,#data
+    case 0x94: // SUBB A,#data
+      if (Bytes.size() < 2) {
+        Size = 0;
+        return Fail;
+      }
+      Size = 2;
+      return decodeInstruction(DecoderTable16, Inst,
+                               uint64_t(Opcode) | (uint64_t(Bytes[1]) << 8),
+                               Address, this, STI);
+    default:
+      Size = 1;
+      return decodeInstruction(DecoderTable8, Inst, Opcode, Address, this,
+                               STI);
+    }
   }
 };
 } // namespace
