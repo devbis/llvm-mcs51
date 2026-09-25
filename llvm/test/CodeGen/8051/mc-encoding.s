@@ -61,6 +61,15 @@
 .Ldjnz_direct:
         djnz r3, .Ldjnz_rn
 .Ldjnz_rn:
+        add a, 0x20
+        addc a, 0x20
+        subb a, 0x20
+        anl a, 0x20
+        orl a, 0x20
+        xrl a, 0x20
+        anl 0x20, #0x12
+        orl 0x20, #0x12
+        xrl 0x20, #0x12
         ret
         reti
 
@@ -117,6 +126,15 @@
 # ASM: cjne r3, #18, {{.*}}encoding: [0xbb,0x12,{{[^]]+}}]
 # ASM: djnz 32, {{.*}}encoding: [0xd5,0x20,{{[^]]+}}]
 # ASM: djnz r3, {{.*}}encoding: [0xdb,{{[^]]+}}]
+# ASM: add a, 32{{.*}}encoding: [0x25,0x20]
+# ASM: addc a, 32{{.*}}encoding: [0x35,0x20]
+# ASM: subb a, 32{{.*}}encoding: [0x95,0x20]
+# ASM: anl a, 32{{.*}}encoding: [0x55,0x20]
+# ASM: orl a, 32{{.*}}encoding: [0x45,0x20]
+# ASM: xrl a, 32{{.*}}encoding: [0x65,0x20]
+# ASM: anl 32, #18{{.*}}encoding: [0x53,0x20,0x12]
+# ASM: orl 32, #18{{.*}}encoding: [0x43,0x20,0x12]
+# ASM: xrl 32, #18{{.*}}encoding: [0x63,0x20,0x12]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -172,5 +190,14 @@
 # DIS: cjne r3, #18,
 # DIS: djnz 32,
 # DIS: djnz r3,
+# DIS: add a, 32
+# DIS: addc a, 32
+# DIS: subb a, 32
+# DIS: anl a, 32
+# DIS: orl a, 32
+# DIS: xrl a, 32
+# DIS: anl 32, #18
+# DIS: orl 32, #18
+# DIS: xrl 32, #18
 # DIS: ret
 # DIS: reti

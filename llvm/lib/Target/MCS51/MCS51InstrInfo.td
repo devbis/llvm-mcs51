@@ -914,8 +914,29 @@ class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
 
 def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov">;
 def XCH_A_DIRECT : MCS51AccDirectInst<0xC5, "xch">;
+def ADD_A_DIRECT : MCS51AccDirectInst<0x25, "add"> {
+  let Defs = [A]; let Uses = [A];
+}
+def ADDC_A_DIRECT : MCS51AccDirectInst<0x35, "addc"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
+def SUBB_A_DIRECT : MCS51AccDirectInst<0x95, "subb"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
+def ANL_A_DIRECT : MCS51AccDirectInst<0x55, "anl"> {
+  let Defs = [A]; let Uses = [A];
+}
+def ORL_A_DIRECT : MCS51AccDirectInst<0x45, "orl"> {
+  let Defs = [A]; let Uses = [A];
+}
+def XRL_A_DIRECT : MCS51AccDirectInst<0x65, "xrl"> {
+  let Defs = [A]; let Uses = [A];
+}
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
 def MOV_DIRECT_IMM : MCS51DirectImmInst<0x75, "mov">;
+def ANL_DIRECT_IMM : MCS51DirectImmInst<0x53, "anl">;
+def ORL_DIRECT_IMM : MCS51DirectImmInst<0x43, "orl">;
+def XRL_DIRECT_IMM : MCS51DirectImmInst<0x63, "xrl">;
 def PUSH_DIRECT : MCS51DirectInst<0xC0, "push"> {
   let Defs = [SP]; let Uses = [SP];
 }
