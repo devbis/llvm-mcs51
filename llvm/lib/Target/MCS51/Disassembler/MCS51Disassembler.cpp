@@ -77,6 +77,8 @@ public:
     case 0x54: // ANL A,#data
     case 0x64: // XRL A,#data
     case 0x74: // MOV A,#data
+    case 0x76: // MOV @R0,#data
+    case 0x77: // MOV @R1,#data
     case 0x94: // SUBB A,#data
     case 0x78: // MOV R0-R7,#data
     case 0x79:
