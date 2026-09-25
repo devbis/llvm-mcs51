@@ -33,9 +33,9 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   if (MCS51::MCS51GPR8RegClass.contains(DestReg) &&
       MCS51::MCS51GPR8RegClass.contains(SrcReg)) {
-    Opcode = MCS51::MOV_RN_RM;
-    BuildMI(MBB, MI, DL, get(Opcode), DestReg)
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
         .addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
     return;
   }
   llvm_unreachable("unsupported MCS-51 physical register copy");
