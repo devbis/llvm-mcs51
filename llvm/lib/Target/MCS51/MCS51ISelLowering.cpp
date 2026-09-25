@@ -79,14 +79,22 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   Register LHS = MI.getOperand(1).getReg();
   unsigned AccOpcode;
   bool IsImmediate = MI.getOpcode() == MCS51::ADD8ri ||
+                     MI.getOpcode() == MCS51::SUB8ri ||
                      MI.getOpcode() == MCS51::AND8ri ||
                      MI.getOpcode() == MCS51::OR8ri ||
                      MI.getOpcode() == MCS51::XOR8ri;
+  bool IsSubtraction = MI.getOpcode() == MCS51::SUB8rr ||
+                       MI.getOpcode() == MCS51::SUB8ri;
 
   BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+  if (IsSubtraction)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
   switch (MI.getOpcode()) {
   case MCS51::ADD8rr:
     AccOpcode = MCS51::ADD_A_RN;
+    break;
+  case MCS51::SUB8rr:
+    AccOpcode = MCS51::SUBB_A_RN;
     break;
   case MCS51::AND8rr:
     AccOpcode = MCS51::ANL_A_RN;
@@ -99,6 +107,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     break;
   case MCS51::ADD8ri:
     AccOpcode = MCS51::ADD_A_IMM;
+    break;
+  case MCS51::SUB8ri:
+    AccOpcode = MCS51::SUBB_A_IMM;
     break;
   case MCS51::AND8ri:
     AccOpcode = MCS51::ANL_A_IMM;
