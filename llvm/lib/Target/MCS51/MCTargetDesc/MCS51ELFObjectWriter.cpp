@@ -15,8 +15,11 @@ public:
 protected:
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &,
                         bool IsPCRel) const override {
-    if (IsPCRel)
-      llvm_unreachable("PC-relative MCS-51 relocations are not implemented");
+    if (IsPCRel) {
+      if (Fixup.getKind() == MCS51::fixup_pcrel8)
+        return ELF::R_8051_PCREL8;
+      llvm_unreachable("unsupported PC-relative MCS-51 relocation");
+    }
     switch (Fixup.getKind()) {
     case MCS51::fixup_8:
     case FK_Data_1:

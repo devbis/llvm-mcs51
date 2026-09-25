@@ -16,6 +16,7 @@ namespace {
 class MCS51MCCodeEmitter final : public MCCodeEmitter {
   const MCInstrInfo &MII;
   const MCRegisterInfo &MRI;
+  MCContext &Ctx;
 
   uint32_t getMachineOpValue(const MCInst &, const MCOperand &Op,
                              SmallVectorImpl<MCFixup> &,
@@ -67,14 +68,31 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     report_fatal_error("unsupported MCS-51 address operand");
   }
 
+  uint32_t getRel8OpValue(const MCInst &MI, unsigned OpNo,
+                          SmallVectorImpl<MCFixup> &Fixups,
+                          const MCSubtargetInfo &) const {
+    const MCOperand &Op = MI.getOperand(OpNo);
+    if (Op.isImm())
+      return static_cast<uint8_t>(Op.getImm());
+    if (Op.isExpr()) {
+      unsigned Offset = OpNo == 0 ? 1 : 2;
+      const MCExpr *Expr = MCBinaryExpr::createSub(
+          Op.getExpr(), MCConstantExpr::create(1, Ctx), Ctx);
+      Fixups.push_back(
+          MCFixup::create(Offset, Expr, MCS51::fixup_pcrel8, true));
+      return 0;
+    }
+    report_fatal_error("unsupported MCS-51 relative branch operand");
+  }
+
   uint64_t getBinaryCodeForInstr(const MCInst &MI,
                                  SmallVectorImpl<MCFixup> &Fixups,
                                  const MCSubtargetInfo &STI) const;
 
 public:
   explicit MCS51MCCodeEmitter(const MCInstrInfo &MII,
-                              const MCRegisterInfo &MRI)
-      : MII(MII), MRI(MRI) {}
+                              const MCRegisterInfo &MRI, MCContext &Ctx)
+      : MII(MII), MRI(MRI), Ctx(Ctx) {}
 
   void encodeInstruction(const MCInst &MI, SmallVectorImpl<char> &Bytes,
                          SmallVectorImpl<MCFixup> &Fixups,
@@ -92,5 +110,5 @@ public:
 
 MCCodeEmitter *llvm::createMCS51MCCodeEmitter(const MCInstrInfo &MII,
                                                MCContext &Ctx) {
-  return new MCS51MCCodeEmitter(MII, *Ctx.getRegisterInfo());
+  return new MCS51MCCodeEmitter(MII, *Ctx.getRegisterInfo(), Ctx);
 }
