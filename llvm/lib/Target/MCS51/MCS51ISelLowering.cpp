@@ -42,11 +42,26 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   SDValue LHS = Op.getOperand(2);
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
-  if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8 ||
-      (CC != ISD::SETEQ && CC != ISD::SETNE))
+  if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8)
     report_fatal_error("unsupported MCS-51 conditional branch");
 
-  unsigned Opcode = CC == ISD::SETEQ ? MCS51ISD::BR_EQ : MCS51ISD::BR_NE;
+  unsigned Opcode;
+  switch (CC) {
+  case ISD::SETEQ: Opcode = MCS51ISD::BR_EQ; break;
+  case ISD::SETNE: Opcode = MCS51ISD::BR_NE; break;
+  case ISD::SETULT: Opcode = MCS51ISD::BR_ULT; break;
+  case ISD::SETUGE: Opcode = MCS51ISD::BR_UGE; break;
+  case ISD::SETUGT:
+    Opcode = MCS51ISD::BR_ULT;
+    std::swap(LHS, RHS);
+    break;
+  case ISD::SETULE:
+    Opcode = MCS51ISD::BR_UGE;
+    std::swap(LHS, RHS);
+    break;
+  default:
+    report_fatal_error("unsupported MCS-51 conditional branch predicate");
+  }
   return DAG.getNode(Opcode, DL, MVT::Other, Op.getOperand(0), LHS, RHS,
                      Dest);
 }
@@ -192,12 +207,34 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::BR_EQ8ri ||
       MI.getOpcode() == MCS51::BR_EQ8rr ||
       MI.getOpcode() == MCS51::BR_NE8ri ||
-      MI.getOpcode() == MCS51::BR_NE8rr) {
+      MI.getOpcode() == MCS51::BR_NE8rr ||
+      MI.getOpcode() == MCS51::BR_ULT8ri ||
+      MI.getOpcode() == MCS51::BR_ULT8rr ||
+      MI.getOpcode() == MCS51::BR_UGE8ri ||
+      MI.getOpcode() == MCS51::BR_UGE8rr) {
     Register LHS = MI.getOperand(0).getReg();
     const MachineOperand &RHS = MI.getOperand(1);
     MachineBasicBlock *Target = MI.getOperand(2).getMBB();
     bool IsEqual = MI.getOpcode() == MCS51::BR_EQ8ri ||
                    MI.getOpcode() == MCS51::BR_EQ8rr;
+    bool IsNotEqual = MI.getOpcode() == MCS51::BR_NE8ri ||
+                      MI.getOpcode() == MCS51::BR_NE8rr;
+    bool IsUnsignedLess = MI.getOpcode() == MCS51::BR_ULT8ri ||
+                          MI.getOpcode() == MCS51::BR_ULT8rr;
+    if (!IsEqual && !IsNotEqual) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      if (RHS.isImm())
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A)
+            .addImm(RHS.getImm());
+      else
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHS.getReg());
+      BuildMI(*MBB, MII, DL,
+              TII.get(IsUnsignedLess ? MCS51::JC : MCS51::JNC))
+          .addMBB(Target);
+      MI.eraseFromParent();
+      return MBB;
+    }
     unsigned BranchOpcode = IsEqual ? MCS51::JZ : MCS51::JNZ;
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
     if (RHS.isImm())
