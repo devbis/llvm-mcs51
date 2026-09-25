@@ -7,6 +7,12 @@ defm : RemapAllTargetPseudoPointerOperands<MCS51PTR>;
 
 def MCS51InstrInfo : InstrInfo;
 
+// CC2530 uses the classic MCS-51 instruction core. Keep it as an explicit
+// CPU choice so drivers and future device-specific scheduling/feature data
+// have a stable target name.
+def : Processor<"generic", NoItineraries, []>;
+def : Processor<"cc2530", NoItineraries, []>;
+
 def MCS51AsmWriter : AsmWriter {
   string AsmWriterClassName = "InstPrinter";
   bit isMCAsmWriter = 1;
