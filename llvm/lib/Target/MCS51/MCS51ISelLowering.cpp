@@ -18,6 +18,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
     : TargetLowering(TM, STI), STI(STI) {
   addRegisterClass(MVT::i8, &MCS51::MCS51GPR8RegClass);
   addRegisterClass(MVT::i16, &MCS51::MCS51PTRRegClass);
+  setOperationAction(ISD::UDIV, MVT::i8, Legal);
+  setOperationAction(ISD::UREM, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
@@ -293,6 +295,19 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_RN)).addReg(RHS);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::UDIV8rr || MI.getOpcode() == MCS51::UREM8rr) {
+    Register RHS = MI.getOperand(2).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_RN)).addReg(RHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::DIV_AB));
+    if (MI.getOpcode() == MCS51::UREM8rr)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
     MI.eraseFromParent();
