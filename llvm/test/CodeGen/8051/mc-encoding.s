@@ -8,6 +8,7 @@
         mul ab
         movx a, @dptr
         mov a, #0x5a
+        mov dptr, #0x1234
         add a, #1
         subb a, #1
         mov a, r3
@@ -42,6 +43,7 @@
 # ASM: mul ab{{.*}}encoding: [0xa4]
 # ASM: movx a, @dptr{{.*}}encoding: [0xe0]
 # ASM: mov a, #90{{.*}}encoding: [0x74,0x5a]
+# ASM: mov dptr, #4660{{.*}}encoding: [0x90,0x34,0x12]
 # ASM: add a, #1{{.*}}encoding: [0x24,0x01]
 # ASM: subb a, #1{{.*}}encoding: [0x94,0x01]
 # ASM: mov a, r3{{.*}}encoding: [0xeb]
@@ -75,6 +77,7 @@
 # DIS: mul ab
 # DIS: movx a, @dptr
 # DIS: mov a, #90
+# DIS: mov dptr, #4660
 # DIS: add a, #1
 # DIS: subb a, #1
 # DIS: mov a, r3

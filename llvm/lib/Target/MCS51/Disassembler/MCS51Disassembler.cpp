@@ -56,6 +56,14 @@ static DecodeStatus DecodeMCS51ARegRegisterClass(
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeMCS51PTRRegisterClass(
+    MCInst &Inst, unsigned RegNo, uint64_t, const MCDisassembler *) {
+  if (RegNo != 0)
+    return MCDisassembler::Fail;
+  Inst.addOperand(MCOperand::createReg(MCS51::DPTR));
+  return MCDisassembler::Success;
+}
+
 #define GET_DISASSEMBLER_TABLE
 #include "MCS51GenDisassemblerTables.inc"
 
@@ -74,7 +82,8 @@ public:
     }
     uint8_t Opcode = Bytes[0];
     if (Opcode == 0x02 || Opcode == 0x12 || Opcode == 0x10 || Opcode == 0x20 ||
-        Opcode == 0x30 || Opcode == 0x75 || Opcode == 0x85) {
+        Opcode == 0x30 || Opcode == 0x75 || Opcode == 0x85 ||
+        Opcode == 0x90) {
       // Long branches, bit branches, and three-byte MOV instructions.
       if (Bytes.size() < 3) {
         Size = 0;
