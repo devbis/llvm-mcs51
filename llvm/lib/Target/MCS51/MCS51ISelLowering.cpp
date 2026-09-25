@@ -2,6 +2,8 @@
 #include "MCS51Subtarget.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -20,12 +22,27 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
 }
 
 SDValue MCS51TargetLowering::LowerFormalArguments(
-    SDValue Chain, CallingConv::ID, bool,
-    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &,
-    SelectionDAG &, SmallVectorImpl<SDValue> &InVals) const {
-  if (!Ins.empty())
-    report_fatal_error("MCS-51 argument lowering is not implemented");
+    SDValue Chain, CallingConv::ID CallConv, bool IsVarArg,
+    const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
+    SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   InVals.clear();
+  SmallVector<CCValAssign, 8> ArgLocs;
+  MachineFunction &MF = DAG.getMachineFunction();
+  CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeFormalArguments(Ins, CC_MCS51);
+
+  for (const CCValAssign &VA : ArgLocs) {
+    if (!VA.isRegLoc())
+      report_fatal_error("MCS-51 stack arguments are not implemented");
+    if (VA.getLocVT() != MVT::i8 || VA.getValVT() != MVT::i8)
+      report_fatal_error("unsupported MCS-51 argument type");
+    Register LiveIn = MF.addLiveIn(VA.getLocReg(),
+                                   &MCS51::MCS51GPR8RegClass);
+    SDValue Value = DAG.getCopyFromReg(Chain, DL, LiveIn, VA.getLocVT());
+    if (VA.getLocInfo() != CCValAssign::Full)
+      report_fatal_error("unsupported MCS-51 argument extension");
+    InVals.push_back(Value);
+  }
   return Chain;
 }
 
