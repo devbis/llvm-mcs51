@@ -20,6 +20,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   addRegisterClass(MVT::i16, &MCS51::MCS51PTRRegClass);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
+  setOperationAction(ISD::BR_CC, MVT::i8, Custom);
   setBooleanContents(ZeroOrOneBooleanContent);
   setStackPointerRegisterToSaveRestore(MCS51::SP);
   computeRegisterProperties(STI.getRegisterInfo());
@@ -29,6 +30,25 @@ EVT MCS51TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
                                             EVT VT) const {
   assert(!VT.isVector() && "MCS-51 does not support vector comparisons");
   return MVT::i8;
+}
+
+SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  if (Op.getOpcode() != ISD::BR_CC)
+    return SDValue();
+
+  SDLoc DL(Op);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+  SDValue LHS = Op.getOperand(2);
+  SDValue RHS = Op.getOperand(3);
+  SDValue Dest = Op.getOperand(4);
+  auto *Zero = dyn_cast<ConstantSDNode>(RHS);
+  if (!Zero || !Zero->isZero() || LHS.getValueType() != MVT::i8 ||
+      (CC != ISD::SETEQ && CC != ISD::SETNE))
+    report_fatal_error("unsupported MCS-51 conditional branch");
+
+  unsigned Opcode = CC == ISD::SETEQ ? MCS51ISD::BR_EQ : MCS51ISD::BR_NE;
+  return DAG.getNode(Opcode, DL, MVT::Other, Op.getOperand(0), LHS, Dest);
 }
 
 SDValue MCS51TargetLowering::LowerFormalArguments(
@@ -161,6 +181,24 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::BRCOND8) {
+    Register Cond = MI.getOperand(0).getReg();
+    MachineBasicBlock *Target = MI.getOperand(1).getMBB();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Cond);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::JNZ)).addMBB(Target);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::BR_EQ8 || MI.getOpcode() == MCS51::BR_NE8) {
+    Register LHS = MI.getOperand(0).getReg();
+    MachineBasicBlock *Target = MI.getOperand(1).getMBB();
+    unsigned BranchOpcode = MI.getOpcode() == MCS51::BR_EQ8 ? MCS51::JZ
+                                                            : MCS51::JNZ;
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL, TII.get(BranchOpcode)).addMBB(Target);
+    MI.eraseFromParent();
+    return MBB;
+  }
   Register Dst = MI.getOperand(0).getReg();
   Register LHS = MI.getOperand(1).getReg();
   if (MI.getOpcode() == MCS51::TRUNC16TO8) {
