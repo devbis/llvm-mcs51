@@ -302,7 +302,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::PUSHARG16) {
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x83);
+        .addImm(0x83)
+        .addReg(MI.getOperand(0).getReg(), RegState::Implicit);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
         .addImm(0xE0)
         .addReg(MCS51::A, RegState::Implicit);
