@@ -241,6 +241,98 @@ def ANL_C_NOTBIT : MCS51BitInst<0xB0, "anl c, /$bitaddr"> { let Defs = [C]; }
 def ORL_C_BIT : MCS51BitInst<0x72, "orl c, $bitaddr"> { let Defs = [C]; }
 def ORL_C_NOTBIT : MCS51BitInst<0xA0, "orl c, /$bitaddr"> { let Defs = [C]; }
 
+def XCH_A_R0_IND : MCS51Inst<0xC6, "xch a, @r0"> { let Defs = [A]; let Uses = [A]; }
+def XCH_A_R1_IND : MCS51Inst<0xC7, "xch a, @r1"> { let Defs = [A]; let Uses = [A]; }
+def XCHD_A_R0_IND : MCS51Inst<0xD6, "xchd a, @r0"> { let Defs = [A]; let Uses = [A]; }
+def XCHD_A_R1_IND : MCS51Inst<0xD7, "xchd a, @r1"> { let Defs = [A]; let Uses = [A]; }
+
+class MCS51DJNZReg<bits<5> opcode> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$rn, MCS51Rel8:$target);
+  let AsmString = "djnz $rn, $target";
+  let Size = 2;
+  let isBranch = 1;
+  let Constraints = "$dst = $rn";
+  bits<3> dst;
+  bits<3> rn;
+  bits<8> target;
+  bits<16> Inst;
+  let Inst{7-3} = opcode;
+  let Inst{2-0} = dst;
+  let Inst{15-8} = target;
+}
+
+def DJNZ_DIRECT : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51Rel8:$target);
+  let AsmString = "djnz $addr, $target";
+  let Size = 3;
+  let isBranch = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+  bits<8> addr;
+  bits<8> target;
+  bits<24> Inst;
+  let Inst{7-0} = 0xD5;
+  let Inst{15-8} = addr;
+  let Inst{23-16} = target;
+}
+
+def DJNZ_RN : MCS51DJNZReg<0b11011>;
+
+def CJNE_A_IMM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$imm, MCS51Rel8:$target);
+  let AsmString = "cjne a, #$imm, $target";
+  let Size = 3;
+  let Defs = [C];
+  let isBranch = 1;
+  bits<8> imm; bits<8> target; bits<24> Inst;
+  let Inst{7-0} = 0xB4; let Inst{15-8} = imm; let Inst{23-16} = target;
+}
+def CJNE_A_DIRECT : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51Rel8:$target);
+  let AsmString = "cjne a, $addr, $target";
+  let Size = 3;
+  let Defs = [C];
+  let isBranch = 1;
+  bits<8> addr; bits<8> target; bits<24> Inst;
+  let Inst{7-0} = 0xB5; let Inst{15-8} = addr; let Inst{23-16} = target;
+}
+class MCS51CJNE_IND<bits<8> opcode, string reg> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$imm, MCS51Rel8:$target);
+  let AsmString = "cjne " # reg # ", #$imm, $target";
+  let Size = 3;
+  let Defs = [C];
+  let isBranch = 1;
+  bits<8> imm; bits<8> target; bits<24> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = imm; let Inst{23-16} = target;
+}
+def CJNE_IND_R0 : MCS51CJNE_IND<0xB6, "@r0">;
+def CJNE_IND_R1 : MCS51CJNE_IND<0xB7, "@r1">;
+class MCS51CJNE_RN<bits<8> opcode> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$rn, MCS51Imm8:$imm,
+                           MCS51Rel8:$target);
+  let AsmString = "cjne $rn, #$imm, $target";
+  let Size = 3;
+  let Defs = [C];
+  let isBranch = 1;
+  bits<3> rn; bits<8> imm; bits<8> target; bits<24> Inst;
+  let Inst{7-3} = opcode{7-3}; let Inst{2-0} = rn;
+  let Inst{15-8} = imm; let Inst{23-16} = target;
+}
+def CJNE_RN : MCS51CJNE_RN<0xB8>;
+
 let isBarrier = 1 in
 def SJMP : MCS51RelBranch<0x80, "sjmp">;
 def JZ : MCS51RelBranch<0x60, "jz"> { let Uses = [A]; }
@@ -821,6 +913,7 @@ class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
 }
 
 def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov">;
+def XCH_A_DIRECT : MCS51AccDirectInst<0xC5, "xch">;
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
 def MOV_DIRECT_IMM : MCS51DirectImmInst<0x75, "mov">;
 def PUSH_DIRECT : MCS51DirectInst<0xC0, "push"> {
@@ -846,6 +939,23 @@ class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let Inst{7-3} = opcode;
   let Inst{2-0} = rn;
 }
+
+class MCS51ExchangeRn : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$src);
+  let AsmString = "xch a, $src";
+  let Size = 1;
+  let hasSideEffects = 1;
+  let Defs = [A];
+  let Uses = [A];
+  let Constraints = "$dst = $src";
+  bits<3> dst;
+  bits<8> Inst;
+  let Inst{7-3} = 0b11001;
+  let Inst{2-0} = dst;
+}
+def XCH_A_RN : MCS51ExchangeRn;
 
 class MCS51RnImmInst<bits<5> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";

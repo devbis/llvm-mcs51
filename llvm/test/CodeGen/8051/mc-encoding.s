@@ -45,6 +45,22 @@
         anl c, /0x20
         orl c, 0x20
         orl c, /0x20
+        xch a, r3
+        xch a, 0x20
+        xch a, @r0
+        xchd a, @r1
+        cjne a, #0x12, .Lcjne_a_imm
+.Lcjne_a_imm:
+        cjne a, 0x20, .Lcjne_a_direct
+.Lcjne_a_direct:
+        cjne @r0, #0x12, .Lcjne_ind
+.Lcjne_ind:
+        cjne r3, #0x12, .Lcjne_rn
+.Lcjne_rn:
+        djnz 0x20, .Ldjnz_direct
+.Ldjnz_direct:
+        djnz r3, .Ldjnz_rn
+.Ldjnz_rn:
         ret
         reti
 
@@ -91,6 +107,16 @@
 # ASM: anl c, /32{{.*}}encoding: [0xb0,0x20]
 # ASM: orl c, 32{{.*}}encoding: [0x72,0x20]
 # ASM: orl c, /32{{.*}}encoding: [0xa0,0x20]
+# ASM: xch a, r3{{.*}}encoding: [0xcb]
+# ASM: xch a, 32{{.*}}encoding: [0xc5,0x20]
+# ASM: xch a, @r0{{.*}}encoding: [0xc6]
+# ASM: xchd a, @r1{{.*}}encoding: [0xd7]
+# ASM: cjne a, #18, {{.*}}encoding: [0xb4,0x12,{{[^]]+}}]
+# ASM: cjne a, 32, {{.*}}encoding: [0xb5,0x20,{{[^]]+}}]
+# ASM: cjne @r0, #18, {{.*}}encoding: [0xb6,0x12,{{[^]]+}}]
+# ASM: cjne r3, #18, {{.*}}encoding: [0xbb,0x12,{{[^]]+}}]
+# ASM: djnz 32, {{.*}}encoding: [0xd5,0x20,{{[^]]+}}]
+# ASM: djnz r3, {{.*}}encoding: [0xdb,{{[^]]+}}]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -136,5 +162,15 @@
 # DIS: anl c, /32
 # DIS: orl c, 32
 # DIS: orl c, /32
+# DIS: xch a, r3
+# DIS: xch a, 32
+# DIS: xch a, @r0
+# DIS: xchd a, @r1
+# DIS: cjne a, #18,
+# DIS: cjne a, 32,
+# DIS: cjne @r0, #18,
+# DIS: cjne r3, #18,
+# DIS: djnz 32,
+# DIS: djnz r3,
 # DIS: ret
 # DIS: reti

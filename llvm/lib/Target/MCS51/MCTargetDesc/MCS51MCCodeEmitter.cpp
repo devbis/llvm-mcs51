@@ -75,7 +75,7 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     if (Op.isImm())
       return static_cast<uint8_t>(Op.getImm());
     if (Op.isExpr()) {
-      unsigned Offset = OpNo == 0 ? 1 : 2;
+      unsigned Offset = MI.getOpcode() == MCS51::DJNZ_RN || OpNo == 0 ? 1 : 2;
       const MCExpr *Expr = MCBinaryExpr::createSub(
           Op.getExpr(), MCConstantExpr::create(1, Ctx), Ctx);
       Fixups.push_back(
