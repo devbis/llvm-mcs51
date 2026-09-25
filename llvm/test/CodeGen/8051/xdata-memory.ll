@@ -1,6 +1,10 @@
 ; RUN: llc -O0 -mtriple=mcs51 -o - %s | FileCheck %s
 ; RUN: llc -O0 -mtriple=mcs51 -filetype=obj %s -o %t.o
 ; RUN: llvm-objdump -d %t.o | FileCheck %s --check-prefix=DIS
+; RUN: llvm-readobj --relocations %t.o | FileCheck %s --check-prefix=RELOC
+
+@sfr_port = external addrspace(7) global i8
+@data_byte = external addrspace(1) global i8
 
 define i8 @read_xdata(i8 %address) {
 entry:
@@ -54,6 +58,31 @@ entry:
   ret i8 %value
 }
 
+define i8 @read_sfr() {
+entry:
+  %value = load i8, ptr addrspace(7) @sfr_port, align 1
+  ret i8 %value
+}
+
+define void @write_sfr(i8 %value) {
+entry:
+  store i8 %value, ptr addrspace(7) @sfr_port, align 1
+  ret void
+}
+
+define i8 @read_direct_constant() {
+entry:
+  %pointer = inttoptr i8 144 to ptr addrspace(7)
+  %value = load i8, ptr addrspace(7) %pointer, align 1
+  ret i8 %value
+}
+
+define i8 @read_data_symbol() {
+entry:
+  %value = load i8, ptr addrspace(1) @data_byte, align 1
+  ret i8 %value
+}
+
 ; CHECK-LABEL: read_xdata:
 ; CHECK: mov 131, #0
 ; CHECK: mov a, r7
@@ -97,6 +126,23 @@ entry:
 ; CHECK: movc a, @a+dptr
 ; CHECK: ret
 
+; CHECK-LABEL: read_sfr:
+; CHECK: mov a, sfr_port
+; CHECK: ret
+
+; CHECK-LABEL: write_sfr:
+; CHECK: mov a, r7
+; CHECK: mov sfr_port, a
+; CHECK: ret
+
+; CHECK-LABEL: read_direct_constant:
+; CHECK: mov a, -112
+; CHECK: ret
+
+; CHECK-LABEL: read_data_symbol:
+; CHECK: mov a, data_byte
+; CHECK: ret
+
 ; DIS-LABEL: <read_idata>:
 ; DIS: mov a, @r0
 ; DIS-LABEL: <write_idata>:
@@ -107,3 +153,8 @@ entry:
 ; DIS: movx @r0, a
 ; DIS-LABEL: <read_code>:
 ; DIS: movc a, @a+dptr
+; DIS-LABEL: <read_direct_constant>:
+; DIS: mov a, 144
+
+; RELOC: R_8051_8 sfr_port 0x0
+; RELOC: R_8051_8 data_byte 0x0
