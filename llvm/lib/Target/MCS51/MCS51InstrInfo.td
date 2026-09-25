@@ -75,7 +75,7 @@ def MCS51Direct8 : Operand<i8>, ImmLeaf<i8, "return isUInt<8>(Imm);"> {
   let DecoderMethod = "DecodeImm8";
 }
 
-def MCS51Addr16 : Operand<i16> {
+def MCS51Addr16 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm16OpValue";
   let DecoderMethod = "DecodeImm16";
@@ -147,6 +147,11 @@ def LJMP : MCS51Abs16Inst<0x02, "ljmp"> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
 def LCALL : MCS51Abs16Inst<0x12, "lcall"> { let isCall = 1; }
+
+// The MCS-51 has no PC-relative unconditional branch with a long enough
+// range for arbitrary basic blocks. Use LJMP until branch relaxation can
+// select shorter forms safely.
+def : Pat<(br bb:$target), (LJMP MCS51Addr16:$target)>;
 
 // C promotes shift counts to int, which is i16 in the MCS-51 ABI. This
 // immediate-only operand keeps supported constant counts visible to ISel.
