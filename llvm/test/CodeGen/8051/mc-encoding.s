@@ -7,6 +7,8 @@
         rl a
         mul ab
         movx a, @dptr
+        mov a, #0x5a
+        add a, #1
         ret
         reti
 
@@ -15,6 +17,8 @@
 # ASM: rl a{{.*}}encoding: [0x23]
 # ASM: mul ab{{.*}}encoding: [0xa4]
 # ASM: movx a, @dptr{{.*}}encoding: [0xe0]
+# ASM: mov a, #90{{.*}}encoding: [0x74,0x5a]
+# ASM: add a, #1{{.*}}encoding: [0x24,0x01]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -22,5 +26,7 @@
 # DIS: rl a
 # DIS: mul ab
 # DIS: movx a, @dptr
+# DIS: mov a, #90
+# DIS: add a, #1
 # DIS: ret
 # DIS: reti

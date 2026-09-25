@@ -44,3 +44,30 @@ def RETI : MCS51Inst<0x32, "reti"> {
   let isReturn = 1;
   let isTerminator = 1;
 }
+
+def MCS51Imm8 : Operand<i8> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm8OpValue";
+  let DecoderMethod = "DecodeImm8";
+}
+
+class MCS51AccImmInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$imm);
+  let AsmString = mnemonic # " a, #$imm";
+  let Size = 2;
+  let hasSideEffects = 1;
+  bits<8> imm;
+  bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = imm;
+}
+
+def MOV_A_IMM : MCS51AccImmInst<0x74, "mov">;
+def ADD_A_IMM : MCS51AccImmInst<0x24, "add">;
+def ADDC_A_IMM : MCS51AccImmInst<0x34, "addc">;
+def SUBB_A_IMM : MCS51AccImmInst<0x94, "subb">;
+def ANL_A_IMM : MCS51AccImmInst<0x54, "anl">;
+def ORL_A_IMM : MCS51AccImmInst<0x44, "orl">;
+def XRL_A_IMM : MCS51AccImmInst<0x64, "xrl">;

@@ -1,4 +1,6 @@
 #include "MCS51InstPrinter.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Compiler.h"
 
@@ -9,6 +11,19 @@ using namespace llvm;
 
 void MCS51InstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
   OS << getRegisterName(Reg);
+}
+
+void MCS51InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
+                                    raw_ostream &OS) {
+  const MCOperand &Op = MI->getOperand(OpNo);
+  if (Op.isReg())
+    printRegName(OS, Op.getReg());
+  else if (Op.isImm())
+    OS << Op.getImm();
+  else if (Op.isExpr())
+    MAI.printExpr(OS, *Op.getExpr());
+  else
+    llvm_unreachable("unsupported MCS-51 operand");
 }
 
 void MCS51InstPrinter::printInst(const MCInst *MI, uint64_t Address,
