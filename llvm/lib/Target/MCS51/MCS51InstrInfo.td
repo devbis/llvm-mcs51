@@ -857,6 +857,8 @@ class MCS51AccDirectInst<bits<8> opcode, string mnemonic> : Instruction {
   let AsmString = mnemonic # " a, $addr";
   let Size = 2;
   let hasSideEffects = 1;
+  let Defs = [A];
+  let Uses = [A, B];
   bits<1> dst;
   let dst = 0;
   bits<8> addr;
@@ -875,7 +877,7 @@ class MCS51DirectAccInst<bits<8> opcode, string mnemonic> : Instruction {
   let Uses = [A];
   // Direct addresses 0x82 and 0x83 alias DPL and DPH. Conservatively model
   // direct stores as clobbering the 16-bit DPTR value.
-  let Defs = [DPTR];
+  let Defs = [DPTR, B];
   bits<8> addr;
   bits<16> Inst;
   let Inst{7-0} = opcode;
@@ -889,7 +891,7 @@ class MCS51DirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let AsmString = mnemonic # " $addr, #$imm";
   let Size = 3;
   let hasSideEffects = 1;
-  let Defs = [DPTR];
+  let Defs = [DPTR, B];
   bits<8> addr;
   bits<8> imm;
   bits<24> Inst;
@@ -918,6 +920,8 @@ def MOV_DIRECT_DIRECT : Instruction {
   let AsmString = "mov $dst, $src";
   let Size = 3;
   let hasSideEffects = 1;
+  let Defs = [DPTR, B];
+  let Uses = [B];
   bits<8> dst;
   bits<8> src;
   bits<24> Inst;
@@ -988,6 +992,63 @@ class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let Inst{2-0} = rn;
 }
 
+def MOV_RN_DIRECT : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "mov $dst, $addr";
+  let Size = 2;
+  let mayLoad = 1;
+  bits<3> dst; bits<8> addr; bits<16> Inst;
+  let Inst{7-3} = 0b10101;
+  let Inst{2-0} = dst;
+  let Inst{15-8} = addr;
+}
+
+def MOV_DIRECT_RN : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51GPR8:$src);
+  let AsmString = "mov $addr, $src";
+  let Size = 2;
+  let mayStore = 1;
+  let Defs = [DPTR, B];
+  bits<3> src; bits<8> addr; bits<16> Inst;
+  let Inst{7-3} = 0b10001;
+  let Inst{2-0} = src;
+  let Inst{15-8} = addr;
+}
+
+class MCS51MovIndirectDirect<bits<8> opcode, string indirect> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "mov " # indirect # ", $addr";
+  let Size = 2;
+  let mayLoad = 1;
+  let mayStore = 1;
+  bits<8> addr; bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = addr;
+}
+class MCS51MovDirectIndirect<bits<8> opcode, string indirect> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "mov $addr, " # indirect;
+  let Size = 2;
+  let mayLoad = 1;
+  let mayStore = 1;
+  let Defs = [DPTR, B];
+  bits<8> addr; bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = addr;
+}
+def MOV_R0_IND_DIRECT : MCS51MovIndirectDirect<0xA6, "@r0">;
+def MOV_R1_IND_DIRECT : MCS51MovIndirectDirect<0xA7, "@r1">;
+def MOV_DIRECT_R0_IND : MCS51MovDirectIndirect<0x86, "@r0">;
+def MOV_DIRECT_R1_IND : MCS51MovDirectIndirect<0x87, "@r1">;
+
 class MCS51ExchangeRn : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
@@ -1035,7 +1096,6 @@ class MCS51RnDefInst<bits<5> opcode, string mnemonic> : Instruction {
 }
 
 def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,"> { let Defs = [A]; }
-def MOV_B_RN  : MCS51RnInst<0b10001, "mov b,"> { let Defs = [B]; }
 def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> { let Defs = [A]; let Uses = [A]; }
 def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,"> { let Defs = [A]; let Uses = [A]; }
 def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,"> { let Defs = [A]; let Uses = [A]; }

@@ -12,7 +12,7 @@
         add a, #1
         subb a, #1
         mov a, r3
-        mov b, r3
+        mov 0xf0, r3
         add a, r3
         subb a, r3
         mov r3, a
@@ -77,6 +77,12 @@
         anl 0x20, #0x12
         orl 0x20, #0x12
         xrl 0x20, #0x12
+        mov r3, 0x20
+        mov 0x20, r3
+        mov @r0, 0x20
+        mov @r1, 0x20
+        mov 0x20, @r0
+        mov 0x20, @r1
         ret
         reti
 
@@ -90,7 +96,7 @@
 # ASM: add a, #1{{.*}}encoding: [0x24,0x01]
 # ASM: subb a, #1{{.*}}encoding: [0x94,0x01]
 # ASM: mov a, r3{{.*}}encoding: [0xeb]
-# ASM: mov b, r3{{.*}}encoding: [0x8b]
+# ASM: mov 240, r3{{.*}}encoding: [0x8b,0xf0]
 # ASM: add a, r3{{.*}}encoding: [0x2b]
 # ASM: subb a, r3{{.*}}encoding: [0x9b]
 # ASM: mov r3, a{{.*}}encoding: [0xfb]
@@ -149,6 +155,12 @@
 # ASM: anl 32, #18{{.*}}encoding: [0x53,0x20,0x12]
 # ASM: orl 32, #18{{.*}}encoding: [0x43,0x20,0x12]
 # ASM: xrl 32, #18{{.*}}encoding: [0x63,0x20,0x12]
+# ASM: mov r3, 32{{.*}}encoding: [0xab,0x20]
+# ASM: mov 32, r3{{.*}}encoding: [0x8b,0x20]
+# ASM: mov @r0, 32{{.*}}encoding: [0xa6,0x20]
+# ASM: mov @r1, 32{{.*}}encoding: [0xa7,0x20]
+# ASM: mov 32, @r0{{.*}}encoding: [0x86,0x20]
+# ASM: mov 32, @r1{{.*}}encoding: [0x87,0x20]
 # ASM: ret{{.*}}encoding: [0x22]
 # ASM: reti{{.*}}encoding: [0x32]
 # DIS: nop
@@ -161,7 +173,7 @@
 # DIS: add a, #1
 # DIS: subb a, #1
 # DIS: mov a, r3
-# DIS: mov b, r3
+# DIS: mov 240, r3
 # DIS: add a, r3
 # DIS: subb a, r3
 # DIS: mov r3, a
@@ -220,5 +232,11 @@
 # DIS: anl 32, #18
 # DIS: orl 32, #18
 # DIS: xrl 32, #18
+# DIS: mov r3, 32
+# DIS: mov 32, r3
+# DIS: mov @r0, 32
+# DIS: mov @r1, 32
+# DIS: mov 32, @r0
+# DIS: mov 32, @r1
 # DIS: ret
 # DIS: reti
