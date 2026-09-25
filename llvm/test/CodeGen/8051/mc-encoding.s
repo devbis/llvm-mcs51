@@ -26,6 +26,8 @@
         mov 0x90, a
         mov 0x90, #0x5a
         inc 0x90
+        push 0xe0
+        pop 0xe0
         mov a, @r0
         mov a, @r1
         mov @r0, a
@@ -61,6 +63,8 @@
 # ASM: mov 144, a{{.*}}encoding: [0xf5,0x90]
 # ASM: mov 144, #90{{.*}}encoding: [0x75,0x90,0x5a]
 # ASM: inc 144{{.*}}encoding: [0x05,0x90]
+# ASM: push 224{{.*}}encoding: [0xc0,0xe0]
+# ASM: pop 224{{.*}}encoding: [0xd0,0xe0]
 # ASM: mov a, @r0{{.*}}encoding: [0xe6]
 # ASM: mov a, @r1{{.*}}encoding: [0xe7]
 # ASM: mov @r0, a{{.*}}encoding: [0xf6]
@@ -95,6 +99,8 @@
 # DIS: mov 144, a
 # DIS: mov 144, #90
 # DIS: inc 144
+# DIS: push 224
+# DIS: pop 224
 # DIS: mov a, @r0
 # DIS: mov a, @r1
 # DIS: mov @r0, a
