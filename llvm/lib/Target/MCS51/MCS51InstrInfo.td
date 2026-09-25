@@ -515,6 +515,32 @@ def STOREDIRECT16 : Instruction {
   let mayStore = 1;
 }
 
+def LOADBIT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, C];
+}
+
+def STOREBIT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+  let Defs = [A, C];
+}
+
 def STOREX8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
