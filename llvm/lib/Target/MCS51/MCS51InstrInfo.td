@@ -14,6 +14,8 @@ def MCS51br_eq : SDNode<"MCS51ISD::BR_EQ", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_ne : SDNode<"MCS51ISD::BR_NE", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_ult : SDNode<"MCS51ISD::BR_ULT", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_uge : SDNode<"MCS51ISD::BR_UGE", SDT_MCS51Br, [SDNPHasChain]>;
+def MCS51br_slt : SDNode<"MCS51ISD::BR_SLT", SDT_MCS51Br, [SDNPHasChain]>;
+def MCS51br_sge : SDNode<"MCS51ISD::BR_SGE", SDT_MCS51Br, [SDNPHasChain]>;
 def SDT_MCS51LoadStack8 : SDTypeProfile<1, 1, [SDTCisVT<0, i8>,
                                                SDTCisVT<1, i8>]>;
 def MCS51loadstack8 : SDNode<"MCS51ISD::LOAD_STACK8", SDT_MCS51LoadStack8,
@@ -254,6 +256,7 @@ class MCS51BrCCImmPseudo<SDNode Node> : Instruction {
   let isTerminator = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
+  let Defs = [A, R1, C];
   let Pattern = [(Node MCS51GPR8:$lhs, MCS51Imm8:$rhs, bb:$target)];
 }
 
@@ -270,6 +273,7 @@ class MCS51BrCCRegPseudo<SDNode Node> : Instruction {
   let isTerminator = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
+  let Defs = [A, R1, C];
   let Pattern = [(Node MCS51GPR8:$lhs, MCS51GPR8:$rhs, bb:$target)];
 }
 
@@ -281,6 +285,10 @@ def BR_ULT8ri : MCS51BrCCImmPseudo<MCS51br_ult>;
 def BR_ULT8rr : MCS51BrCCRegPseudo<MCS51br_ult>;
 def BR_UGE8ri : MCS51BrCCImmPseudo<MCS51br_uge>;
 def BR_UGE8rr : MCS51BrCCRegPseudo<MCS51br_uge>;
+def BR_SLT8ri : MCS51BrCCImmPseudo<MCS51br_slt>;
+def BR_SLT8rr : MCS51BrCCRegPseudo<MCS51br_slt>;
+def BR_SGE8ri : MCS51BrCCImmPseudo<MCS51br_sge>;
+def BR_SGE8rr : MCS51BrCCRegPseudo<MCS51br_sge>;
 
 def LOADX8 : Instruction {
   let Namespace = "MCS51";
