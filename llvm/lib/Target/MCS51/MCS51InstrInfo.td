@@ -138,6 +138,8 @@ def MOV_R0_IND_A : MCS51Inst<0xF6, "mov @r0, a">;
 def MOV_R1_IND_A : MCS51Inst<0xF7, "mov @r1, a">;
 def INC_R0_IND : MCS51Inst<0x06, "inc @r0">;
 def INC_R1_IND : MCS51Inst<0x07, "inc @r1">;
+def DEC_R0_IND : MCS51Inst<0x16, "dec @r0">;
+def DEC_R1_IND : MCS51Inst<0x17, "dec @r1">;
 def ADD_A_R0_IND : MCS51Inst<0x26, "add a, @r0">;
 def ADD_A_R1_IND : MCS51Inst<0x27, "add a, @r1">;
 def ADDC_A_R0_IND : MCS51Inst<0x36, "addc a, @r0">;
@@ -964,6 +966,9 @@ def XRL_A_DIRECT : MCS51AccDirectInst<0x65, "xrl"> {
   let Defs = [A]; let Uses = [A];
 }
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
+def ANL_DIRECT_A : MCS51DirectAccInst<0x52, "anl">;
+def ORL_DIRECT_A : MCS51DirectAccInst<0x42, "orl">;
+def XRL_DIRECT_A : MCS51DirectAccInst<0x62, "xrl">;
 def MOV_DIRECT_IMM : MCS51DirectImmInst<0x75, "mov">;
 def ANL_DIRECT_IMM : MCS51DirectImmInst<0x53, "anl">;
 def ORL_DIRECT_IMM : MCS51DirectImmInst<0x43, "orl">;
