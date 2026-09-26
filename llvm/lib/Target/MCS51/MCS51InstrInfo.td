@@ -1846,8 +1846,10 @@ class MCS51FixedSFRLoad<bits<8> address, string mnemonic,
 }
 def MOV_DPL_A : MCS51FixedSFRStore<0x82, "mov 130, a", DPTR>;
 def MOV_DPH_A : MCS51FixedSFRStore<0x83, "mov 131, a", DPTR>;
+def MOV_SP_A : MCS51FixedSFRStore<0x81, "mov 129, a", SP>;
 def MOV_B_A : MCS51FixedSFRStore<0xF0, "mov 240, a", B>;
 def MOV_A_B : MCS51FixedSFRLoad<0xF0, "mov a, 240", B>;
+def MOV_A_SP : MCS51FixedSFRLoad<0x81, "mov a, 129", SP>;
 def ANL_DIRECT_A : MCS51DirectAccInst<0x52, "anl">;
 def ORL_DIRECT_A : MCS51DirectAccInst<0x42, "orl">;
 def XRL_DIRECT_A : MCS51DirectAccInst<0x62, "xrl">;
