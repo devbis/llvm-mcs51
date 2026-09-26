@@ -74,7 +74,9 @@ static bool getFrameAddress(SDValue Ptr, int &FI, int64_t &Offset) {
     return false;
   FI = cast<FrameIndexSDNode>(Base)->getIndex();
   Offset = C->getSExtValue();
-  return Offset >= -128 && Offset <= 127;
+  // Frame addresses are formed with an 8-bit ADD, so displacements from -128
+  // through 255 have a valid modulo-256 encoding.
+  return Offset >= -128 && Offset <= 255;
 }
 
 static bool getIndexedFrameAddress(SDValue Ptr, int &FI, SDValue &Index) {
