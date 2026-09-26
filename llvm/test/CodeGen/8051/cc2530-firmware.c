@@ -8,15 +8,23 @@
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex
 
 volatile unsigned char counter;
+unsigned char initialized = 42;
 
-void entry(void) { counter = 1; }
+int main(void) {
+  counter = initialized;
+  return 0;
+}
 
 // MAP: Name: .text
 // MAP: Address: 0x0
-// MAP: Name: .bss
+// MAP: Name: .data
 // MAP: Address: 0x0
-// MAP: Name: counter
+// MAP: Name: .bss
+// MAP: Address: 0x1
+// MAP: Name: initialized
 // MAP: Value: 0x0
+// MAP: Name: counter
+// MAP: Value: 0x1
 
 // DIS-LABEL: <reset>:
 // DIS: ljmp
@@ -24,9 +32,11 @@ void entry(void) { counter = 1; }
 // DIS: mov 129, #127
 // DIS: mov dptr, #0
 // DIS: movx @dptr, a
+// DIS: movc a, @a+dptr
 // DIS: lcall
-// DIS-LABEL: <entry>:
+// DIS-LABEL: <main>:
 // DIS: mov dptr, #0
 // DIS: movx @dptr, a
 
+// IHEX: :01{{[0-9A-F][0-9A-F][0-9A-F][0-9A-F]}}002A
 // IHEX: :00000001FF
