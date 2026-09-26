@@ -517,8 +517,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             MCS51::A)
         .addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0xF0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
     BuildMI(*MBB, MII, DL,
             TII.get(IsAdd ? MCS51::ADDC_A_DIRECT : MCS51::SUBB_A_DIRECT),
             MCS51::A)
@@ -553,8 +552,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSLo);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
         .addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0xF0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
         .addImm(0x83);
     // CLR A preserves CY, and RLC moves the borrow into bit zero.
