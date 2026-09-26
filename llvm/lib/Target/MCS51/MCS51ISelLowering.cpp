@@ -424,7 +424,18 @@ SDValue MCS51TargetLowering::LowerReturn(
             cast<ConstantSDNode>(Value)->getZExtValue(), DL, MVT::i8));
       return DAG.getNode(MCS51ISD::RET_I32_IMM, DL, MVT::Other, Ops);
     }
-    SDValue Ops[] = {Chain, OutVals[0], OutVals[1], OutVals[2], OutVals[3]};
+    MachineFunction &MF = DAG.getMachineFunction();
+    SmallVector<SDValue, 4> ReturnParts;
+    for (SDValue Value : OutVals) {
+      Register Temp = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
+      Chain = DAG.getCopyToReg(Chain, DL, Temp, Value);
+      SDValue Copy = DAG.getCopyFromReg(Chain, DL, Temp, MVT::i8);
+      ReturnParts.push_back(Copy);
+      Chain = Copy.getValue(1);
+    }
+    SDValue Ops[] = {Chain, ReturnParts[0], ReturnParts[1], ReturnParts[2],
+                     ReturnParts[3]};
     return DAG.getNode(MCS51ISD::RET_I32, DL, MVT::Other, Ops);
   } else if (!OutVals.empty() &&
              (Outs.front().VT == MVT::i8 || Outs.front().Flags.isZExt() ||
