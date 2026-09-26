@@ -62,6 +62,13 @@ def SDT_MCS51Shift32Parts : SDTypeProfile<2, 3, [SDTCisVT<0, i16>,
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpeq16 : SDNode<"MCS51ISD::CMPEQ16", SDT_MCS51CmpUlt16>;
+def SDT_MCS51AddExtendedByteImmediate : SDTypeProfile<1, 2, [
+  SDTCisVT<0, i16>, SDTCisVT<1, i8>, SDTCisVT<2, i16>
+]>;
+def MCS51add_zext8_imm : SDNode<"MCS51ISD::ADD_ZEXT8_IMM",
+                                SDT_MCS51AddExtendedByteImmediate>;
+def MCS51add_sext8_imm : SDNode<"MCS51ISD::ADD_SEXT8_IMM",
+                                SDT_MCS51AddExtendedByteImmediate>;
 def MCS51cmpult8 : SDNode<"MCS51ISD::CMPULT8", SDT_MCS51Cmp8>;
 def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
 def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
@@ -1579,6 +1586,9 @@ def MOV_A_IMM : MCS51AccImmInst<0x74, "mov"> {
 def ADD_A_IMM : MCS51AccImmInst<0x24, "add"> {
   let Defs = [A, C]; let Uses = [A];
 }
+def ADDC_A_IMM : MCS51AccImmInst<0x34, "addc"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
 def SUBB_A_IMM : MCS51AccImmInst<0x94, "subb"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
@@ -2037,6 +2047,36 @@ def ZEXT8TO16 : Instruction {
   let hasSideEffects = 1;
   let Pattern = [(set MCS51PTR:$dst, (zext MCS51GPR8:$src))];
 }
+
+def SEXT8TO16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst, (sext MCS51GPR8:$src))];
+}
+
+class MCS51AddExtendedByteImmediatePseudo<SDNode Op> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51GPR8:$src, MCS51Imm16:$imm);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst,
+                      (Op MCS51GPR8:$src, MCS51Imm16:$imm))];
+}
+
+def ADD_ZEXT8_IMM : MCS51AddExtendedByteImmediatePseudo<MCS51add_zext8_imm>;
+def ADD_SEXT8_IMM : MCS51AddExtendedByteImmediatePseudo<MCS51add_sext8_imm>;
 
 def TRUNC16TO8 : Instruction {
   let Namespace = "MCS51";
