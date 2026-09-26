@@ -17,6 +17,10 @@ unsigned long multiply_long(unsigned long lhs, unsigned long rhs) {
   return lhs * rhs;
 }
 
+unsigned long shift_right_long(unsigned long value, unsigned char amount) {
+  return value >> amount;
+}
+
 // CHECK-LABEL: add_long:
 // CHECK-COUNT-3: addc a,
 // CHECK-NOT: subb a,
@@ -39,6 +43,11 @@ unsigned long multiply_long(unsigned long lhs, unsigned long rhs) {
 // CHECK: ret
 // CHECK-LABEL: multiply_long:
 // CHECK: mul ab
+// CHECK: ret
+// CHECK-LABEL: shift_right_long:
+// CHECK: jz
+// CHECK-COUNT-4: rrc a
+// CHECK: djnz 240,
 // CHECK: ret
 
 // O0-LABEL: add_long:
