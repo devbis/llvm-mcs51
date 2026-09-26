@@ -44,6 +44,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SREM, MVT::i16, LibCall);
   setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
+  setTargetDAGCombine(ISD::SUB);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
@@ -177,7 +178,8 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
       return DAG.getNode(Opcode, DL, MVT::i16, Base, Byte);
     }
     return SDValue();
-  }
+}
+
   if (Op.getOpcode() == ISD::ANY_EXTEND && Op.getValueType() == MVT::i16 &&
       Op.getOperand(0).getValueType() == MVT::i8) {
     // ANY_EXTEND leaves the high bits undefined, so zero is a valid choice.
@@ -769,6 +771,46 @@ SDValue MCS51TargetLowering::LowerReturn(
   if (!Outs.empty() && Outs.front().VT == MVT::i16)
     return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain);
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
+}
+
+SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
+                                                DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() != ISD::SUB || N->getValueType(0) != MVT::i16)
+    return SDValue();
+
+  SDValue Extended = N->getOperand(1);
+  SDValue Base = N->getOperand(0);
+  if (Base.getValueType() != MVT::i16 ||
+      isa<ConstantSDNode>(Base) || containsFrameIndex(Base))
+    return SDValue();
+
+  bool IsSigned = false;
+  SDValue Byte;
+  LoadSDNode *ExtendedLoad = nullptr;
+  if (auto *Load = dyn_cast<LoadSDNode>(Extended)) {
+    if (Load->getMemoryVT() != MVT::i8 ||
+        Load->getExtensionType() == ISD::NON_EXTLOAD ||
+        !Extended.hasOneUse())
+      return SDValue();
+    IsSigned = Load->getExtensionType() == ISD::SEXTLOAD;
+    ExtendedLoad = Load;
+    Byte = DCI.DAG.getLoad(MVT::i8, SDLoc(N), Load->getChain(),
+                           Load->getBasePtr(), Load->getMemOperand());
+  } else if ((Extended.getOpcode() == ISD::SIGN_EXTEND ||
+              Extended.getOpcode() == ISD::ZERO_EXTEND) &&
+             Extended.getOperand(0).getValueType() == MVT::i8) {
+    IsSigned = Extended.getOpcode() == ISD::SIGN_EXTEND;
+    Byte = Extended.getOperand(0);
+  } else {
+    return SDValue();
+  }
+
+  if (ExtendedLoad)
+    DCI.DAG.ReplaceAllUsesOfValueWith(SDValue(ExtendedLoad, 1),
+                                      Byte.getValue(1));
+  unsigned Opcode = IsSigned ? MCS51ISD::SUB_SEXT8_16
+                             : MCS51ISD::SUB_ZEXT8_16;
+  return DCI.DAG.getNode(Opcode, SDLoc(N), MVT::i16, Base, Byte);
 }
 
 MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
@@ -2217,18 +2259,33 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   Register Dst = MI.getOperand(0).getReg();
   Register LHS = MI.getOperand(1).getReg();
   if (MI.getOpcode() == MCS51::ADD_ZEXT8_16 ||
-      MI.getOpcode() == MCS51::ADD_SEXT8_16) {
-    bool IsSigned = MI.getOpcode() == MCS51::ADD_SEXT8_16;
+      MI.getOpcode() == MCS51::ADD_SEXT8_16 ||
+      MI.getOpcode() == MCS51::SUB_ZEXT8_16 ||
+      MI.getOpcode() == MCS51::SUB_SEXT8_16) {
+    bool IsSubtraction = MI.getOpcode() == MCS51::SUB_ZEXT8_16 ||
+                         MI.getOpcode() == MCS51::SUB_SEXT8_16;
+    bool IsSigned = MI.getOpcode() == MCS51::ADD_SEXT8_16 ||
+                    MI.getOpcode() == MCS51::SUB_SEXT8_16;
     Register Byte = MI.getOperand(2).getReg();
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
         .addReg(LHS);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Byte);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_DIRECT), MCS51::A)
-        .addImm(0x82);
+    if (IsSubtraction) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(Byte);
+    } else {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Byte);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+    }
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x83);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IMM), MCS51::A).addImm(0);
+    if (IsSubtraction)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A).addImm(0);
+    else
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IMM), MCS51::A).addImm(0);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
 
     if (IsSigned) {
@@ -2243,7 +2300,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*Decrement, Decrement->end(), DL,
               TII.get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x83);
       BuildMI(*Decrement, Decrement->end(), DL,
-              TII.get(MCS51::ADD_A_IMM), MCS51::A).addImm(0xFF);
+              TII.get(MCS51::ADD_A_IMM), MCS51::A)
+          .addImm(IsSubtraction ? 1 : 0xFF);
       BuildMI(*Decrement, Decrement->end(), DL,
               TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
       MBB->addSuccessor(Decrement);

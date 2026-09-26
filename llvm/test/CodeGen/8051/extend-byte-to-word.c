@@ -21,6 +21,15 @@ unsigned short add_unsigned_byte(unsigned short base, unsigned char value) {
 
 short add_signed_byte(short base, signed char value) { return base + value; }
 
+unsigned short subtract_unsigned_byte(unsigned short base,
+                                      unsigned char value) {
+  return base - value;
+}
+
+short subtract_signed_byte(short base, signed char value) {
+  return base - value;
+}
+
 // CHECK-LABEL: zero_extend_byte:
 // CHECK: mov 130, a
 // CHECK: mov 131, #0
@@ -77,6 +86,18 @@ short add_signed_byte(short base, signed char value) { return base + value; }
 // CHECK: jnc
 // CHECK: add a, #255
 // CHECK: ret
+// CHECK-LABEL: subtract_unsigned_byte:
+// CHECK: clr c
+// CHECK: subb a, r
+// CHECK: subb a, #0
+// CHECK: ret
+// CHECK-LABEL: subtract_signed_byte:
+// CHECK: clr c
+// CHECK: subb a, r
+// CHECK: subb a, #0
+// CHECK: jnc
+// CHECK: add a, #1
+// CHECK: ret
 // OPT-LABEL: zero_extend_before_add:
 // OPT: mov 131, #0
 // OPT: inc dptr
@@ -95,4 +116,16 @@ short add_signed_byte(short base, signed char value) { return base + value; }
 // OPT: addc a, #0
 // OPT: jnc
 // OPT: add a, #255
+// OPT: ret
+// OPT-LABEL: subtract_unsigned_byte:
+// OPT: clr c
+// OPT: subb a, r7
+// OPT: subb a, #0
+// OPT: ret
+// OPT-LABEL: subtract_signed_byte:
+// OPT: clr c
+// OPT: subb a, r7
+// OPT: subb a, #0
+// OPT: jnc
+// OPT: add a, #1
 // OPT: ret

@@ -76,6 +76,10 @@ def MCS51add_zext8_16 : SDNode<"MCS51ISD::ADD_ZEXT8_16",
                                SDT_MCS51AddExtendedByte>;
 def MCS51add_sext8_16 : SDNode<"MCS51ISD::ADD_SEXT8_16",
                                SDT_MCS51AddExtendedByte>;
+def MCS51sub_zext8_16 : SDNode<"MCS51ISD::SUB_ZEXT8_16",
+                               SDT_MCS51AddExtendedByte>;
+def MCS51sub_sext8_16 : SDNode<"MCS51ISD::SUB_SEXT8_16",
+                               SDT_MCS51AddExtendedByte>;
 def MCS51cmpult8 : SDNode<"MCS51ISD::CMPULT8", SDT_MCS51Cmp8>;
 def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
 def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
@@ -2101,6 +2105,8 @@ class MCS51AddExtendedBytePseudo<SDNode Op> : Instruction {
 
 def ADD_ZEXT8_16 : MCS51AddExtendedBytePseudo<MCS51add_zext8_16>;
 def ADD_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51add_sext8_16>;
+def SUB_ZEXT8_16 : MCS51AddExtendedBytePseudo<MCS51sub_zext8_16>;
+def SUB_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51sub_sext8_16>;
 
 def TRUNC16TO8 : Instruction {
   let Namespace = "MCS51";
