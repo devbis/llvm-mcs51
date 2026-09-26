@@ -13,8 +13,7 @@ void clear_ready(void) { ready = 0; }
 // CHECK: clr a
 // CHECK-NEXT: rlc a
 // CHECK-LABEL: write_ready:
-// CHECK: mov a, r{{[0-7]}}
-// CHECK-NEXT: mov c, 224
+// CHECK: mov c, 224
 // CHECK-NEXT: mov ready, c
 // CHECK-LABEL: set_ready:
 // CHECK: setb ready

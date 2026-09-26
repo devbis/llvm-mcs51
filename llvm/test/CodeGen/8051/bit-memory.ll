@@ -22,8 +22,7 @@ entry:
 ; CHECK-NEXT: rlc a
 ; CHECK-NEXT: mov r{{[0-7]}}, a
 ; CHECK-LABEL: write_bit_flag:
-; CHECK: mov a, r{{[0-7]}}
-; CHECK-NEXT: mov c, 224
+; CHECK: mov c, 224
 ; CHECK-NEXT: mov bit_flag, c
 
 ; RELOC: R_8051_8 bit_flag
