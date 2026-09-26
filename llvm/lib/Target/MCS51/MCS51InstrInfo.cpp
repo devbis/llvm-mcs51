@@ -46,8 +46,9 @@ void MCS51InstrInfo::storeRegToStackSlot(
     bool IsKill, int FrameIndex, const TargetRegisterClass *RC, Register,
     MachineInstr::MIFlag Flags) const {
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
+  bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
   bool IsWord = RC == &MCS51::MCS51PTRRegClass;
-  if (!IsByte && !IsWord)
+  if (!IsByte && !IsAccumulator && !IsWord)
     llvm_unreachable("unsupported MCS-51 spill register class");
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -55,8 +56,10 @@ void MCS51InstrInfo::storeRegToStackSlot(
       MachinePointerInfo::getFixedStack(MF, FrameIndex),
       MachineMemOperand::MOStore, MFI.getObjectSize(FrameIndex),
       MFI.getObjectAlign(FrameIndex));
-  BuildMI(MBB, MI, DebugLoc(), get(IsByte ? MCS51::SPILL_STORE8
-                                          : MCS51::SPILL_STORE16))
+  unsigned Opcode = IsByte ? MCS51::SPILL_STORE8
+                           : IsAccumulator ? MCS51::SPILL_STORE_A8
+                                            : MCS51::SPILL_STORE16;
+  BuildMI(MBB, MI, DebugLoc(), get(Opcode))
       .addFrameIndex(FrameIndex)
       .addImm(0)
       .addReg(SrcReg, getKillRegState(IsKill))
@@ -69,8 +72,9 @@ void MCS51InstrInfo::loadRegFromStackSlot(
     int FrameIndex, const TargetRegisterClass *RC, Register, unsigned SubReg,
     MachineInstr::MIFlag Flags) const {
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
+  bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
   bool IsWord = RC == &MCS51::MCS51PTRRegClass;
-  if ((!IsByte && !IsWord) || SubReg)
+  if ((!IsByte && !IsAccumulator && !IsWord) || SubReg)
     llvm_unreachable("unsupported MCS-51 reload register class");
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -78,8 +82,10 @@ void MCS51InstrInfo::loadRegFromStackSlot(
       MachinePointerInfo::getFixedStack(MF, FrameIndex),
       MachineMemOperand::MOLoad, MFI.getObjectSize(FrameIndex),
       MFI.getObjectAlign(FrameIndex));
-  BuildMI(MBB, MI, DebugLoc(), get(IsByte ? MCS51::SPILL_LOAD8
-                                          : MCS51::SPILL_LOAD16), DestReg)
+  unsigned Opcode = IsByte ? MCS51::SPILL_LOAD8
+                           : IsAccumulator ? MCS51::SPILL_LOAD_A8
+                                            : MCS51::SPILL_LOAD16;
+  BuildMI(MBB, MI, DebugLoc(), get(Opcode), DestReg)
       .addFrameIndex(FrameIndex)
       .addImm(0)
       .addMemOperand(MMO)

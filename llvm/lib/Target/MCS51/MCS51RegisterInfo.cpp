@@ -54,12 +54,28 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     report_fatal_error("MCS-51 stack frame exceeds 128-byte displacement");
 
   auto I = MI->getIterator();
-  auto EmitAddress = [&]() {
+  auto EmitAddressAtOffset = [&](int64_t AddressOffset) {
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x81);
-    BuildMI(MBB, I, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A).addImm(Offset);
+    BuildMI(MBB, I, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+        .addImm(AddressOffset);
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
         .addReg(MCS51::R1, RegState::Define);
   };
+  auto EmitAddress = [&]() { EmitAddressAtOffset(Offset); };
+  auto OffsetAfterPush = [&](int64_t Count) {
+    int64_t Adjusted = Offset - Count;
+    if (Adjusted < -128)
+      Adjusted += 256;
+    return Adjusted;
+  };
+
+  if (MI->getOpcode() == MCS51::FRAMEADDR_R1) {
+    if (Offset < -128 || Offset > 127)
+      report_fatal_error("MCS-51 stack frame exceeds 128-byte displacement");
+    EmitAddressAtOffset(Offset);
+    MI->eraseFromParent();
+    return true;
+  }
 
   if (MI->getOpcode() == MCS51::LOAD_FRAME8_INDEX ||
       MI->getOpcode() == MCS51::STORE_FRAME8_INDEX) {
@@ -86,11 +102,20 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
       MI->getOpcode() == MCS51::LOAD_FRAME8 ||
       MI->getOpcode() == MCS51::SPILL_LOAD16 ||
+      MI->getOpcode() == MCS51::SPILL_LOAD_A8 ||
       MI->getOpcode() == MCS51::LOAD_FRAME16) {
     Register Dst = MI->getOperand(0).getReg();
-    EmitAddress();
+    if (MI->getOpcode() == MCS51::SPILL_LOAD_A8) {
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+      EmitAddressAtOffset(OffsetAfterPush(1));
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+    } else {
+      EmitAddress();
+    }
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
-    if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
+    if (MI->getOpcode() == MCS51::SPILL_LOAD_A8) {
+      // The load itself leaves the byte in the accumulator register class.
+    } else if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
         MI->getOpcode() == MCS51::LOAD_FRAME8) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
     } else {
@@ -105,14 +130,25 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
              MI->getOpcode() == MCS51::STORE_FRAME8 ||
              MI->getOpcode() == MCS51::SPILL_STORE16 ||
+             MI->getOpcode() == MCS51::SPILL_STORE_A8 ||
              MI->getOpcode() == MCS51::STORE_FRAME16) {
     Register Src = MI->getOperand(FIOperandNum + 2).getReg();
-    EmitAddress();
-    if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
+    if (MI->getOpcode() == MCS51::SPILL_STORE_A8) {
+      // Save A and PSW while forming the address so the spill preserves both
+      // the accumulator value and live condition flags.
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+      EmitAddressAtOffset(OffsetAfterPush(2));
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
+    } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
         MI->getOpcode() == MCS51::STORE_FRAME8) {
+      EmitAddress();
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
     } else {
+      EmitAddress();
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
           .addImm(0x82);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);

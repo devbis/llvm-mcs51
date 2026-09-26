@@ -29,12 +29,19 @@ def SDT_MCS51Add32 : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
 def SDT_MCS51Mul16 : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                           SDTCisVT<1, i16>,
                                           SDTCisVT<2, i16>] >;
+def SDT_MCS51Shift32Parts : SDTypeProfile<2, 3, [SDTCisVT<0, i16>,
+                                                 SDTCisVT<1, i16>,
+                                                 SDTCisVT<2, i16>,
+                                                 SDTCisVT<3, i16>,
+                                                 SDTCisVT<4, i16>] >;
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpeq16 : SDNode<"MCS51ISD::CMPEQ16", SDT_MCS51CmpUlt16>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
 def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
+def MCS51srl32_parts : SDNode<"MCS51ISD::SRL32_PARTS",
+                              SDT_MCS51Shift32Parts>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -85,7 +92,10 @@ def INC_A : MCS51Inst<0x04, "inc a">;
 def RRC_A : MCS51Inst<0x13, "rrc a"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
-def DEC_A : MCS51Inst<0x14, "dec a">;
+def DEC_A : MCS51Inst<0x14, "dec a"> {
+  let Defs = [A];
+  let Uses = [A];
+}
 def RL_A : MCS51Inst<0x23, "rl a">;
 def RLC_A : MCS51Inst<0x33, "rlc a"> {
   let Defs = [A, C]; let Uses = [A, C];
@@ -407,6 +417,8 @@ def DJNZ_DIRECT : Instruction {
   let isBranch = 1;
   let mayLoad = 1;
   let mayStore = 1;
+  let Defs = [B];
+  let Uses = [B];
   bits<8> addr;
   bits<8> target;
   bits<24> Inst;
@@ -1018,6 +1030,20 @@ def SPILL_LOAD16 : Instruction {
   let isCodeGenOnly = 1;
   let mayLoad = 1;
   let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def SPILL_LOAD_A8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
 }
 
 def SPILL_STORE16 : Instruction {
@@ -1030,6 +1056,32 @@ def SPILL_STORE16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def SPILL_STORE_A8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51AReg:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [A, R1, SP];
+  let Uses = [A, R1, SP];
+}
+
+def FRAMEADDR_R1 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
   let Defs = [A, R1];
   let Uses = [SP];
 }
@@ -1203,6 +1255,23 @@ def MUL16rr : Instruction {
   let hasSideEffects = 1;
 }
 
+def SRL32_PARTS : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
+  let InOperandList = (ins MCS51PTR:$srclo, MCS51PTR:$srchi,
+                           MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
+                      (MCS51srl32_parts MCS51PTR:$srclo,
+                                        MCS51PTR:$srchi,
+                                        MCS51PTR:$amount))];
+}
+
 let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
                     (MCS51add32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
                                 MCS51PTR:$rhslo, MCS51PTR:$rhshi))] in
@@ -1304,7 +1373,7 @@ class MCS51AccDirectInst<bits<8> opcode, string mnemonic> : Instruction {
   let Size = 2;
   let hasSideEffects = 1;
   let Defs = [A];
-  let Uses = [A, B];
+  let Uses = [A];
   bits<1> dst;
   let dst = 0;
   bits<8> addr;
@@ -1391,7 +1460,7 @@ class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
 
 def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov"> {
   let Defs = [];
-  let Uses = [B];
+  let Uses = [];
 }
 def XCH_A_DIRECT : MCS51AccDirectInst<0xC5, "xch">;
 def ADD_A_DIRECT : MCS51AccDirectInst<0x25, "add"> {
@@ -1457,10 +1526,36 @@ def ANL_DIRECT_IMM : MCS51DirectImmInst<0x53, "anl">;
 def ORL_DIRECT_IMM : MCS51DirectImmInst<0x43, "orl">;
 def XRL_DIRECT_IMM : MCS51DirectImmInst<0x63, "xrl">;
 def PUSH_DIRECT : MCS51DirectInst<0xC0, "push"> {
-  let Defs = [SP]; let Uses = [SP];
+  let Defs = [SP]; let Uses = [SP, A];
 }
 def POP_DIRECT : MCS51DirectInst<0xD0, "pop"> {
-  let Defs = [SP]; let Uses = [SP];
+  let Defs = [SP, A]; let Uses = [SP];
+}
+def PUSH_PSW : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "push 208";
+  let Size = 2;
+  let hasSideEffects = 1;
+  let Defs = [SP];
+  let Uses = [SP];
+  bits<16> Inst;
+  let Inst{7-0} = 0xC0;
+  let Inst{15-8} = 0xD0;
+}
+def POP_PSW : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "pop 208";
+  let Size = 2;
+  let hasSideEffects = 1;
+  let Defs = [SP];
+  let Uses = [SP];
+  bits<16> Inst;
+  let Inst{7-0} = 0xD0;
+  let Inst{15-8} = 0xD0;
 }
 def INC_DIRECT : MCS51DirectInst<0x05, "inc">;
 def DEC_DIRECT : MCS51DirectInst<0x15, "dec">;
