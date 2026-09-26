@@ -43,3 +43,9 @@ SECTIONS
   __mcs51_data_load = LOADADDR(.data);
   .bss (NOLOAD) : { *(.bss .bss.*) *(COMMON) } > XRAM
 }
+
+/* The upper 256 bytes of SRAM are also the CPU's DATA/IDATA address window. */
+ASSERT(ADDR(.data) + SIZEOF(.data) <= __cc2530_data_alias_start,
+       "CC2530 .data overlaps the DATA-space SRAM alias")
+ASSERT(ADDR(.bss) + SIZEOF(.bss) <= __cc2530_data_alias_start,
+       "CC2530 .bss overlaps the DATA-space SRAM alias")

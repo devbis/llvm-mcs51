@@ -55,7 +55,8 @@ because CODE and XDATA are separate 8051 buses. This profile covers the common
 32 KiB code window and defines the CC2530 XDATA windows for 8 KiB SRAM, XREG,
 memory-mapped SFRs, the information page, and the selectable 32 KiB flash-bank
 window. Linker symbols also describe the DATA alias in the top 256 bytes of
-SRAM. Ordinary `.data` and `.bss` allocation remains limited to SRAM. The
+SRAM. Static XDATA `.data` and `.bss` outputs are linker-checked to stay below
+`0x1f00`, preserving that alias for the CPU's DATA/IDATA space. The
 current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
