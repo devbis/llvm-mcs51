@@ -743,13 +743,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::ADDDPTR16ri) {
     Register Dst = MI.getOperand(0).getReg();
     int64_t Amount = MI.getOperand(2).getImm();
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
         .add(MI.getOperand(1));
-    for (int64_t I = 0; I < Amount; ++I) {
+    for (int64_t I = 0; I < Amount; ++I)
       BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-          .addReg(MCS51::DPTR);
-    }
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
     MI.eraseFromParent();
     return MBB;
   }
