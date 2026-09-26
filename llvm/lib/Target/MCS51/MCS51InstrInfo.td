@@ -793,7 +793,7 @@ def SPILL_LOAD16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1, DPTR];
+  let Defs = [A, R1];
 }
 
 def SPILL_STORE16 : Instruction {
@@ -807,7 +807,7 @@ def SPILL_STORE16 : Instruction {
   let isCodeGenOnly = 1;
   let mayStore = 1;
   let Defs = [A, R1];
-  let Uses = [DPTR, SP];
+  let Uses = [SP];
 }
 
 def LOAD_FRAME8 : Instruction {
@@ -828,6 +828,33 @@ def STORE_FRAME8 : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
                            MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def LOAD_FRAME16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def STORE_FRAME16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51PTR:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
