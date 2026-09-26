@@ -18,6 +18,9 @@ def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                         SDNPVariadic]>;
+def MCS51icall : SDNode<"MCS51ISD::ICALL", SDT_MCS51Call,
+                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                         SDNPVariadic]>;
 def SDT_MCS51Br : SDTypeProfile<0, 3, [SDTCisVT<0, i8>,
                                        SDTCisSameAs<0, 1>,
                                        SDTCisVT<2, OtherVT>]>;
@@ -81,7 +84,11 @@ def CPL_A : MCS51Inst<0xF4, "cpl a">;
 def CLR_C : MCS51Inst<0xC3, "clr c"> { let Defs = [C]; }
 def CPL_C : MCS51Inst<0xB3, "cpl c">;
 def SETB_C : MCS51Inst<0xD3, "setb c">;
-def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr">;
+def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr"> {
+  let isBranch = 1; let isIndirectBranch = 1;
+  let isTerminator = 1; let isBarrier = 1;
+  let Uses = [A, DPTR];
+}
 def MOVC_ADPTR : MCS51Inst<0x93, "movc a, @a+dptr"> {
   let Defs = [A]; let Uses = [A, DPTR];
 }
@@ -756,6 +763,25 @@ def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16> {
 
 def : Pat<(MCS51call (i16 texternalsym:$addr)),
           (LCALL texternalsym:$addr)>;
+
+// The 8051 has no indirect CALL instruction. The custom inserter expands this
+// pseudo to an LCALL of a local dispatch block and a continuation jump when
+// needed. The dispatcher clears A, then uses JMP @A+DPTR to tail-transfer to
+// the callee; its RET returns to the call site's continuation.
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+    Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
+def ICALL : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51PTR:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+
+def : Pat<(MCS51icall (i16 MCS51PTR:$target)), (ICALL MCS51PTR:$target)>;
 
 def MOV_DPTR_IMM : Instruction {
   let Namespace = "MCS51";
