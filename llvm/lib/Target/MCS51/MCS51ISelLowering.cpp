@@ -565,6 +565,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register FalseCopy = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51PTRRegClass);
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    // DPTR is reloaded from the selected virtual value in the tail. The
+    // generic split liveness can retain it as a physical live-in even though
+    // it is defined before its first use there, which is invalid for an
+    // allocatable register in a block containing a PHI.
+    Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MF.insert(Tail->getIterator(), TrueBB);
@@ -603,6 +608,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register FalseCopy = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MF.insert(Tail->getIterator(), TrueBB);
@@ -833,6 +839,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register SrcHi = MI.getOperand(3).getReg();
     Register Amount = MI.getOperand(4).getReg();
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *Loop = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MF.insert(Tail->getIterator(), Loop);
     MBB->addSuccessor(Loop);
@@ -1024,6 +1031,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     int64_t CompareKind = MI.getOperand(3).getImm();
     if (CompareKind == 2) {
       MachineBasicBlock *Tail = MBB->splitAt(MI);
+      Tail->removeLiveIn(MCS51::DPTR);
       MachineBasicBlock *HighCompareBB =
           MF.CreateMachineBasicBlock(MBB->getBasicBlock());
       MachineBasicBlock *EqualBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
@@ -1208,6 +1216,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Src = MI.getOperand(1).getReg();
     Register Amount = MI.getOperand(2).getReg();
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *CheckAmount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *LoadCount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *Loop = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
