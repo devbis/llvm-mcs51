@@ -57,6 +57,30 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
+  auto LowerUnsignedWordCompare = [&](SDValue LHS, SDValue RHS,
+                                      ISD::CondCode CC) -> SDValue {
+    bool Invert = false;
+    switch (CC) {
+    case ISD::SETULT:
+      break;
+    case ISD::SETUGE:
+      Invert = true;
+      break;
+    case ISD::SETUGT:
+      std::swap(LHS, RHS);
+      break;
+    case ISD::SETULE:
+      std::swap(LHS, RHS);
+      Invert = true;
+      break;
+    default:
+      return SDValue();
+    }
+    SDValue Result = DAG.getNode(MCS51ISD::CMPULT16, DL, MVT::i8, LHS, RHS);
+    return Invert ? DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
+                                DAG.getConstant(1, DL, MVT::i8))
+                  : Result;
+  };
   if (Op.getOpcode() == ISD::SRL && Op.getValueType() == MVT::i16) {
     auto *Amount = dyn_cast<ConstantSDNode>(Op.getOperand(1));
     if (!Amount || Amount->getZExtValue() != 8)
@@ -66,9 +90,7 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if (Op.getOpcode() == ISD::SETCC &&
       Op.getOperand(0).getValueType() == MVT::i16) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
-    if (CC == ISD::SETULT)
-      return DAG.getNode(MCS51ISD::CMPULT16, DL, MVT::i8,
-                         Op.getOperand(0), Op.getOperand(2));
+    return LowerUnsignedWordCompare(Op.getOperand(0), Op.getOperand(2), CC);
   }
   if (Op.getOpcode() == ISD::SELECT_CC &&
       Op.getOperand(0).getValueType() == MVT::i16 &&
@@ -76,10 +98,16 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
     auto *TrueValue = dyn_cast<ConstantSDNode>(Op.getOperand(2));
     auto *FalseValue = dyn_cast<ConstantSDNode>(Op.getOperand(3));
-    if (CC == ISD::SETULT && TrueValue && FalseValue &&
-        TrueValue->isOne() && FalseValue->isZero())
-      return DAG.getNode(MCS51ISD::CMPULT16, DL, MVT::i8, Op.getOperand(0),
-                         Op.getOperand(1));
+    if (TrueValue && FalseValue &&
+        ((TrueValue->isOne() && FalseValue->isZero()) ||
+         (TrueValue->isZero() && FalseValue->isOne()))) {
+      SDValue Result = LowerUnsignedWordCompare(Op.getOperand(0),
+                                                 Op.getOperand(1), CC);
+      if (Result && TrueValue->isZero())
+        Result = DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
+                             DAG.getConstant(1, DL, MVT::i8));
+      return Result;
+    }
   }
   if (Op.getOpcode() != ISD::BR_CC)
     return SDValue();

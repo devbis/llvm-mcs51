@@ -97,3 +97,29 @@ unsigned short subtract_words(unsigned short lhs, unsigned short rhs) {
 unsigned char less_than_words(unsigned short lhs, unsigned short rhs) {
   return lhs < rhs;
 }
+
+// CHECK-LABEL: less_equal_words:
+// CHECK: subb a,
+// CHECK: subb a,
+// CHECK: xrl a, #1
+// CHECK: ret
+unsigned char less_equal_words(unsigned short lhs, unsigned short rhs) {
+  return lhs <= rhs;
+}
+
+// CHECK-LABEL: greater_words:
+// CHECK: subb a,
+// CHECK: subb a,
+// CHECK: ret
+unsigned char greater_words(unsigned short lhs, unsigned short rhs) {
+  return lhs > rhs;
+}
+
+// CHECK-LABEL: greater_equal_words:
+// CHECK: subb a,
+// CHECK: subb a,
+// CHECK: xrl a, #1
+// CHECK: ret
+unsigned char greater_equal_words(unsigned short lhs, unsigned short rhs) {
+  return lhs >= rhs;
+}
