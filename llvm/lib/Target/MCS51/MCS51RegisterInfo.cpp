@@ -26,13 +26,24 @@ const uint32_t *MCS51RegisterInfo::getCallPreservedMask(
   return nullptr;
 }
 
-BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &) const {
+BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
   Reserved.set(MCS51::PC);
   Reserved.set(MCS51::SP);
   Reserved.set(MCS51::PSW);
   // R1 is reserved as the indirect pointer for stack frame spill accesses.
   Reserved.set(MCS51::R1);
+  // Variable-width 16-bit shifts use DJNZ to keep their counter in R0 across
+  // the loop backedge. Reserve it while the generic shift node is still
+  // present, before its custom inserter introduces the loop.
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      if (MI.getOpcode() == MCS51::SRL16 || MI.getOpcode() == MCS51::SHL16 ||
+          MI.getOpcode() == MCS51::SRA16 ||
+          MI.getOpcode() == MCS51::DJNZ_RN) {
+        Reserved.set(MCS51::R0);
+        return Reserved;
+      }
   return Reserved;
 }
 
