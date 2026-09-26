@@ -7,6 +7,7 @@ MEMORY
   CODE      (rx) : ORIGIN = 0x0000, LENGTH = 0x8000
   XRAM      (rw) : ORIGIN = 0x0000, LENGTH = 0x2000
   DATA_RAM  (rw) : ORIGIN = 0x0000, LENGTH = 0x0100
+  BIT_RAM   (rw) : ORIGIN = 0x0000, LENGTH = 0x0080
   XREG      (rw) : ORIGIN = 0x6000, LENGTH = 0x0400
   SFR_XDATA (rw) : ORIGIN = 0x7080, LENGTH = 0x0080
   INFO_PAGE (r)  : ORIGIN = 0x7800, LENGTH = 0x0800
@@ -134,6 +135,20 @@ SECTIONS
     *(.mcs51.data2.bss)
     __mcs51_data2_bss_end = .;
   } > DATA_RAM
+
+  /* The bit address space uses 8-bit bit addresses, independently of DATA. */
+  .mcs51_bit 0 :
+  {
+    __mcs51_bit_start = .;
+    *(.mcs51.bit)
+    __mcs51_bit_end = .;
+  } > BIT_RAM AT> CODE
+  __mcs51_bit_load = LOADADDR(.mcs51_bit);
+  .mcs51_bit_bss (NOLOAD) :
+  {
+    *(.mcs51.bit.bss)
+    __mcs51_bit_bss_end = .;
+  } > BIT_RAM
 }
 
 /* The upper 256 bytes of SRAM are also the CPU's DATA/IDATA address window. */
@@ -145,6 +160,8 @@ ASSERT(__mcs51_data1_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA globals exceed directly addressable internal RAM")
 ASSERT(__mcs51_data2_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA/IDATA globals overlap the hardware stack")
+ASSERT(__mcs51_bit_bss_end <= LENGTH(BIT_RAM),
+       "CC2530 bit globals exceed the bit-addressable DATA area")
 ASSERT(ADDR(.text) + SIZEOF(.text) <= 0x8000,
        "CC2530 common code exceeds the 32-KiB root bank")
 ASSERT(SIZEOF(.mcs51_vector_0) <= 3,
