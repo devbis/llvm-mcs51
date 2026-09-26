@@ -444,11 +444,72 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADXABS8) {
+    Register Dst = MI.getOperand(0).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::LOADXABS16) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LowByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::STOREDIRECT8) {
     Register Src = MI.getOperand(1).getReg();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A))
         .add(MI.getOperand(0));
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREXABS8) {
+    Register Src = MI.getOperand(1).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+        .add(MI.getOperand(0));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREXABS16) {
+    Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register HighByte = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LowByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), HighByte)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+        .add(MI.getOperand(0));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(HighByte);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
     MI.eraseFromParent();
     return MBB;
   }

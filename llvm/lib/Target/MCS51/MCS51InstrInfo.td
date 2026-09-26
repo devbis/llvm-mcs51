@@ -431,6 +431,35 @@ def LOADX8 : Instruction {
   let mayLoad = 1;
 }
 
+// Absolute XDATA accesses must load the symbol/address into DPTR before using
+// MOVX. Keep these separate from LOADX8/LOADX16, which operate on a live pointer
+// already held in DPTR.
+def LOADXABS8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Imm16:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, DPTR];
+}
+
+def LOADXABS16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51Imm16:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, DPTR];
+}
+
 def LOADX16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -551,6 +580,32 @@ def STOREX8 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let mayStore = 1;
+}
+
+def STOREXABS8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm16:$addr, MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+  let Defs = [A, DPTR];
+}
+
+def STOREXABS16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm16:$addr, MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+  let Defs = [A, DPTR];
 }
 
 class MCS51IndirectMemPseudo<bits<1> IsLoad> : Instruction {

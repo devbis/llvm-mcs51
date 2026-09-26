@@ -7,6 +7,8 @@
 @data_byte = external addrspace(1) global i8
 @sfr_word = external addrspace(7) global i16
 @data_word = external addrspace(1) global i16
+@xdata_byte = external addrspace(4) global i8
+@xdata_word = external addrspace(4) global i16
 
 define i8 @read_xdata(i8 %address) {
 entry:
@@ -138,6 +140,30 @@ entry:
 define void @write_sfr_word() {
 entry:
   store i16 4660, ptr addrspace(7) @sfr_word, align 1
+  ret void
+}
+
+define i8 @read_xdata_symbol() {
+entry:
+  %value = load i8, ptr addrspace(4) @xdata_byte, align 1
+  ret i8 %value
+}
+
+define void @write_xdata_symbol(i8 %value) {
+entry:
+  store i8 %value, ptr addrspace(4) @xdata_byte, align 1
+  ret void
+}
+
+define i16 @read_xdata_symbol_word() {
+entry:
+  %value = load i16, ptr addrspace(4) @xdata_word, align 1
+  ret i16 %value
+}
+
+define void @write_xdata_symbol_word(i16 %value) {
+entry:
+  store i16 %value, ptr addrspace(4) @xdata_word, align 1
   ret void
 }
 
@@ -298,6 +324,30 @@ entry:
 ; CHECK: mov sfr_word+1, a
 ; CHECK: ret
 
+; CHECK-LABEL: read_xdata_symbol:
+; CHECK: mov dptr, #xdata_byte
+; CHECK: movx a, @dptr
+; CHECK: ret
+
+; CHECK-LABEL: write_xdata_symbol:
+; CHECK: mov dptr, #xdata_byte
+; CHECK: movx @dptr, a
+; CHECK: ret
+
+; CHECK-LABEL: read_xdata_symbol_word:
+; CHECK: mov dptr, #xdata_word
+; CHECK: movx a, @dptr
+; CHECK: inc dptr
+; CHECK: movx a, @dptr
+; CHECK: ret
+
+; CHECK-LABEL: write_xdata_symbol_word:
+; CHECK: mov dptr, #xdata_word
+; CHECK: movx @dptr, a
+; CHECK: inc dptr
+; CHECK: movx @dptr, a
+; CHECK: ret
+
 ; DIS-LABEL: <read_idata>:
 ; DIS: mov a, @r0
 ; DIS-LABEL: <write_idata>:
@@ -325,3 +375,7 @@ entry:
 ; RELOC: R_8051_8 data_word 0x1
 ; RELOC: R_8051_8 sfr_word 0x0
 ; RELOC: R_8051_8 sfr_word 0x1
+; RELOC: R_8051_16 xdata_byte 0x0
+; RELOC: R_8051_16 xdata_byte 0x0
+; RELOC: R_8051_16 xdata_word 0x0
+; RELOC: R_8051_16 xdata_word 0x0
