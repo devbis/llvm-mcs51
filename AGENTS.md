@@ -33,21 +33,26 @@ cmake --build ../llvm-8051-build \
 
 ## Verification
 
-Run the MCS-51 CodeGen, MC, and LLD relocation tests with:
+After changing the backend, build the compiler and tools from the sibling build
+directory, then run the focused MCS-51 tests. From the `llvm-8051` source root:
 
 ```sh
+cmake --build ../llvm-8051-build \
+  --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj FileCheck lld \
+  -j 10
+
 ../llvm-8051-build/bin/llvm-lit -q \
   llvm/test/CodeGen/8051 \
   llvm/test/MC/MCS51 \
   lld/test/ELF/mcs51-relocations.s \
-  lld/test/ELF/mcs51-11-bit-branch.s
+  lld/test/ELF/mcs51-11-bit-branch.s \
+  llvm/test/CodeGen/8051/cc2530-firmware.c \
+  llvm/test/CodeGen/8051/division-runtime.c
 ```
 
-The CC2530 end-to-end test is
-`llvm/test/CodeGen/8051/cc2530-firmware.c`. It checks C compilation through
-Clang and LLD, followed by Intel HEX generation. Keep new MCS-51-specific tests
-inside this checkout, even when nearby test directories are symlinks to another
-LLVM checkout.
+The CC2530 end-to-end test checks C compilation through Clang and LLD, followed
+by Intel HEX generation. Keep new MCS-51-specific tests inside this checkout,
+even when nearby test directories are symlinks to another LLVM checkout.
 
 The CC2530 common-flash/XDATA linker layout is
 `llvm/lib/Target/MCS51/cc2530.ld`. Pass it to Clang/LLD with
