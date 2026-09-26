@@ -563,10 +563,14 @@ class MCS51BitInst<bits<8> opcode, string mnemonic> : Instruction {
 }
 
 def MOV_C_BIT : MCS51BitInst<0xA2, "mov c, $bitaddr"> { let Defs = [C]; }
-def MOV_BIT_C : MCS51BitInst<0x92, "mov $bitaddr, c"> { let Uses = [C]; }
-def CLR_BIT : MCS51BitInst<0xC2, "clr $bitaddr">;
-def SETB_BIT : MCS51BitInst<0xD2, "setb $bitaddr">;
-def CPL_BIT : MCS51BitInst<0xB2, "cpl $bitaddr">;
+def MOV_BIT_C : MCS51BitInst<0x92, "mov $bitaddr, c"> {
+  let Uses = [C]; let mayStore = 1;
+}
+def CLR_BIT : MCS51BitInst<0xC2, "clr $bitaddr"> { let mayStore = 1; }
+def SETB_BIT : MCS51BitInst<0xD2, "setb $bitaddr"> { let mayStore = 1; }
+def CPL_BIT : MCS51BitInst<0xB2, "cpl $bitaddr"> {
+  let mayLoad = 1; let mayStore = 1;
+}
 def ANL_C_BIT : MCS51BitInst<0x82, "anl c, $bitaddr"> { let Defs = [C]; }
 def ANL_C_NOTBIT : MCS51BitInst<0xB0, "anl c, /$bitaddr"> { let Defs = [C]; }
 def ORL_C_BIT : MCS51BitInst<0x72, "orl c, $bitaddr"> { let Defs = [C]; }

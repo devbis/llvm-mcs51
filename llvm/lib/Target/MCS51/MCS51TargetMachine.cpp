@@ -20,13 +20,18 @@ public:
                                     const TargetMachine &TM) const override {
     const auto *GV = dyn_cast<GlobalVariable>(GO);
     if (GV && !GV->hasSection() &&
-        (GV->getAddressSpace() == MCS51::Data ||
+        (GV->getAddressSpace() == MCS51::Bit ||
+         GV->getAddressSpace() == MCS51::Data ||
          GV->getAddressSpace() == MCS51::IData)) {
+      bool IsBit = GV->getAddressSpace() == MCS51::Bit;
       bool IsData = GV->getAddressSpace() == MCS51::Data;
-      StringRef Name = IsData ? (Kind.isBSS() ? ".mcs51.data1.bss"
-                                              : ".mcs51.data1")
-                              : (Kind.isBSS() ? ".mcs51.data2.bss"
-                                              : ".mcs51.data2");
+      StringRef Name;
+      if (IsBit)
+        Name = Kind.isBSS() ? ".mcs51.bit.bss" : ".mcs51.bit";
+      else if (IsData)
+        Name = Kind.isBSS() ? ".mcs51.data1.bss" : ".mcs51.data1";
+      else
+        Name = Kind.isBSS() ? ".mcs51.data2.bss" : ".mcs51.data2";
       unsigned Type = Kind.isBSS() ? ELF::SHT_NOBITS : ELF::SHT_PROGBITS;
       unsigned Flags = ELF::SHF_ALLOC;
       if (!Kind.isReadOnly())
