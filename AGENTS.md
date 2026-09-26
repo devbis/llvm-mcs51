@@ -62,7 +62,13 @@ XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
 profile does not yet package physical bank images or implement code-bank
 switching calls.
 
-## Completion criteria
+## Final target and completion criteria
+
+The final deliverable is a buildable LLVM branch that can compile, optimize,
+link, and emit deployable firmware for classic MCS-51/8051 devices and the
+CC2530. Building the listed tools and passing the focused test suite are the
+minimum per-change checks; they do not by themselves mean the architecture is
+fully supported.
 
 The project is complete only when all of the following work together and are
 verified:
@@ -78,6 +84,13 @@ verified:
 * Optimization tests and representative firmware comparisons show compact,
   correct output approaching IAR/Keil quality, rather than merely proving that
   the target is registered or that a minimal image links.
+
+For a final readiness check, build all listed tools, run the MCS-51 CodeGen,
+MC, and LLD relocation tests above, and run the CC2530 end-to-end firmware test.
+Add focused regression tests for each newly supported ABI, instruction,
+address-space, linker, startup, and image-generation feature. Inspect generated
+assembly and linked images for representative firmware to confirm both
+correctness and code size.
 
 Current work is incomplete. Ordinary unqualified globals are assigned to
 XDATA, and the initial linker profile maps zero-initialized globals there.
