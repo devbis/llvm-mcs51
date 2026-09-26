@@ -88,3 +88,12 @@ unsigned short add_words(unsigned short lhs, unsigned short rhs) {
 unsigned short subtract_words(unsigned short lhs, unsigned short rhs) {
   return lhs - rhs;
 }
+
+// CHECK-LABEL: less_than_words:
+// CHECK: subb a,
+// CHECK: subb a,
+// CHECK: rlc a
+// CHECK: ret
+unsigned char less_than_words(unsigned short lhs, unsigned short rhs) {
+  return lhs < rhs;
+}

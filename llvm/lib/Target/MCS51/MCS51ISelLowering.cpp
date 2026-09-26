@@ -26,6 +26,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i16, Custom);
+  setOperationAction(ISD::SETCC, MVT::i16, Custom);
+  setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
   setBooleanContents(ZeroOrOneBooleanContent);
   setStackPointerRegisterToSaveRestore(MCS51::SP);
@@ -60,6 +62,24 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     if (!Amount || Amount->getZExtValue() != 8)
       report_fatal_error("unsupported MCS-51 16-bit logical shift");
     return DAG.getNode(MCS51ISD::SRL16_8, DL, MVT::i16, Op.getOperand(0));
+  }
+  if (Op.getOpcode() == ISD::SETCC &&
+      Op.getOperand(0).getValueType() == MVT::i16) {
+    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+    if (CC == ISD::SETULT)
+      return DAG.getNode(MCS51ISD::CMPULT16, DL, MVT::i8,
+                         Op.getOperand(0), Op.getOperand(2));
+  }
+  if (Op.getOpcode() == ISD::SELECT_CC &&
+      Op.getOperand(0).getValueType() == MVT::i16 &&
+      Op.getValueType() == MVT::i8) {
+    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+    auto *TrueValue = dyn_cast<ConstantSDNode>(Op.getOperand(2));
+    auto *FalseValue = dyn_cast<ConstantSDNode>(Op.getOperand(3));
+    if (CC == ISD::SETULT && TrueValue && FalseValue &&
+        TrueValue->isOne() && FalseValue->isZero())
+      return DAG.getNode(MCS51ISD::CMPULT16, DL, MVT::i8, Op.getOperand(0),
+                         Op.getOperand(1));
   }
   if (Op.getOpcode() != ISD::BR_CC)
     return SDValue();
@@ -517,6 +537,48 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::CMPULT16) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    Register LHSLo = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register LHSHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register RHSLo = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register RHSHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    auto CopyDPTR = [&](Register Src) {
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Src);
+    };
+    auto ReadDPTRByte = [&](int64_t Address, Register DstByte) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(Address);
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), DstByte)
+          .addReg(MCS51::A);
+    };
+    CopyDPTR(LHS);
+    ReadDPTRByte(0x82, LHSLo);
+    ReadDPTRByte(0x83, LHSHi);
+    CopyDPTR(RHS);
+    ReadDPTRByte(0x82, RHSLo);
+    ReadDPTRByte(0x83, RHSHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSLo);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHSLo);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHSHi);
+    // CLR A preserves CY, and RLC moves the borrow into bit zero.
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
     MI.eraseFromParent();
     return MBB;
   }
