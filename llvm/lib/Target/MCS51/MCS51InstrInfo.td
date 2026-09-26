@@ -19,9 +19,17 @@ def MCS51srl16_8 : SDNode<"MCS51ISD::SRL16_8", SDT_MCS51ShiftWord8>;
 def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                             SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>] >;
+def SDT_MCS51Add32 : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
+                                         SDTCisVT<1, i16>,
+                                         SDTCisVT<2, i16>,
+                                         SDTCisVT<3, i16>,
+                                         SDTCisVT<4, i16>,
+                                         SDTCisVT<5, i16>] >;
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpeq16 : SDNode<"MCS51ISD::CMPEQ16", SDT_MCS51CmpUlt16>;
+def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
+def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -199,8 +207,12 @@ def INC_R0_IND : MCS51Inst<0x06, "inc @r0">;
 def INC_R1_IND : MCS51Inst<0x07, "inc @r1">;
 def DEC_R0_IND : MCS51Inst<0x16, "dec @r0">;
 def DEC_R1_IND : MCS51Inst<0x17, "dec @r1">;
-def ADD_A_R0_IND : MCS51Inst<0x26, "add a, @r0">;
-def ADD_A_R1_IND : MCS51Inst<0x27, "add a, @r1">;
+def ADD_A_R0_IND : MCS51Inst<0x26, "add a, @r0"> {
+  let Defs = [A, C]; let Uses = [A];
+}
+def ADD_A_R1_IND : MCS51Inst<0x27, "add a, @r1"> {
+  let Defs = [A, C]; let Uses = [A];
+}
 def ADDC_A_R0_IND : MCS51Inst<0x36, "addc a, @r0">;
 def ADDC_A_R1_IND : MCS51Inst<0x37, "addc a, @r1">;
 def SUBB_A_R0_IND : MCS51Inst<0x96, "subb a, @r0">;
@@ -1143,6 +1155,38 @@ def ADD16rr : MCS51WordArithmetic;
 let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
 
+let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
+                    (MCS51add32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                                MCS51PTR:$rhslo, MCS51PTR:$rhshi))] in
+def ADD32rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
+  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
+
+let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
+                    (MCS51sub32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                                MCS51PTR:$rhslo, MCS51PTR:$rhshi))] in
+def SUB32rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
+  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
+
 def CMP16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
@@ -1189,7 +1233,7 @@ def MOV_A_IMM : MCS51AccImmInst<0x74, "mov"> {
   let Pattern = [(set MCS51AReg:$dst, MCS51Imm8:$imm)];
 }
 def ADD_A_IMM : MCS51AccImmInst<0x24, "add"> {
-  let Defs = [A]; let Uses = [A];
+  let Defs = [A, C]; let Uses = [A];
 }
 def SUBB_A_IMM : MCS51AccImmInst<0x94, "subb"> {
   let Defs = [A, C]; let Uses = [A, C];
@@ -1303,7 +1347,7 @@ def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov"> {
 }
 def XCH_A_DIRECT : MCS51AccDirectInst<0xC5, "xch">;
 def ADD_A_DIRECT : MCS51AccDirectInst<0x25, "add"> {
-  let Defs = [A]; let Uses = [A];
+  let Defs = [A, C]; let Uses = [A];
 }
 def ADDC_A_DIRECT : MCS51AccDirectInst<0x35, "addc"> {
   let Defs = [A, C]; let Uses = [A, C];
@@ -1492,7 +1536,9 @@ class MCS51RnDefInst<bits<5> opcode, string mnemonic> : Instruction {
 }
 
 def MOV_A_RN  : MCS51RnInst<0b11101, "mov a,"> { let Defs = [A]; }
-def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> { let Defs = [A]; let Uses = [A]; }
+def ADD_A_RN  : MCS51RnInst<0b00101, "add a,"> {
+  let Defs = [A, C]; let Uses = [A];
+}
 def ANL_A_RN  : MCS51RnInst<0b01011, "anl a,"> { let Defs = [A]; let Uses = [A]; }
 def ORL_A_RN  : MCS51RnInst<0b01001, "orl a,"> { let Defs = [A]; let Uses = [A]; }
 def XRL_A_RN  : MCS51RnInst<0b01101, "xrl a,"> { let Defs = [A]; let Uses = [A]; }
