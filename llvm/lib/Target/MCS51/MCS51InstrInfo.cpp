@@ -95,6 +95,18 @@ void MCS51InstrInfo::loadRegFromStackSlot(
 
 bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
+  if (Opcode == MCS51::RET_A) {
+    MachineBasicBlock &MBB = *MI.getParent();
+    MachineBasicBlock::iterator I = MI.getIterator();
+    const DebugLoc &DL = MI.getDebugLoc();
+    Register RetVal = MI.getOperand(0).getReg();
+    if (RetVal != MCS51::A)
+      BuildMI(MBB, I, DL, get(MCS51::MOV_A_RN))
+          .addReg(RetVal, getKillRegState(MI.getOperand(0).isKill()));
+    BuildMI(MBB, I, DL, get(MCS51::RET_NOA));
+    MI.eraseFromParent();
+    return true;
+  }
   if (Opcode != MCS51::LOADSTACKARG8)
     return false;
 
