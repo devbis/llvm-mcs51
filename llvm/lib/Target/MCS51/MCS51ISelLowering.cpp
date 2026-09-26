@@ -60,7 +60,7 @@ EVT MCS51TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
 
 MVT MCS51TargetLowering::getRegisterTypeForCallingConv(
     LLVMContext &Context, CallingConv::ID CC, EVT VT) const {
-  if (VT == MVT::i32)
+  if (VT == MVT::i32 || VT == MVT::i64)
     return MVT::i8;
   return TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT);
 }
@@ -69,6 +69,8 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
     LLVMContext &Context, CallingConv::ID CC, EVT VT) const {
   if (VT == MVT::i32)
     return 4;
+  if (VT == MVT::i64)
+    return 8;
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
@@ -444,11 +446,21 @@ SDValue MCS51TargetLowering::LowerCall(
       Chain = DAG.getNode(MCS51ISD::POP_ARG8, DL, MVT::Other, Chain);
   };
 
-  if (CLI.RetTy && CLI.RetTy->isIntegerTy(32)) {
-    if (CLI.Ins.size() != 4)
-      report_fatal_error("unexpected MCS-51 i32 return parts");
-    static constexpr Register ReturnRegs[] = {MCS51::R4, MCS51::R5,
-                                               MCS51::R6, MCS51::R7};
+  if (CLI.RetTy && (CLI.RetTy->isIntegerTy(32) ||
+                    CLI.RetTy->isIntegerTy(64))) {
+    bool IsI64 = CLI.RetTy->isIntegerTy(64);
+    unsigned NumParts = IsI64 ? 8 : 4;
+    if (CLI.Ins.size() != NumParts)
+      report_fatal_error(IsI64 ? "unexpected MCS-51 i64 return parts"
+                               : "unexpected MCS-51 i32 return parts");
+    static constexpr Register I32ReturnRegs[] = {MCS51::R4, MCS51::R5,
+                                                  MCS51::R6, MCS51::R7};
+    static constexpr Register I64ReturnRegs[] = {
+        MCS51::R0, MCS51::R1, MCS51::R2, MCS51::R3,
+        MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7};
+    ArrayRef<Register> ReturnRegs =
+        IsI64 ? ArrayRef<Register>(I64ReturnRegs)
+              : ArrayRef<Register>(I32ReturnRegs);
     for (Register Reg : ReturnRegs) {
       SDValue Part = DAG.getCopyFromReg(Chain, DL, Reg, MVT::i8, InGlue);
       Chain = Part.getValue(1);
@@ -480,6 +492,10 @@ bool MCS51TargetLowering::CanLowerReturn(
          (Outs.size() == 1 &&
           (Outs.front().VT == MVT::i8 || Outs.front().VT == MVT::i16)) ||
          (Outs.size() == 4 && Outs.front().ArgVT == MVT::i32 &&
+          llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
+            return Arg.VT == MVT::i8;
+          })) ||
+         (Outs.size() == 8 && Outs.front().ArgVT == MVT::i64 &&
           llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
             return Arg.VT == MVT::i8;
           }));
@@ -521,6 +537,10 @@ SDValue MCS51TargetLowering::LowerReturn(
     SDValue Ops[] = {Chain, ReturnParts[0], ReturnParts[1], ReturnParts[2],
                      ReturnParts[3]};
     return DAG.getNode(MCS51ISD::RET_I32, DL, MVT::Other, Ops);
+  } else if (Outs.size() == 8 && Outs.front().ArgVT == MVT::i64) {
+    SmallVector<SDValue, 9> Ops{Chain};
+    Ops.append(OutVals.begin(), OutVals.end());
+    return DAG.getNode(MCS51ISD::RET_I64, DL, MVT::Other, Ops);
   } else if (!OutVals.empty() &&
              (Outs.front().VT == MVT::i8 || Outs.front().Flags.isZExt() ||
               Outs.front().Flags.isSExt())) {
@@ -1152,6 +1172,20 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     for (unsigned I = 0; I != 4; ++I)
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ReturnRegs[I])
           .add(MI.getOperand(I));
+    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
+    for (Register Reg : ReturnRegs)
+      Ret.addReg(Reg, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::RET_I64) {
+    static constexpr Register ReturnRegs[] = {
+        MCS51::R0, MCS51::R1, MCS51::R2, MCS51::R3,
+        MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7};
+    for (unsigned I = 0; I != 8; ++I) {
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ReturnRegs[I])
+          .add(MI.getOperand(I));
+    }
     MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
     for (Register Reg : ReturnRegs)
       Ret.addReg(Reg, RegState::Implicit);

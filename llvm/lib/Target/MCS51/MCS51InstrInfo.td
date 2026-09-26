@@ -15,6 +15,16 @@ def MCS51ret_i32 : SDNode<"MCS51ISD::RET_I32", SDT_MCS51RetI32,
                           [SDNPHasChain]>;
 def MCS51ret_i32_imm : SDNode<"MCS51ISD::RET_I32_IMM", SDT_MCS51RetI32,
                               [SDNPHasChain]>;
+def SDT_MCS51RetI64 : SDTypeProfile<0, 8, [SDTCisVT<0, i8>,
+                                          SDTCisVT<1, i8>,
+                                          SDTCisVT<2, i8>,
+                                          SDTCisVT<3, i8>,
+                                          SDTCisVT<4, i8>,
+                                          SDTCisVT<5, i8>,
+                                          SDTCisVT<6, i8>,
+                                          SDTCisVT<7, i8>] >;
+def MCS51ret_i64 : SDNode<"MCS51ISD::RET_I64", SDT_MCS51RetI64,
+                          [SDNPHasChain]>;
 def SDT_MCS51ShiftWord8 : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
                                               SDTCisVT<1, i16>] >;
 def MCS51srl16_8 : SDNode<"MCS51ISD::SRL16_8", SDT_MCS51ShiftWord8>;
@@ -356,6 +366,29 @@ def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
                          MCS51GPR8:$b2, MCS51GPR8:$b3),
           (RET_I32 MCS51GPR8:$b0, MCS51GPR8:$b1,
                    MCS51GPR8:$b2, MCS51GPR8:$b3)>;
+def RET_I64 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$b0, MCS51GPR8:$b1,
+                           MCS51GPR8:$b2, MCS51GPR8:$b3,
+                           MCS51GPR8:$b4, MCS51GPR8:$b5,
+                           MCS51GPR8:$b6, MCS51GPR8:$b7);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let isReturn = 1;
+  let isTerminator = 1;
+}
+def : Pat<(MCS51ret_i64 MCS51GPR8:$b0, MCS51GPR8:$b1,
+                        MCS51GPR8:$b2, MCS51GPR8:$b3,
+                        MCS51GPR8:$b4, MCS51GPR8:$b5,
+                        MCS51GPR8:$b6, MCS51GPR8:$b7),
+          (RET_I64 MCS51GPR8:$b0, MCS51GPR8:$b1,
+                   MCS51GPR8:$b2, MCS51GPR8:$b3,
+                   MCS51GPR8:$b4, MCS51GPR8:$b5,
+                   MCS51GPR8:$b6, MCS51GPR8:$b7)>;
 def : Pat<(MCS51srl16_8 MCS51PTR:$src), (SRL16_8 MCS51PTR:$src)>;
 def : Pat<(MCS51shl16_8 MCS51PTR:$src), (SHL16_8 MCS51PTR:$src)>;
 def : Pat<(MCS51srl16 MCS51PTR:$src, MCS51PTR:$amount),
