@@ -213,12 +213,16 @@ SDValue MCS51TargetLowering::LowerCall(
     InGlue = SDValue();
 
   SDValue Callee = CLI.Callee;
+  unsigned CallOpcode = MCS51ISD::CALL;
   if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee))
     Callee = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16);
   else if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Callee))
     Callee = DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i16);
-  else
-    report_fatal_error("unsupported MCS-51 indirect call");
+  else {
+    if (Callee.getValueType() != MVT::i16)
+      report_fatal_error("unsupported MCS-51 indirect call target type");
+    CallOpcode = MCS51ISD::ICALL;
+  }
 
   SmallVector<SDValue, 12> Ops;
   Ops.push_back(Chain);
@@ -228,7 +232,7 @@ SDValue MCS51TargetLowering::LowerCall(
   if (InGlue.getNode())
     Ops.push_back(InGlue);
   SDVTList CallVTs = DAG.getVTList(MVT::Other, MVT::Glue);
-  Chain = DAG.getNode(MCS51ISD::CALL, DL, CallVTs, Ops);
+  Chain = DAG.getNode(CallOpcode, DL, CallVTs, Ops);
   InGlue = Chain.getValue(1);
 
   for (unsigned I = 0; I < CCInfo.getStackSize(); ++I)
@@ -319,6 +323,32 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::ICALL) {
+    MachineFunction &MF = *MBB->getParent();
+    MachineBasicBlock *ReturnBB = MBB->splitAt(MI);
+    if (ReturnBB == MBB) {
+      ReturnBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(++MBB->getIterator(), ReturnBB);
+      MBB->addSuccessor(ReturnBB);
+    }
+
+    MachineBasicBlock *DispatchBB =
+        MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(ReturnBB->getIterator(), DispatchBB);
+    DispatchBB->setMachineBlockAddressTaken();
+    DispatchBB->addLiveIn(MCS51::A);
+    DispatchBB->addLiveIn(MCS51::DPTR);
+    // Keep the locally-called dispatcher reachable to machine CFG cleanup.
+    MBB->addSuccessor(DispatchBB);
+
+    MI.eraseFromParent();
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LCALL)).addMBB(DispatchBB);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(ReturnBB);
+    BuildMI(*DispatchBB, DispatchBB->end(), DL, TII.get(MCS51::CLR_A));
+    BuildMI(*DispatchBB, DispatchBB->end(), DL,
+            TII.get(MCS51::JMP_ADPTR));
+    return ReturnBB;
+  }
   if (MI.getOpcode() == MCS51::ADDDPTR16ri) {
     Register Dst = MI.getOperand(0).getReg();
     int64_t Amount = MI.getOperand(2).getImm();
