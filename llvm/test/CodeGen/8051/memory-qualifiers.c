@@ -2,6 +2,9 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O0 -ffreestanding -mllvm -verify-machineinstrs -c %s -o %t.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld -Wl,--no-check-sections %S/../../../lib/Target/MCS51/cc2530_startup.s %t.o -o %t.elf
 
+#define SFR(address) (*(volatile __sfr unsigned char *)(address))
+#define SBIT(address) (*(volatile __sbit unsigned char *)(address))
+
 __data volatile unsigned char data_value;
 __idata volatile unsigned char idata_value;
 __xdata volatile unsigned char xdata_value;
@@ -29,6 +32,10 @@ void write_xdata_pointer(__xdata volatile unsigned char *pointer,
                          unsigned char value) {
   *pointer = value;
 }
+unsigned char read_port0(void) { return SFR(0x80); }
+void write_port0(unsigned char value) { SFR(0x80) = value; }
+unsigned char read_ea(void) { return SBIT(0xaf); }
+void set_ea(void) { SBIT(0xaf) = 1; }
 
 int main(void) {
   write_data(read_idata());
@@ -36,6 +43,8 @@ int main(void) {
   write_xdata(read_code());
   write_xdata(read_code_pointer(&code_value));
   write_xdata_pointer(&xdata_value, read_xdata_pointer(&xdata_value));
+  write_port0(read_port0());
+  set_ea();
   return read_code_word();
 }
 
@@ -67,3 +76,11 @@ int main(void) {
 // CHECK: movx a, @dptr
 // CHECK-LABEL: write_xdata_pointer:
 // CHECK: movx @dptr, a
+// CHECK-LABEL: read_port0:
+// CHECK: mov a, -128
+// CHECK-LABEL: write_port0:
+// CHECK: mov -128, a
+// CHECK-LABEL: read_ea:
+// CHECK: mov c, -81
+// CHECK-LABEL: set_ea:
+// CHECK: setb -81
