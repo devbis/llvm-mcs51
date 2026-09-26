@@ -16,7 +16,9 @@ entry:
 }
 
 ; CHECK-LABEL: sum_ten:
-; CHECK: inc 129
+; CHECK: mov a, 129
+; CHECK-NEXT: add a, #4
+; CHECK-NEXT: mov 129, a
 ; CHECK: mov @r1, a
 ; CHECK: dec 129
 ; CHECK: ret
