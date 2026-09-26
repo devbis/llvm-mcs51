@@ -10033,6 +10033,15 @@ static TypedefDecl *CreateVoidPtrBuiltinVaListDecl(const ASTContext *Context) {
   return Context->buildImplicitTypedef(T, "__builtin_va_list");
 }
 
+static TypedefDecl *CreateMCS51BuiltinVaListDecl(const ASTContext *Context) {
+  // Variadic arguments are passed on the internal stack. An IDATA pointer
+  // makes generic va_arg loads use the 8051's indirect internal RAM bus.
+  QualType IDataChar = Context->getAddrSpaceQualType(
+      Context->CharTy, getLangASFromTargetAS(2));
+  QualType T = Context->getPointerType(IDataChar);
+  return Context->buildImplicitTypedef(T, "__builtin_va_list");
+}
+
 static TypedefDecl *
 CreateAArch64ABIBuiltinVaListDecl(const ASTContext *Context) {
   // struct __va_list
@@ -10406,6 +10415,8 @@ static TypedefDecl *CreateVaListDecl(const ASTContext *Context,
     return CreateCharPtrBuiltinVaListDecl(Context);
   case TargetInfo::VoidPtrBuiltinVaList:
     return CreateVoidPtrBuiltinVaListDecl(Context);
+  case TargetInfo::MCS51BuiltinVaList:
+    return CreateMCS51BuiltinVaListDecl(Context);
   case TargetInfo::AArch64ABIBuiltinVaList:
     return CreateAArch64ABIBuiltinVaListDecl(Context);
   case TargetInfo::PowerABIBuiltinVaList:

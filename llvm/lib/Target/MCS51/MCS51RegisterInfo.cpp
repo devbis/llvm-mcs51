@@ -77,6 +77,13 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     return static_cast<uint8_t>(Offset - Count);
   };
 
+  if (MI->getOpcode() == MCS51::FRAMEADDR8) {
+    EmitAddressAtOffset(Offset);
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), MI->getOperand(0).getReg());
+    MI->eraseFromParent();
+    return true;
+  }
+
   if (MI->getOpcode() == MCS51::FRAMEADDR_R1) {
     EmitAddressAtOffset(Offset);
     MI->eraseFromParent();

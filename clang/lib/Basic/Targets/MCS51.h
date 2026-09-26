@@ -54,7 +54,7 @@ public:
   }
 
   BuiltinVaListKind getBuiltinVaListKind() const override {
-    return TargetInfo::VoidPtrBuiltinVaList;
+    return TargetInfo::MCS51BuiltinVaList;
   }
 
   bool isValidCPUName(StringRef Name) const override {
