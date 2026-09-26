@@ -1014,10 +1014,10 @@ def ICALL : Instruction {
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51PTR:$target);
   let AsmString = "";
-  let Size = 0;
+  // AsmPrinter expands this to two PUSH instructions and an LCALL.
+  let Size = 7;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
 }
 
 def : Pat<(MCS51icall (i16 MCS51PTR:$target)), (ICALL MCS51PTR:$target)>;

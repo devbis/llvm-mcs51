@@ -13,23 +13,37 @@ u8 call_indirect_with_arg(u8 (*fn)(u8), u8 value) {
   return fn(value);
 }
 
-// The 8051 has no indirect CALL opcode. The backend calls its local
-// dispatcher, which jumps through DPTR; the return address skips the
-// dispatcher and continues after it.
+u8 call_indirect_with_stack_arg(u8 (*fn)(u8, u8, u8, u8, u8), u8 a, u8 b,
+                                u8 c, u8 d, u8 e) {
+  return fn(a, b, c, d, e);
+}
+
+// The 8051 has no indirect CALL opcode. The backend calls a local thunk,
+// which restores an ordinary call frame before jumping through DPTR.
 // CHECK-LABEL: call_indirect:
-// CHECK: lcall .LBB0_
+// CHECK: push 130
+// CHECK: push 131
+// CHECK: lcall .Lcall_indirect.mcs51.icall
+// CHECK-LABEL: .Lcall_indirect.mcs51.icall:
 // CHECK: jmp @a+dptr
 // CHECK-LABEL: call_indirect_with_arg:
-// CHECK: lcall .LBB1_
+// CHECK: push 130
+// CHECK: push 131
+// CHECK: lcall .Lcall_indirect_with_arg.mcs51.icall
+// CHECK-LABEL: .Lcall_indirect_with_arg.mcs51.icall:
+// CHECK: jmp @a+dptr
+// CHECK-LABEL: call_indirect_with_stack_arg:
+// CHECK: lcall .Lcall_indirect_with_stack_arg.mcs51.icall
+// CHECK-LABEL: .Lcall_indirect_with_stack_arg.mcs51.icall:
 // CHECK: jmp @a+dptr
 
 // DIS-LABEL: <call_indirect>:
-// DIS: lcall 154
+// DIS: lcall 158
 // DIS: ret
-// DIS: clr a
+// DIS: mov a, 129
 // DIS: jmp @a+dptr
 // DIS-LABEL: <call_indirect_with_arg>:
-// DIS: lcall 162
+// DIS: lcall 202
 // DIS: ret
-// DIS: clr a
+// DIS: mov a, 129
 // DIS: jmp @a+dptr

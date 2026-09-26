@@ -15,6 +15,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
+#include <initializer_list>
 
 using namespace llvm;
 
@@ -54,6 +55,15 @@ public:
       OutStreamer->switchSection(SavedSection);
     }
 
+    bool HasIndirectCall = false;
+    for (const MachineBasicBlock &MBB : *MF)
+      for (const MachineInstr &MI : MBB)
+        HasIndirectCall |= MI.getOpcode() == MCS51::ICALL;
+    if (HasIndirectCall) {
+      OutStreamer->emitLabel(getIndirectCallThunkSymbol(F));
+      emitIndirectCallThunk();
+    }
+
     if (!Bank)
       return;
 
@@ -80,6 +90,17 @@ public:
   }
 
   void emitInstruction(const MachineInstr *MI) override {
+    if (MI->getOpcode() == MCS51::ICALL) {
+      emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x82});
+      emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x83});
+      MCInst Call;
+      Call.setOpcode(MCS51::LCALL);
+      Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+          getIndirectCallThunkSymbol(MF->getFunction()), OutContext)));
+      EmitToStreamer(*OutStreamer, Call);
+      return;
+    }
+
     MCInst Inst;
     Inst.setOpcode(MI->getOpcode());
     for (const MachineOperand &MO : MI->operands()) {
@@ -113,6 +134,63 @@ public:
   }
 
 private:
+  MCSymbol *getIndirectCallThunkSymbol(const Function &F) {
+    SmallString<64> Name(".L");
+    Name.append(getSymbol(&F)->getName());
+    Name.append(".mcs51.icall");
+    return OutContext.getOrCreateSymbol(Name);
+  }
+
+  void emitThunkInstruction(unsigned Opcode,
+                            std::initializer_list<MCOperand> Operands) {
+    MCInst Inst;
+    Inst.setOpcode(Opcode);
+    for (const MCOperand &Operand : Operands)
+      Inst.addOperand(Operand);
+    EmitToStreamer(*OutStreamer, Inst);
+  }
+
+  void emitIndirectCallThunk() {
+    auto Reg = [](unsigned R) { return MCOperand::createReg(R); };
+    auto Imm = [](int64_t V) { return MCOperand::createImm(V); };
+
+    // The caller pushed DPL and DPH before LCALL. The helper's stack is:
+    // return-high, return-low, target-high, target-low, then stack arguments.
+    // Load the target, move the helper return address over the target bytes,
+    // and shrink SP so the indirect callee sees an ordinary call frame.
+    emitThunkInstruction(MCS51::MOV_A_DIRECT, {Reg(MCS51::A), Imm(0x81)});
+    emitThunkInstruction(MCS51::ADD_A_IMM, {Reg(MCS51::A), Imm(0xFE)});
+    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_DIRECT_A, {Imm(0x83)});
+    emitThunkInstruction(MCS51::DEC_RN,
+                         {Reg(MCS51::R0), Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_DIRECT_A, {Imm(0x82)});
+
+    emitThunkInstruction(MCS51::MOV_A_DIRECT, {Reg(MCS51::A), Imm(0x81)});
+    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R2)});
+    emitThunkInstruction(MCS51::DEC_RN,
+                         {Reg(MCS51::R0), Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R3)});
+    emitThunkInstruction(MCS51::DEC_RN,
+                         {Reg(MCS51::R0), Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_RN, {Reg(MCS51::R2)});
+    emitThunkInstruction(MCS51::MOV_IND_RI_A, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::DEC_RN,
+                         {Reg(MCS51::R0), Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_RN, {Reg(MCS51::R3)});
+    emitThunkInstruction(MCS51::MOV_IND_RI_A, {Reg(MCS51::R0)});
+    emitThunkInstruction(MCS51::MOV_A_DIRECT, {Reg(MCS51::A), Imm(0x81)});
+    emitThunkInstruction(MCS51::ADD_A_IMM, {Reg(MCS51::A), Imm(0xFE)});
+    emitThunkInstruction(MCS51::MOV_DIRECT_A, {Imm(0x81)});
+    emitThunkInstruction(MCS51::CLR_A, {});
+    emitThunkInstruction(MCS51::JMP_ADPTR, {});
+  }
+
   void emitBankThunkInstruction(unsigned Opcode,
                                ArrayRef<int64_t> Immediates) {
     MCInst Inst;
