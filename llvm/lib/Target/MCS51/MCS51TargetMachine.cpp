@@ -56,6 +56,8 @@ public:
     addPass(createMCS51ISelDag(getMCS51TargetMachine(), getOptLevel()));
     return false;
   }
+
+  void addPreEmitPass() override { addPass(&BranchRelaxationPassID); }
 };
 } // namespace
 

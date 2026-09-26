@@ -52,6 +52,16 @@ def MCS51shl32_parts : SDNode<"MCS51ISD::SHL32_PARTS",
                               SDT_MCS51Shift32Parts>;
 def MCS51sra32_parts : SDNode<"MCS51ISD::SRA32_PARTS",
                               SDT_MCS51Shift32Parts>;
+def SDT_MCS51Select8 : SDTypeProfile<1, 3, [SDTCisVT<0, i8>,
+                                           SDTCisVT<1, i8>,
+                                           SDTCisVT<2, i8>,
+                                           SDTCisVT<3, i8>] >;
+def MCS51select8 : SDNode<"MCS51ISD::SELECT8", SDT_MCS51Select8>;
+def SDT_MCS51Select16 : SDTypeProfile<1, 3, [SDTCisVT<0, i16>,
+                                            SDTCisVT<1, i8>,
+                                            SDTCisVT<2, i16>,
+                                            SDTCisVT<3, i16>] >;
+def MCS51select16 : SDNode<"MCS51ISD::SELECT16", SDT_MCS51Select16>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -249,6 +259,28 @@ def BUILDPAIR16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
 }
+def SELECT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$cond, MCS51GPR8:$true,
+                           MCS51GPR8:$false);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def SELECT16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51GPR8:$cond, MCS51PTR:$true,
+                           MCS51PTR:$false);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
 def RET_I32 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -293,6 +325,11 @@ def RET  : MCS51Inst<0x22, "ret"> {
   let isTerminator = 1;
   let Uses = [A];
 }
+def RET_NOA : MCS51Inst<0x22, "ret"> {
+  let isReturn = 1;
+  let isTerminator = 1;
+  let isCodeGenOnly = 1;
+}
 def RETI : MCS51Inst<0x32, "reti"> {
   let isReturn = 1;
   let isTerminator = 1;
@@ -313,6 +350,14 @@ def : Pat<(MCS51shl16 MCS51PTR:$src, MCS51PTR:$amount),
           (SHL16 MCS51PTR:$src, MCS51PTR:$amount)>;
 def : Pat<(MCS51sra16 MCS51PTR:$src, MCS51PTR:$amount),
           (SRA16 MCS51PTR:$src, MCS51PTR:$amount)>;
+def : Pat<(MCS51select8 MCS51GPR8:$cond, MCS51GPR8:$true,
+                         MCS51GPR8:$false),
+          (SELECT8 MCS51GPR8:$cond, MCS51GPR8:$true,
+                   MCS51GPR8:$false)>;
+def : Pat<(MCS51select16 MCS51GPR8:$cond, MCS51PTR:$true,
+                           MCS51PTR:$false),
+          (SELECT16 MCS51GPR8:$cond, MCS51PTR:$true,
+                    MCS51PTR:$false)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
@@ -361,14 +406,15 @@ def MCS51Addr11 : Operand<OtherVT> {
   let DecoderMethod = "DecodeAddr11";
 }
 
-def MCS51Imm16 : Operand<i16>, ImmLeaf<i16, "return isUInt<16>(Imm);"> {
+def MCS51Imm16 : Operand<i16>,
+                 ImmLeaf<i16, "return isUInt<16>(Imm) || isInt<16>(Imm);"> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm16OpValue";
   let DecoderMethod = "DecodeImm16";
 }
 
 def MCS51Imm16NotOne : Operand<i16>,
-                       ImmLeaf<i16, "return isUInt<16>(Imm) && Imm != 1;">;
+                       ImmLeaf<i16, "return (isUInt<16>(Imm) || isInt<16>(Imm)) && Imm != 1;">;
 
 def MCS51Rel8 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
@@ -932,10 +978,10 @@ def AJMP : MCS51Abs11Inst<0b00001, "ajmp"> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
 let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
-    Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
+    Uses = [SP], isCall = 1 in
 def ACALL : MCS51Abs11Inst<0b10001, "acall">;
 let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
-    Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
+    Uses = [SP], isCall = 1 in
 def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
 }
@@ -948,7 +994,7 @@ def : Pat<(MCS51call (i16 texternalsym:$addr)),
 // needed. The dispatcher clears A, then uses JMP @A+DPTR to tail-transfer to
 // the callee; its RET returns to the call site's continuation.
 let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
-    Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
+    Uses = [SP, DPTR], isCall = 1 in
 def ICALL : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);

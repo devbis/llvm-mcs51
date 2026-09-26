@@ -23,6 +23,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   addRegisterClass(MVT::i16, &MCS51::MCS51PTRRegClass);
   setOperationAction(ISD::UDIV, MVT::i8, Legal);
   setOperationAction(ISD::UREM, MVT::i8, Legal);
+  setOperationAction(ISD::UDIV, MVT::i16, LibCall);
+  setOperationAction(ISD::UREM, MVT::i16, LibCall);
+  setOperationAction(ISD::SDIV, MVT::i16, LibCall);
+  setOperationAction(ISD::SREM, MVT::i16, LibCall);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
@@ -37,7 +41,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ADD, MVT::i32, Custom);
   setOperationAction(ISD::SUB, MVT::i32, Custom);
   setOperationAction(ISD::SETCC, MVT::i16, Custom);
+  setOperationAction(ISD::SELECT, MVT::i8, Custom);
+  setOperationAction(ISD::SELECT, MVT::i16, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
+  setOperationAction(ISD::SELECT_CC, MVT::i16, Custom);
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
   setOperationAction(ISD::BR_CC, MVT::i16, Custom);
   setBooleanContents(ZeroOrOneBooleanContent);
@@ -152,6 +159,12 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if (Op.getOpcode() == ISD::MUL && Op.getValueType() == MVT::i16)
     return DAG.getNode(MCS51ISD::MUL16, DL, MVT::i16, Op.getOperand(0),
                        Op.getOperand(1));
+  if (Op.getOpcode() == ISD::SELECT && Op.getValueType() == MVT::i8)
+    return DAG.getNode(MCS51ISD::SELECT8, DL, MVT::i8, Op.getOperand(0),
+                       Op.getOperand(1), Op.getOperand(2));
+  if (Op.getOpcode() == ISD::SELECT && Op.getValueType() == MVT::i16)
+    return DAG.getNode(MCS51ISD::SELECT16, DL, MVT::i16, Op.getOperand(0),
+                       Op.getOperand(1), Op.getOperand(2));
   if (Op.getOpcode() == ISD::SRL_PARTS ||
       Op.getOpcode() == ISD::SHL_PARTS ||
       Op.getOpcode() == ISD::SRA_PARTS) {
@@ -172,15 +185,22 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   }
   if (Op.getOpcode() == ISD::SELECT_CC &&
       Op.getOperand(0).getValueType() == MVT::i16 &&
-      Op.getValueType() == MVT::i8) {
+      (Op.getValueType() == MVT::i8 || Op.getValueType() == MVT::i16)) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
     auto *TrueValue = dyn_cast<ConstantSDNode>(Op.getOperand(2));
     auto *FalseValue = dyn_cast<ConstantSDNode>(Op.getOperand(3));
+    bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
+                    CC == ISD::SETGT || CC == ISD::SETLE;
+    if (Op.getValueType() == MVT::i16) {
+      SDValue Result = LowerWordCompare(Op.getOperand(0), Op.getOperand(1),
+                                        CC, IsSigned);
+      if (Result)
+        return DAG.getNode(MCS51ISD::SELECT16, DL, MVT::i16, Result,
+                           Op.getOperand(2), Op.getOperand(3));
+    }
     if (TrueValue && FalseValue &&
         ((TrueValue->isOne() && FalseValue->isZero()) ||
          (TrueValue->isZero() && FalseValue->isOne()))) {
-      bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
-                      CC == ISD::SETGT || CC == ISD::SETLE;
       SDValue Result = LowerWordCompare(Op.getOperand(0), Op.getOperand(1),
                                         CC, IsSigned);
       if (Result && TrueValue->isZero())
@@ -419,10 +439,10 @@ SDValue MCS51TargetLowering::LowerCall(
   Chain = DAG.getNode(CallOpcode, DL, CallVTs, Ops);
   InGlue = Chain.getValue(1);
 
-  for (unsigned I = 0; I < CCInfo.getStackSize(); ++I)
-    Chain = DAG.getNode(MCS51ISD::POP_ARG8, DL, MVT::Other, Chain);
-  if (CCInfo.getStackSize() != 0)
-    InGlue = SDValue();
+  auto PopStackArguments = [&]() {
+    for (unsigned I = 0; I < CCInfo.getStackSize(); ++I)
+      Chain = DAG.getNode(MCS51ISD::POP_ARG8, DL, MVT::Other, Chain);
+  };
 
   if (CLI.RetTy && CLI.RetTy->isIntegerTy(32)) {
     if (CLI.Ins.size() != 4)
@@ -435,6 +455,7 @@ SDValue MCS51TargetLowering::LowerCall(
       InGlue = Part.getValue(2);
       InVals.push_back(Part.getValue(0));
     }
+    PopStackArguments();
     return Chain;
   }
 
@@ -447,6 +468,7 @@ SDValue MCS51TargetLowering::LowerCall(
     InGlue = Chain.getValue(2);
     InVals.push_back(Chain.getValue(0));
   }
+  PopStackArguments();
   return Chain;
 }
 
@@ -523,6 +545,74 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::SELECT16) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register Cond = MI.getOperand(1).getReg();
+    Register TrueValue = MI.getOperand(2).getReg();
+    Register FalseValue = MI.getOperand(3).getReg();
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), TrueBB);
+    MF.insert(Tail->getIterator(), FalseBB);
+    while (!MBB->succ_empty())
+      MBB->removeSuccessor(MBB->succ_begin());
+    MBB->addSuccessor(TrueBB);
+    MBB->addSuccessor(FalseBB);
+    TrueBB->addSuccessor(Tail);
+    FalseBB->addSuccessor(Tail);
+    Tail->addLiveIn(MCS51::DPTR);
+    MI.eraseFromParent();
+
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(Cond);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(FalseBB);
+    BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(TargetOpcode::COPY),
+            MCS51::DPTR)
+        .addReg(TrueValue);
+    BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*FalseBB, FalseBB->end(), DL,
+            TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .addReg(FalseValue);
+    BuildMI(*FalseBB, FalseBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*Tail, Tail->getFirstNonPHI(), DL,
+            TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    return Tail;
+  }
+  if (MI.getOpcode() == MCS51::SELECT8) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register Cond = MI.getOperand(1).getReg();
+    Register TrueValue = MI.getOperand(2).getReg();
+    Register FalseValue = MI.getOperand(3).getReg();
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), TrueBB);
+    MF.insert(Tail->getIterator(), FalseBB);
+    while (!MBB->succ_empty())
+      MBB->removeSuccessor(MBB->succ_begin());
+    MBB->addSuccessor(TrueBB);
+    MBB->addSuccessor(FalseBB);
+    TrueBB->addSuccessor(Tail);
+    FalseBB->addSuccessor(Tail);
+    Tail->addLiveIn(MCS51::A);
+    MI.eraseFromParent();
+
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(Cond);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(FalseBB);
+    BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(MCS51::MOV_A_RN))
+        .addReg(TrueValue);
+    BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*FalseBB, FalseBB->end(), DL, TII.get(MCS51::MOV_A_RN))
+        .addReg(FalseValue);
+    BuildMI(*FalseBB, FalseBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*Tail, Tail->getFirstNonPHI(), DL,
+            TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
+    return Tail;
+  }
   if (MI.getOpcode() == MCS51::ICALL) {
     MachineFunction &MF = *MBB->getParent();
     MachineBasicBlock *ReturnBB = MBB->splitAt(MI);
@@ -917,10 +1007,21 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     int64_t CompareKind = MI.getOperand(3).getImm();
     if (CompareKind == 2) {
       MachineBasicBlock *Tail = MBB->splitAt(MI);
+      MachineBasicBlock *HighCompareBB =
+          MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MachineBasicBlock *EqualBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
       MachineBasicBlock *NotEqualBB = MF.CreateMachineBasicBlock(
           MBB->getBasicBlock());
+      MF.insert(Tail->getIterator(), HighCompareBB);
+      MF.insert(Tail->getIterator(), EqualBB);
       MF.insert(Tail->getIterator(), NotEqualBB);
+      while (!MBB->succ_empty())
+        MBB->removeSuccessor(MBB->succ_begin());
+      MBB->addSuccessor(HighCompareBB);
       MBB->addSuccessor(NotEqualBB);
+      HighCompareBB->addSuccessor(EqualBB);
+      HighCompareBB->addSuccessor(NotEqualBB);
+      EqualBB->addSuccessor(Tail);
       NotEqualBB->addSuccessor(Tail);
       Tail->addLiveIn(MCS51::A);
       MI.eraseFromParent();
@@ -945,15 +1046,18 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN)).addReg(LHSLo);
       BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ))
           .addMBB(NotEqualBB);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+      BuildMI(*HighCompareBB, HighCompareBB->end(), DL,
+              TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
           .addImm(0x83);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_DIRECT), MCS51::A)
+      BuildMI(*HighCompareBB, HighCompareBB->end(), DL,
+              TII.get(MCS51::XRL_A_DIRECT), MCS51::A)
           .addImm(0xF0);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ))
+      BuildMI(*HighCompareBB, HighCompareBB->end(), DL, TII.get(MCS51::JNZ))
           .addMBB(NotEqualBB);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+      BuildMI(*EqualBB, EqualBB->end(), DL,
+              TII.get(MCS51::MOV_A_IMM), MCS51::A)
           .addImm(1);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+      BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
       BuildMI(*NotEqualBB, NotEqualBB->end(), DL,
               TII.get(MCS51::MOV_A_IMM), MCS51::A)
           .addImm(0);
@@ -1014,7 +1118,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     for (unsigned I = 0; I != 4; ++I)
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ReturnRegs[I])
           .add(MI.getOperand(I));
-    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET));
+    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
     for (Register Reg : ReturnRegs)
       Ret.addReg(Reg, RegState::Implicit);
     MI.eraseFromParent();
@@ -1026,14 +1130,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     for (unsigned I = 0; I != 4; ++I)
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM), ReturnRegs[I])
           .add(MI.getOperand(I));
-    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET));
+    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
     for (Register Reg : ReturnRegs)
       Ret.addReg(Reg, RegState::Implicit);
     MI.eraseFromParent();
     return MBB;
   }
   if (MI.getOpcode() == MCS51::RET16) {
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::RET))
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA))
         .addReg(MCS51::DPTR, RegState::Implicit);
     MI.eraseFromParent();
     return MBB;

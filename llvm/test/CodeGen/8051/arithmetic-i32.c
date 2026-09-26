@@ -82,18 +82,21 @@ int shift_right_signed_word(int value, unsigned int amount) {
 // CHECK: djnz 240,
 // CHECK: ret
 // CHECK-LABEL: shift_right_word:
+// CHECK: ret
 // CHECK: rrc a
 // CHECK: djnz r0,
-// CHECK: ret
+// CHECK: ljmp
 // CHECK-LABEL: shift_left_word:
+// CHECK: ret
 // CHECK: rlc a
 // CHECK: djnz r0,
-// CHECK: ret
+// CHECK: ljmp
 // CHECK-LABEL: shift_right_signed_word:
+// CHECK: ret
 // CHECK: mov c, 231
 // CHECK: rrc a
 // CHECK: djnz r0,
-// CHECK: ret
+// CHECK: ljmp
 
 // O0-LABEL: add_long:
 // O0-COUNT-3: addc a,
