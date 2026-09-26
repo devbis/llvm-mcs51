@@ -265,6 +265,28 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return true;
     }
+    SDValue Base = LD->getBasePtr();
+    if (AS == MCS51::IData && LD->getMemoryVT() == MVT::i16 &&
+        (isa<GlobalAddressSDNode>(Base) || isa<ConstantSDNode>(Base) ||
+         Base.getOpcode() == ISD::TargetGlobalAddress)) {
+      SDValue Addr = LD->getBasePtr();
+      if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+        Addr = CurDAG->getTargetGlobalAddress(
+            GA->getGlobal(), DL, MVT::i8, GA->getOffset(),
+            GA->getTargetFlags());
+      else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+        Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
+      else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
+        return false;
+      SDValue Ops[] = {Addr, LD->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOADIDATA_GLOBAL16, DL,
+                                           N->getVTList(), Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
     if (AS == MCS51::Bit) {
       if (LD->getMemoryVT() != MVT::i8)
         report_fatal_error("unsupported MCS-51 bit memory load width");
@@ -345,6 +367,29 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
 
   auto *ST = cast<StoreSDNode>(N);
   unsigned AS = ST->getAddressSpace();
+  if (AS == MCS51::IData && ST->getMemoryVT() == MVT::i16) {
+    SDValue Addr = ST->getBasePtr();
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+      Addr = CurDAG->getTargetGlobalAddress(
+          GA->getGlobal(), DL, MVT::i8, GA->getOffset(), GA->getTargetFlags());
+    else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+      Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
+    else if (Addr.getOpcode() == ISD::TargetGlobalAddress)
+      Addr = CurDAG->getTargetGlobalAddress(
+          cast<GlobalAddressSDNode>(Addr)->getGlobal(), DL, MVT::i8,
+          cast<GlobalAddressSDNode>(Addr)->getOffset(),
+          cast<GlobalAddressSDNode>(Addr)->getTargetFlags());
+    if (Addr.getOpcode() == ISD::TargetGlobalAddress ||
+        Addr.getOpcode() == ISD::TargetConstant) {
+      SDValue Ops[] = {Addr, ST->getValue(), ST->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::STOREIDATA_GLOBAL16, DL,
+                                           MVT::Other, Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
+  }
   if (AS == MCS51::IData && ST->getMemoryVT() == MVT::i8) {
     SDValue Addr = ST->getBasePtr();
     if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
