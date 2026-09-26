@@ -809,6 +809,19 @@ def LOADCODE8 : Instruction {
   let mayLoad = 1;
 }
 
+def LOADCODEABS8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Imm16:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, DPTR];
+}
+
 def LOADCODE16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -819,6 +832,19 @@ def LOADCODE16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let mayLoad = 1;
+}
+
+def LOADCODEABS16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51Imm16:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, DPTR];
 }
 
 def LOADDIRECT8 : Instruction {
