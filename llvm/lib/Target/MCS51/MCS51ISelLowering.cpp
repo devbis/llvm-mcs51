@@ -1218,11 +1218,20 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MF.insert(Tail->getIterator(), Loop);
     Loop->addLiveIn(MCS51::B);
     Loop->addLiveIn(MCS51::R0);
-    Loop->addLiveIn(MCS51::R2);
     CheckAmount->addLiveIn(MCS51::B);
     LoadCount->addLiveIn(MCS51::B);
     Tail->addLiveIn(MCS51::B);
-    Tail->addLiveIn(MCS51::R2);
+
+    Register InitialHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register LoopHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register NextHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register ZeroHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register TailHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
 
     auto CopyDPTR = [&](MachineBasicBlock &Block,
                         MachineBasicBlock::iterator I, Register Reg) {
@@ -1236,7 +1245,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x83);
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(MCS51::R2, RegState::Define);
+        .addReg(InitialHi, RegState::Define);
 
     CopyDPTR(*MBB, MBB->end(), Amount);
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
@@ -1286,24 +1295,26 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Loop->addSuccessor(Tail);
     Zero->addSuccessor(Tail);
 
+    BuildMI(*Loop, Loop->begin(), DL, TII.get(TargetOpcode::PHI), LoopHi)
+        .addReg(InitialHi).addMBB(LoadCount).addReg(NextHi).addMBB(Loop);
     BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::CLR_C));
     if (IsLeft) {
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RLC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_B_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_RN))
-          .addReg(MCS51::R2);
+          .addReg(LoopHi);
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RLC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_RN_A))
-          .addReg(MCS51::R2, RegState::Define);
+          .addReg(NextHi, RegState::Define);
     } else {
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_RN))
-          .addReg(MCS51::R2);
+          .addReg(LoopHi);
       if (IsArithmetic)
         BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_C_BIT)).addImm(0xE7);
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_RN_A))
-          .addReg(MCS51::R2, RegState::Define);
+          .addReg(NextHi, RegState::Define);
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_B_A));
@@ -1315,16 +1326,20 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
         .addImm(0);
     BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(MCS51::R2, RegState::Define);
+        .addReg(ZeroHi, RegState::Define);
     BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_B_A));
     BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
 
     MI.eraseFromParent();
     MachineBasicBlock::iterator TailBody = Tail->getFirstNonPHI();
+    BuildMI(*Tail, TailBody, DL, TII.get(TargetOpcode::PHI), TailHi)
+        .addReg(InitialHi).addMBB(LoadCount)
+        .addReg(NextHi).addMBB(Loop)
+        .addReg(ZeroHi).addMBB(Zero);
     BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
     BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_DPL_A));
     BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_A_RN))
-        .addReg(MCS51::R2);
+        .addReg(TailHi);
     BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_DPH_A));
     BuildMI(*Tail, TailBody, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
