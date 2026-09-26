@@ -30,6 +30,17 @@ short subtract_signed_byte(short base, signed char value) {
   return base - value;
 }
 
+volatile unsigned char loaded_byte;
+volatile signed char loaded_signed_byte;
+
+unsigned short subtract_volatile_byte(unsigned short base) {
+  return base - loaded_byte;
+}
+
+short subtract_volatile_signed_byte(short base) {
+  return base - loaded_signed_byte;
+}
+
 // CHECK-LABEL: zero_extend_byte:
 // CHECK: mov 130, a
 // CHECK: mov 131, #0
@@ -125,6 +136,18 @@ short subtract_signed_byte(short base, signed char value) {
 // OPT-LABEL: subtract_signed_byte:
 // OPT: clr c
 // OPT: subb a, r7
+// OPT: subb a, #0
+// OPT: jnc
+// OPT: add a, #1
+// OPT: ret
+// OPT-LABEL: subtract_volatile_byte:
+// OPT: clr c
+// OPT: subb a, r
+// OPT: subb a, #0
+// OPT: ret
+// OPT-LABEL: subtract_volatile_signed_byte:
+// OPT: clr c
+// OPT: subb a, r
 // OPT: subb a, #0
 // OPT: jnc
 // OPT: add a, #1
