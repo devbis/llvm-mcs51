@@ -41,6 +41,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRL_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::ADD, MVT::i32, Custom);
   setOperationAction(ISD::SUB, MVT::i32, Custom);
+  setOperationAction(ISD::SETCC, MVT::i8, Custom);
   setOperationAction(ISD::SETCC, MVT::i16, Custom);
   setOperationAction(ISD::SELECT, MVT::i8, Custom);
   setOperationAction(ISD::SELECT, MVT::i16, Custom);
@@ -120,6 +121,47 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     return DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Op.getOperand(0));
   }
 
+  auto LowerByteCompare = [&](SDValue LHS, SDValue RHS,
+                              ISD::CondCode CC) -> SDValue {
+    bool Invert = false;
+    int64_t CompareKind = ISD::isSignedIntSetCC(CC) ? 1 : 0;
+    switch (CC) {
+    case ISD::SETEQ:
+      CompareKind = 2;
+      break;
+    case ISD::SETNE:
+      CompareKind = 2;
+      Invert = true;
+      break;
+    case ISD::SETULT:
+    case ISD::SETLT:
+      break;
+    case ISD::SETUGE:
+    case ISD::SETGE:
+      Invert = true;
+      break;
+    case ISD::SETUGT:
+    case ISD::SETGT:
+      std::swap(LHS, RHS);
+      break;
+    case ISD::SETULE:
+    case ISD::SETLE:
+      std::swap(LHS, RHS);
+      Invert = true;
+      break;
+    default:
+      return SDValue();
+    }
+    unsigned Opcode = CompareKind == 2
+                          ? MCS51ISD::CMPEQ8
+                          : CompareKind == 1 ? MCS51ISD::CMPSLT8
+                                             : MCS51ISD::CMPULT8;
+    SDValue Result = DAG.getNode(Opcode, DL, MVT::i8, LHS, RHS);
+    return Invert ? DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
+                                DAG.getConstant(1, DL, MVT::i8))
+                  : Result;
+  };
+
   auto LowerWordCompare = [&](SDValue LHS, SDValue RHS, ISD::CondCode CC,
                               bool IsSigned) -> SDValue {
     bool Invert = false;
@@ -195,11 +237,61 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                        Op.getOperand(0), Op.getOperand(1), Op.getOperand(2));
   }
   if (Op.getOpcode() == ISD::SETCC &&
+      Op.getOperand(0).getValueType() == MVT::i8) {
+    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
+    return LowerByteCompare(Op.getOperand(0), Op.getOperand(1), CC);
+  }
+  if (Op.getOpcode() == ISD::SETCC &&
       Op.getOperand(0).getValueType() == MVT::i16) {
-    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
+    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
     bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
                     CC == ISD::SETGT || CC == ISD::SETLE;
-    return LowerWordCompare(Op.getOperand(0), Op.getOperand(2), CC, IsSigned);
+
+    auto GetExtendedByte = [&](SDValue V) -> std::pair<SDValue, int> {
+      if ((V.getOpcode() == ISD::ZERO_EXTEND ||
+           V.getOpcode() == ISD::SIGN_EXTEND) &&
+          V.getOperand(0).getValueType() == MVT::i8)
+        return {V.getOperand(0), V.getOpcode() == ISD::SIGN_EXTEND ? 1 : 0};
+
+      // Type legalization folds zext/sext of a byte load into an extending
+      // load whose result type is i16. Comparing the truncated bytes avoids
+      // forcing those values through the backend's single i16 register (DPTR).
+      if (auto *Load = dyn_cast<LoadSDNode>(V)) {
+        if (Load->getMemoryVT() == MVT::i8 &&
+            (Load->getExtensionType() == ISD::ZEXTLOAD ||
+             Load->getExtensionType() == ISD::SEXTLOAD)) {
+          int Extension = Load->getExtensionType() == ISD::SEXTLOAD ? 1 : 0;
+          return {DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, V), Extension};
+        }
+      }
+      return {SDValue(), -1};
+    };
+
+    auto [LHSByte, LHSExtension] = GetExtendedByte(Op.getOperand(0));
+    auto [RHSByte, RHSExtension] = GetExtendedByte(Op.getOperand(1));
+    if (LHSByte && RHSByte && LHSExtension == RHSExtension &&
+        (LHSExtension == 0 || IsSigned || ISD::isIntEqualitySetCC(CC))) {
+      if (LHSExtension == 0) {
+        switch (CC) {
+        case ISD::SETLT:
+          CC = ISD::SETULT;
+          break;
+        case ISD::SETLE:
+          CC = ISD::SETULE;
+          break;
+        case ISD::SETGT:
+          CC = ISD::SETUGT;
+          break;
+        case ISD::SETGE:
+          CC = ISD::SETUGE;
+          break;
+        default:
+          break;
+        }
+      }
+      return LowerByteCompare(LHSByte, RHSByte, CC);
+    }
+    return LowerWordCompare(Op.getOperand(0), Op.getOperand(1), CC, IsSigned);
   }
   if (Op.getOpcode() == ISD::SELECT_CC &&
       Op.getOperand(0).getValueType() == MVT::i16 &&
@@ -1055,6 +1147,80 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::CMP8) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    int64_t CompareKind = MI.getOperand(3).getImm();
+    if (CompareKind == 2) {
+      MachineBasicBlock *Tail = MBB->splitAt(MI);
+      Tail->removeLiveIn(MCS51::DPTR);
+      MachineBasicBlock *EqualBB =
+          MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MachineBasicBlock *NotEqualBB =
+          MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(Tail->getIterator(), EqualBB);
+      MF.insert(Tail->getIterator(), NotEqualBB);
+      while (!MBB->succ_empty())
+        MBB->removeSuccessor(MBB->succ_begin());
+      MBB->addSuccessor(EqualBB);
+      MBB->addSuccessor(NotEqualBB);
+      EqualBB->addSuccessor(Tail);
+      NotEqualBB->addSuccessor(Tail);
+      Register EqualResult = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
+      Register NotEqualResult = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
+      MI.eraseFromParent();
+
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN)).addReg(RHS);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(EqualBB);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(NotEqualBB);
+      BuildMI(*EqualBB, EqualBB->end(), DL,
+              TII.get(MCS51::MOV_A_IMM), MCS51::A).addImm(1);
+      BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(TargetOpcode::COPY),
+              EqualResult).addReg(MCS51::A);
+      BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(MCS51::LJMP))
+          .addMBB(Tail);
+      BuildMI(*NotEqualBB, NotEqualBB->end(), DL,
+              TII.get(MCS51::MOV_A_IMM), MCS51::A).addImm(0);
+      BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(TargetOpcode::COPY),
+              NotEqualResult).addReg(MCS51::A);
+      BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(MCS51::LJMP))
+          .addMBB(Tail);
+      BuildMI(*Tail, Tail->getFirstNonPHI(), DL, TII.get(TargetOpcode::PHI),
+              Dst)
+          .addReg(EqualResult).addMBB(EqualBB)
+          .addReg(NotEqualResult).addMBB(NotEqualBB);
+      return Tail;
+    }
+
+    if (CompareKind == 1) {
+      // Flipping both sign bits turns signed order into unsigned order.
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(RHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(0x80);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(0x80);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    } else {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHS);
+    }
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
     MI.eraseFromParent();
     return MBB;
   }

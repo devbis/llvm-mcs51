@@ -38,6 +38,9 @@ def MCS51sra16 : SDNode<"MCS51ISD::SRA16", SDT_MCS51ShiftWord>;
 def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                             SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>] >;
+def SDT_MCS51Cmp8 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
+                                         SDTCisVT<1, i8>,
+                                         SDTCisVT<2, i8>] >;
 def SDT_MCS51Add32 : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
                                          SDTCisVT<1, i16>,
                                          SDTCisVT<2, i16>,
@@ -55,6 +58,9 @@ def SDT_MCS51Shift32Parts : SDTypeProfile<2, 3, [SDTCisVT<0, i16>,
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpeq16 : SDNode<"MCS51ISD::CMPEQ16", SDT_MCS51CmpUlt16>;
+def MCS51cmpult8 : SDNode<"MCS51ISD::CMPULT8", SDT_MCS51Cmp8>;
+def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
+def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
 def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
@@ -1495,12 +1501,30 @@ def CMP16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
 }
+def CMP8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs,
+                           MCS51Imm8:$kind);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
 def : Pat<(MCS51cmpult16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 0)>;
 def : Pat<(MCS51cmpslt16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 1)>;
 def : Pat<(MCS51cmpeq16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 2)>;
+def : Pat<(MCS51cmpult8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
+          (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 0)>;
+def : Pat<(MCS51cmpslt8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
+          (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 1)>;
+def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
+          (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 2)>;
 
 // The MCS-51 has no PC-relative unconditional branch with a long enough
 // range for arbitrary basic blocks. Use LJMP until branch relaxation can
