@@ -26,6 +26,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
   setOperationAction(ISD::SRL, MVT::i16, Custom);
+  setOperationAction(ISD::ADD, MVT::i32, Custom);
+  setOperationAction(ISD::SUB, MVT::i32, Custom);
   setOperationAction(ISD::SETCC, MVT::i16, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
@@ -53,6 +55,33 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
   if (VT == MVT::i32)
     return 4;
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
+}
+
+void MCS51TargetLowering::ReplaceNodeResults(
+    SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
+  if ((N->getOpcode() == ISD::ADD || N->getOpcode() == ISD::SUB) &&
+      N->getValueType(0) == MVT::i32) {
+    SDLoc DL(N);
+    SDValue Zero = DAG.getConstant(0, DL, MVT::i16);
+    SDValue One = DAG.getConstant(1, DL, MVT::i16);
+    SDValue LHSLo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                N->getOperand(0), Zero);
+    SDValue LHSHi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                N->getOperand(0), One);
+    SDValue RHSLo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                N->getOperand(1), Zero);
+    SDValue RHSHi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                N->getOperand(1), One);
+    unsigned Opcode = N->getOpcode() == ISD::ADD ? MCS51ISD::ADD32
+                                                  : MCS51ISD::SUB32;
+    SDValue Sum = DAG.getNode(Opcode, DL,
+                              DAG.getVTList(MVT::i16, MVT::i16), LHSLo,
+                              LHSHi, RHSLo, RHSHi);
+    Results.push_back(DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i32, Sum,
+                                  Sum.getValue(1)));
+    return;
+  }
+  llvm_unreachable("unexpected MCS-51 operation with illegal result type");
 }
 
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
@@ -575,6 +604,62 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
           .addReg(MCS51::DPTR);
     }
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::ADD32rr ||
+      MI.getOpcode() == MCS51::SUB32rr) {
+    MachineFunction &MF = *MBB->getParent();
+    bool IsAdd = MI.getOpcode() == MCS51::ADD32rr;
+    Register DstLo = MI.getOperand(0).getReg();
+    Register DstHi = MI.getOperand(1).getReg();
+    Register Operands[] = {MI.getOperand(2).getReg(),
+                           MI.getOperand(3).getReg(),
+                           MI.getOperand(4).getReg(),
+                           MI.getOperand(5).getReg()};
+    Register Work = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register Sum[4];
+    for (Register &Part : Sum)
+      Part = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
+
+    auto CopyDPTR = [&](Register Src) {
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Src);
+    };
+    for (unsigned I = 0; I != 4; ++I) {
+      Register LHS = Operands[I < 2 ? 0 : 1];
+      Register RHS = Operands[I < 2 ? 2 : 3];
+      unsigned Direct = (I & 1) ? 0x83 : 0x82;
+      CopyDPTR(LHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(Direct);
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Work)
+          .addReg(MCS51::A);
+      CopyDPTR(RHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Work);
+      if (!IsAdd && I == 0)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      unsigned ArithmeticOpcode =
+          IsAdd ? (I == 0 ? MCS51::ADD_A_DIRECT : MCS51::ADDC_A_DIRECT)
+                : MCS51::SUBB_A_DIRECT;
+      BuildMI(*MBB, MII, DL, TII.get(ArithmeticOpcode), MCS51::A)
+          .addImm(Direct);
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Sum[I])
+          .addReg(MCS51::A);
+    }
+
+    auto WriteWord = [&](Register Dst, Register Lo, Register Hi) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Lo);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Hi);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+          .addReg(MCS51::DPTR);
+    };
+    WriteWord(DstLo, Sum[0], Sum[1]);
+    WriteWord(DstHi, Sum[2], Sum[3]);
     MI.eraseFromParent();
     return MBB;
   }
