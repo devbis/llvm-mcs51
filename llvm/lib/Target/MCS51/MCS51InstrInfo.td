@@ -69,6 +69,13 @@ def MCS51add_zext8_imm : SDNode<"MCS51ISD::ADD_ZEXT8_IMM",
                                 SDT_MCS51AddExtendedByteImmediate>;
 def MCS51add_sext8_imm : SDNode<"MCS51ISD::ADD_SEXT8_IMM",
                                 SDT_MCS51AddExtendedByteImmediate>;
+def SDT_MCS51AddExtendedByte : SDTypeProfile<1, 2, [
+  SDTCisVT<0, i16>, SDTCisVT<1, i16>, SDTCisVT<2, i8>
+]>;
+def MCS51add_zext8_16 : SDNode<"MCS51ISD::ADD_ZEXT8_16",
+                               SDT_MCS51AddExtendedByte>;
+def MCS51add_sext8_16 : SDNode<"MCS51ISD::ADD_SEXT8_16",
+                               SDT_MCS51AddExtendedByte>;
 def MCS51cmpult8 : SDNode<"MCS51ISD::CMPULT8", SDT_MCS51Cmp8>;
 def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
 def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
@@ -2077,6 +2084,23 @@ class MCS51AddExtendedByteImmediatePseudo<SDNode Op> : Instruction {
 
 def ADD_ZEXT8_IMM : MCS51AddExtendedByteImmediatePseudo<MCS51add_zext8_imm>;
 def ADD_SEXT8_IMM : MCS51AddExtendedByteImmediatePseudo<MCS51add_sext8_imm>;
+
+class MCS51AddExtendedBytePseudo<SDNode Op> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$base, MCS51GPR8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst,
+                      (Op MCS51PTR:$base, MCS51GPR8:$src))];
+}
+
+def ADD_ZEXT8_16 : MCS51AddExtendedBytePseudo<MCS51add_zext8_16>;
+def ADD_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51add_sext8_16>;
 
 def TRUNC16TO8 : Instruction {
   let Namespace = "MCS51";
