@@ -744,6 +744,32 @@ def STOREIDATA_GLOBAL8 : Instruction {
   let Defs = [A, R0];
 }
 
+def LOADIDATA_GLOBAL16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51Imm8:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let Defs = [A, DPTR, R0];
+}
+
+def STOREIDATA_GLOBAL16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$addr, MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+  let Defs = [A, R0];
+}
+
 class MCS51IndirectWordPseudo<bits<1> IsLoad> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = !if(IsLoad, (outs MCS51PTR:$dst), (outs));

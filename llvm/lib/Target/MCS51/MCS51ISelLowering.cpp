@@ -376,6 +376,57 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::LOADIDATA_GLOBAL16) {
+    Register Dst = MI.getOperand(0).getReg();
+    MachineMemOperand *MMO = MI.memoperands().front();
+    MachineFunction &MF = *MBB->getParent();
+    MachineMemOperand *LowMMO = MF.getMachineMemOperand(MMO, 0, 1);
+    MachineMemOperand *HighMMO = MF.getMachineMemOperand(MMO, 1, 1);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
+        .addReg(MCS51::R0, RegState::Define)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI))
+        .addReg(MCS51::R0)
+        .addMemOperand(LowMMO);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_RN))
+        .addReg(MCS51::R0, RegState::Define)
+        .addReg(MCS51::R0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI))
+        .addReg(MCS51::R0)
+        .addMemOperand(HighMMO);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREIDATA_GLOBAL16) {
+    MachineMemOperand *MMO = MI.memoperands().front();
+    MachineFunction &MF = *MBB->getParent();
+    MachineMemOperand *LowMMO = MF.getMachineMemOperand(MMO, 0, 1);
+    MachineMemOperand *HighMMO = MF.getMachineMemOperand(MMO, 1, 1);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
+        .addReg(MCS51::R0, RegState::Define)
+        .add(MI.getOperand(0));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_IND_RI_A))
+        .addReg(MCS51::R0)
+        .addMemOperand(LowMMO);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_RN))
+        .addReg(MCS51::R0, RegState::Define)
+        .addReg(MCS51::R0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_IND_RI_A))
+        .addReg(MCS51::R0)
+        .addMemOperand(HighMMO);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::ADDDPTR16ri) {
     Register Dst = MI.getOperand(0).getReg();
     int64_t Amount = MI.getOperand(2).getImm();

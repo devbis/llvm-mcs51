@@ -58,9 +58,11 @@ window. Linker symbols also describe the DATA alias in the top 256 bytes of
 SRAM. Static XDATA `.data` and `.bss` outputs are linker-checked to stay below
 `0x1f00`, preserving that alias for the CPU's DATA/IDATA space. The linker
 assigns explicit DATA/IDATA globals offsets `0x30` through `0x7f`; startup adds
-the SRAM alias base when copying their initial values. Lower offsets remain
-available for register banks and bit-addressable RAM, and the upper half of the
-alias is reserved for the hardware stack. The current reset stub in
+the SRAM alias base when copying their initial values. DATA-space globals use
+direct accesses, while IDATA globals support byte and word accesses through
+`@R0`. Lower offsets remain available for register banks and bit-addressable
+RAM, and the upper half of the alias is reserved for the hardware stack. The
+current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
 profile does not yet package physical bank images or implement code-bank
