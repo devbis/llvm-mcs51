@@ -24,6 +24,14 @@ unsigned long shift_right_long(unsigned long value, unsigned char amount) {
   return value >> amount;
 }
 
+unsigned long shift_left_long(unsigned long value, unsigned char amount) {
+  return value << amount;
+}
+
+long shift_right_signed_long(long value, unsigned char amount) {
+  return value >> amount;
+}
+
 unsigned int shift_right_word(unsigned int value, unsigned int amount) {
   return value >> amount;
 }
@@ -61,6 +69,15 @@ int shift_right_signed_word(int value, unsigned int amount) {
 // CHECK: ret
 // CHECK-LABEL: shift_right_long:
 // CHECK: jz
+// CHECK-COUNT-4: rrc a
+// CHECK: djnz 240,
+// CHECK: ret
+// CHECK-LABEL: shift_left_long:
+// CHECK-COUNT-4: rlc a
+// CHECK: djnz 240,
+// CHECK: ret
+// CHECK-LABEL: shift_right_signed_long:
+// CHECK: mov c, 231
 // CHECK-COUNT-4: rrc a
 // CHECK: djnz 240,
 // CHECK: ret

@@ -48,6 +48,10 @@ def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
 def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
 def MCS51srl32_parts : SDNode<"MCS51ISD::SRL32_PARTS",
                               SDT_MCS51Shift32Parts>;
+def MCS51shl32_parts : SDNode<"MCS51ISD::SHL32_PARTS",
+                              SDT_MCS51Shift32Parts>;
+def MCS51sra32_parts : SDNode<"MCS51ISD::SRA32_PARTS",
+                              SDT_MCS51Shift32Parts>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -1316,6 +1320,38 @@ def SRL32_PARTS : Instruction {
   let hasSideEffects = 1;
   let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
                       (MCS51srl32_parts MCS51PTR:$srclo,
+                                        MCS51PTR:$srchi,
+                                        MCS51PTR:$amount))];
+}
+def SHL32_PARTS : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
+  let InOperandList = (ins MCS51PTR:$srclo, MCS51PTR:$srchi,
+                           MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
+                      (MCS51shl32_parts MCS51PTR:$srclo,
+                                        MCS51PTR:$srchi,
+                                        MCS51PTR:$amount))];
+}
+def SRA32_PARTS : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
+  let InOperandList = (ins MCS51PTR:$srclo, MCS51PTR:$srchi,
+                           MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
+                      (MCS51sra32_parts MCS51PTR:$srclo,
                                         MCS51PTR:$srchi,
                                         MCS51PTR:$amount))];
 }
