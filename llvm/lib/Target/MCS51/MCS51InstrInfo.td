@@ -3,6 +3,17 @@
 def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDTNone, [SDNPHasChain]>;
+def SDT_MCS51RetI32 : SDTypeProfile<0, 4, [SDTCisVT<0, i8>,
+                                           SDTCisVT<1, i8>,
+                                           SDTCisVT<2, i8>,
+                                           SDTCisVT<3, i8>] >;
+def MCS51ret_i32 : SDNode<"MCS51ISD::RET_I32", SDT_MCS51RetI32,
+                          [SDNPHasChain]>;
+def MCS51ret_i32_imm : SDNode<"MCS51ISD::RET_I32_IMM", SDT_MCS51RetI32,
+                              [SDNPHasChain]>;
+def SDT_MCS51ShiftWord8 : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
+                                              SDTCisVT<1, i16>] >;
+def MCS51srl16_8 : SDNode<"MCS51ISD::SRL16_8", SDT_MCS51ShiftWord8>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -130,6 +141,39 @@ def RET16 : Instruction {
   let isReturn = 1;
   let isTerminator = 1;
 }
+def SRL16_8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def BUILDPAIR16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51GPR8:$lo, MCS51GPR8:$hi);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def RET_I32 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$b0, MCS51GPR8:$b1,
+                           MCS51GPR8:$b2, MCS51GPR8:$b3);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let isReturn = 1;
+  let isTerminator = 1;
+}
 def MOVX_R0A : MCS51Inst<0xF2, "movx @r0, a">;
 def MOVX_R1A : MCS51Inst<0xF3, "movx @r1, a">;
 def MOV_A_R0_IND : MCS51Inst<0xE6, "mov a, @r0">;
@@ -164,6 +208,11 @@ def RETI : MCS51Inst<0x32, "reti"> {
 
 def : Pat<(MCS51retglue), (RET)>;
 def : Pat<(MCS51retword), (RET16)>;
+def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
+                         MCS51GPR8:$b2, MCS51GPR8:$b3),
+          (RET_I32 MCS51GPR8:$b0, MCS51GPR8:$b1,
+                   MCS51GPR8:$b2, MCS51GPR8:$b3)>;
+def : Pat<(MCS51srl16_8 MCS51PTR:$src), (SRL16_8 MCS51PTR:$src)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
@@ -171,6 +220,25 @@ def MCS51Imm8 : Operand<i8>,
   let EncoderMethod = "getImm8OpValue";
   let DecoderMethod = "DecodeImm8";
 }
+
+def RET_I32_IMM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$b0, MCS51Imm8:$b1,
+                           MCS51Imm8:$b2, MCS51Imm8:$b3);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let isReturn = 1;
+  let isTerminator = 1;
+}
+
+def : Pat<(MCS51ret_i32_imm MCS51Imm8:$b0, MCS51Imm8:$b1,
+                             MCS51Imm8:$b2, MCS51Imm8:$b3),
+          (RET_I32_IMM MCS51Imm8:$b0, MCS51Imm8:$b1,
+                       MCS51Imm8:$b2, MCS51Imm8:$b3)>;
 
 def MCS51FrameIndex : Operand<i16>;
 
@@ -192,6 +260,9 @@ def MCS51Imm16 : Operand<i16>, ImmLeaf<i16, "return isUInt<16>(Imm);"> {
   let EncoderMethod = "getImm16OpValue";
   let DecoderMethod = "DecodeImm16";
 }
+
+def MCS51Imm16NotOne : Operand<i16>,
+                       ImmLeaf<i16, "return isUInt<16>(Imm) && Imm != 1;">;
 
 def MCS51Rel8 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
@@ -582,6 +653,18 @@ def STOREX8 : Instruction {
   let mayStore = 1;
 }
 
+def STOREX16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51PTR:$addr, MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+}
+
 def STOREXABS8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -915,6 +998,19 @@ def INCDPTR16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$src, (i16 1)))];
+}
+
+def ADDDPTR16ri : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src, MCS51Imm16NotOne:$imm);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let Pattern = [(set MCS51PTR:$dst,
+                      (add MCS51PTR:$src, MCS51Imm16NotOne:$imm))];
 }
 
 // The MCS-51 has no PC-relative unconditional branch with a long enough
