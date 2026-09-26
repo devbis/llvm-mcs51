@@ -194,6 +194,19 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return true;
     }
+    if (AS == MCS51::Default && LD->getMemoryVT() == MVT::i16 &&
+        getFrameAddress(LD->getBasePtr(), FI, Offset)) {
+      SDValue Ops[] = {
+          CurDAG->getTargetFrameIndex(FI, MVT::i16),
+          CurDAG->getTargetConstant(Offset, DL, MVT::i8), LD->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LOAD_FRAME16, DL,
+                                           N->getVTList(), Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
     if (AS == MCS51::Data || AS == MCS51::SFR) {
       unsigned Opcode;
       if (LD->getMemoryVT() == MVT::i8)
@@ -339,6 +352,18 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
                      CurDAG->getTargetConstant(Offset, DL, MVT::i8),
                      ST->getValue(), ST->getChain()};
     SDNode *Res = CurDAG->getMachineNode(MCS51::STORE_FRAME8, DL,
+                                         MVT::Other, Ops);
+    CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+    ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+    CurDAG->RemoveDeadNode(N);
+    return true;
+  }
+  if (AS == MCS51::Default && ST->getMemoryVT() == MVT::i16 &&
+      getFrameAddress(ST->getBasePtr(), FI, Offset)) {
+    SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
+                     CurDAG->getTargetConstant(Offset, DL, MVT::i8),
+                     ST->getValue(), ST->getChain()};
+    SDNode *Res = CurDAG->getMachineNode(MCS51::STORE_FRAME16, DL,
                                          MVT::Other, Ops);
     CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
     ReplaceUses(SDValue(N, 0), SDValue(Res, 0));

@@ -85,7 +85,8 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
 
   if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
       MI->getOpcode() == MCS51::LOAD_FRAME8 ||
-      MI->getOpcode() == MCS51::SPILL_LOAD16) {
+      MI->getOpcode() == MCS51::SPILL_LOAD16 ||
+      MI->getOpcode() == MCS51::LOAD_FRAME16) {
     Register Dst = MI->getOperand(0).getReg();
     EmitAddress();
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
@@ -103,7 +104,8 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     }
   } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
              MI->getOpcode() == MCS51::STORE_FRAME8 ||
-             MI->getOpcode() == MCS51::SPILL_STORE16) {
+             MI->getOpcode() == MCS51::SPILL_STORE16 ||
+             MI->getOpcode() == MCS51::STORE_FRAME16) {
     Register Src = MI->getOperand(FIOperandNum + 2).getReg();
     EmitAddress();
     if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
