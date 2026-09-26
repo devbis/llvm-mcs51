@@ -52,10 +52,15 @@ The initial CC2530 common-flash/XDATA linker layout is
 `llvm/lib/Target/MCS51/cc2530.ld`. Pass it to Clang/LLD with
 `-Wl,-T,<path-to-cc2530.ld> -Wl,--no-check-sections`; the overlap is expected
 because CODE and XDATA are separate 8051 buses. This profile covers the common
-32 KiB code window and 8 KiB XDATA RAM only. The current reset stub in
+32 KiB code window and defines the CC2530 XDATA windows for 8 KiB SRAM, XREG,
+memory-mapped SFRs, the information page, and the selectable 32 KiB flash-bank
+window. Linker symbols also describe the DATA alias in the top 256 bytes of
+SRAM. Ordinary `.data` and `.bss` allocation remains limited to SRAM. The
+current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
-profile does not yet implement code banks.
+profile does not yet package physical bank images or implement code-bank
+switching calls.
 
 ## Completion criteria
 
