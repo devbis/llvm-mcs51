@@ -71,3 +71,20 @@ unsigned char shift_left_two(unsigned char value) {
 unsigned char shift_right_two(unsigned char value) {
   return (unsigned char)(value >> 2);
 }
+
+// CHECK-LABEL: add_words:
+// CHECK: add a,
+// CHECK: addc a,
+// CHECK: ret
+unsigned short add_words(unsigned short lhs, unsigned short rhs) {
+  return lhs + rhs;
+}
+
+// CHECK-LABEL: subtract_words:
+// CHECK: clr c
+// CHECK: subb a,
+// CHECK: subb a,
+// CHECK: ret
+unsigned short subtract_words(unsigned short lhs, unsigned short rhs) {
+  return lhs - rhs;
+}
