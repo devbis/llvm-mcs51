@@ -13,6 +13,8 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -28,6 +30,30 @@ public:
   void emitFunctionBodyEnd() override {
     const Function &F = MF->getFunction();
     unsigned Bank = F.hasSection() ? getMCS51CodeBank(F.getSection()) : 0;
+    if (F.hasFnAttribute("interrupt")) {
+      if (Bank)
+        report_fatal_error(
+            "MCS-51 interrupt handlers must reside in common flash");
+      StringRef Vector = F.getFnAttribute("interrupt").getValueAsString();
+      unsigned Number = 0;
+      if (Vector.getAsInteger(10, Number) || Number > 17)
+        report_fatal_error("invalid MCS-51 interrupt vector number");
+
+      MCSection *SavedSection = OutStreamer->getCurrentSectionOnly();
+      SmallString<32> SectionName;
+      raw_svector_ostream(SectionName) << ".mcs51.vector." << Number;
+      MCSection *VectorSection = OutContext.getELFSection(
+          SectionName, ELF::SHT_PROGBITS,
+          ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
+      OutStreamer->switchSection(VectorSection);
+      MCInst Jump;
+      Jump.setOpcode(MCS51::LJMP);
+      Jump.addOperand(MCOperand::createExpr(
+          MCSymbolRefExpr::create(getSymbol(&F), OutContext)));
+      EmitToStreamer(*OutStreamer, Jump);
+      OutStreamer->switchSection(SavedSection);
+    }
+
     if (!Bank)
       return;
 

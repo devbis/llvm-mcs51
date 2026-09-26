@@ -2,6 +2,8 @@
 // operands and multi-byte encodings are described separately below.
 def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def MCS51retinterrupt : SDNode<"MCS51ISD::RET_INTERRUPT", SDTNone,
+                               [SDNPHasChain]>;
 def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDTNone, [SDNPHasChain]>;
 def SDT_MCS51RetI32 : SDTypeProfile<0, 4, [SDTCisVT<0, i8>,
                                            SDTCisVT<1, i8>,
@@ -214,6 +216,7 @@ def RETI : MCS51Inst<0x32, "reti"> {
 }
 
 def : Pat<(MCS51retglue), (RET)>;
+def : Pat<(MCS51retinterrupt), (RETI)>;
 def : Pat<(MCS51retword), (RET16)>;
 def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
                          MCS51GPR8:$b2, MCS51GPR8:$b3),

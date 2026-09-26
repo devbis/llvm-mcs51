@@ -1,5 +1,6 @@
 #include "MCS51ISelLowering.h"
 #include "MCS51Banking.h"
+#include "MCS51SelectionDAGInfo.h"
 #include "MCS51Subtarget.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -303,6 +304,11 @@ SDValue MCS51TargetLowering::LowerReturn(
     SelectionDAG &DAG) const {
   if (Outs.size() != OutVals.size())
     report_fatal_error("MCS-51 return value lowering mismatch");
+  if (DAG.getMachineFunction().getFunction().hasFnAttribute("interrupt")) {
+    if (!Outs.empty())
+      report_fatal_error("MCS-51 interrupt handlers must return void");
+    return DAG.getNode(MCS51ISD::RET_INTERRUPT, DL, MVT::Other, Chain);
+  }
   if (Outs.size() == 4 && Outs.front().ArgVT == MVT::i32) {
     bool AllConstant = llvm::all_of(OutVals, [](SDValue Value) {
       return isa<ConstantSDNode>(Value);

@@ -29,9 +29,30 @@ __cc2530_xbank_end = ORIGIN(XDATA_BANK) + LENGTH(XDATA_BANK);
 
 SECTIONS
 {
-  .text :
+  .vectors 0x0000 : { KEEP(*(.vectors)) } > CODE
+
+  .mcs51_vector_0 0x0003 : { KEEP(*(.mcs51.vector.0)) } > CODE
+  .mcs51_vector_1 0x000b : { KEEP(*(.mcs51.vector.1)) } > CODE
+  .mcs51_vector_2 0x0013 : { KEEP(*(.mcs51.vector.2)) } > CODE
+  .mcs51_vector_3 0x001b : { KEEP(*(.mcs51.vector.3)) } > CODE
+  .mcs51_vector_4 0x0023 : { KEEP(*(.mcs51.vector.4)) } > CODE
+  .mcs51_vector_5 0x002b : { KEEP(*(.mcs51.vector.5)) } > CODE
+  .mcs51_vector_6 0x0033 : { KEEP(*(.mcs51.vector.6)) } > CODE
+  .mcs51_vector_7 0x003b : { KEEP(*(.mcs51.vector.7)) } > CODE
+  .mcs51_vector_8 0x0043 : { KEEP(*(.mcs51.vector.8)) } > CODE
+  .mcs51_vector_9 0x004b : { KEEP(*(.mcs51.vector.9)) } > CODE
+  .mcs51_vector_10 0x0053 : { KEEP(*(.mcs51.vector.10)) } > CODE
+  .mcs51_vector_11 0x005b : { KEEP(*(.mcs51.vector.11)) } > CODE
+  .mcs51_vector_12 0x0063 : { KEEP(*(.mcs51.vector.12)) } > CODE
+  .mcs51_vector_13 0x006b : { KEEP(*(.mcs51.vector.13)) } > CODE
+  .mcs51_vector_14 0x0073 : { KEEP(*(.mcs51.vector.14)) } > CODE
+  .mcs51_vector_15 0x007b : { KEEP(*(.mcs51.vector.15)) } > CODE
+  .mcs51_vector_16 0x0083 : { KEEP(*(.mcs51.vector.16)) } > CODE
+  .mcs51_vector_17 0x008b : { KEEP(*(.mcs51.vector.17)) } > CODE
+
+  /* CC2530 vector slots occupy 0x0003 through 0x008d (18 vectors). */
+  .text 0x0094 :
   {
-    KEEP(*(.vectors))
     *(.text .text.*)
     *(.rodata .rodata.*)
   } > CODE
@@ -40,7 +61,7 @@ SECTIONS
    * Banked code executes at the same 0x8000-0xffff CPU address range, but
    * each output section has a distinct physical flash load address. Put code
    * in these banks with input sections such as .bank1.text and .bank2.rodata.
-   * A bank-aware call ABI is still required before code may call across banks.
+   * Cross-bank direct calls use root-bank trampolines.
    */
   .bank1 0x8000 : AT(0x08000)
   {
@@ -126,6 +147,42 @@ ASSERT(__mcs51_data2_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA/IDATA globals overlap the hardware stack")
 ASSERT(ADDR(.text) + SIZEOF(.text) <= 0x8000,
        "CC2530 common code exceeds the 32-KiB root bank")
+ASSERT(SIZEOF(.mcs51_vector_0) <= 3,
+       "CC2530 interrupt vector 0 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_1) <= 3,
+       "CC2530 interrupt vector 1 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_2) <= 3,
+       "CC2530 interrupt vector 2 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_3) <= 3,
+       "CC2530 interrupt vector 3 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_4) <= 3,
+       "CC2530 interrupt vector 4 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_5) <= 3,
+       "CC2530 interrupt vector 5 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_6) <= 3,
+       "CC2530 interrupt vector 6 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_7) <= 3,
+       "CC2530 interrupt vector 7 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_8) <= 3,
+       "CC2530 interrupt vector 8 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_9) <= 3,
+       "CC2530 interrupt vector 9 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_10) <= 3,
+       "CC2530 interrupt vector 10 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_11) <= 3,
+       "CC2530 interrupt vector 11 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_12) <= 3,
+       "CC2530 interrupt vector 12 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_13) <= 3,
+       "CC2530 interrupt vector 13 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_14) <= 3,
+       "CC2530 interrupt vector 14 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_15) <= 3,
+       "CC2530 interrupt vector 15 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_16) <= 3,
+       "CC2530 interrupt vector 16 has multiple handlers")
+ASSERT(SIZEOF(.mcs51_vector_17) <= 3,
+       "CC2530 interrupt vector 17 has multiple handlers")
 ASSERT(SIZEOF(.bank1) <= LENGTH(XDATA_BANK), "CC2530 bank 1 exceeds 32 KiB")
 ASSERT(SIZEOF(.bank2) <= LENGTH(XDATA_BANK), "CC2530 bank 2 exceeds 32 KiB")
 ASSERT(SIZEOF(.bank3) <= LENGTH(XDATA_BANK), "CC2530 bank 3 exceeds 32 KiB")
