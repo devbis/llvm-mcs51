@@ -51,6 +51,81 @@ int64_t __ashrdi3(int64_t Value, int Count) {
   return (int64_t)Result.Value;
 }
 
+static uint64_t udivmod64(uint64_t Numerator, uint64_t Denominator,
+                          uint64_t *Remainder) {
+  uint64_t Quotient = 0;
+  uint64_t Rest = 0;
+
+  for (unsigned I = 0; I != 64; ++I) {
+    unsigned Carry = Numerator >> 63;
+    Numerator <<= 1;
+    Rest = (Rest << 1) | Carry;
+    Word64Bytes RestBytes = {.Value = Rest};
+    Word64Bytes DenominatorBytes = {.Value = Denominator};
+    unsigned GreaterOrEqual = 1;
+    for (int Byte = 7; Byte >= 0; --Byte) {
+      unsigned Difference = (unsigned)RestBytes.Bytes[Byte] -
+                           (unsigned)DenominatorBytes.Bytes[Byte];
+      if (Difference != 0) {
+        GreaterOrEqual = Difference < 256;
+        break;
+      }
+    }
+    if (Carry || GreaterOrEqual) {
+      Rest -= Denominator;
+      Numerator |= 1;
+    }
+  }
+
+  *Remainder = Rest;
+  return Numerator;
+}
+
+uint64_t __udivdi3(uint64_t Numerator, uint64_t Denominator) {
+  uint64_t Remainder;
+  return udivmod64(Numerator, Denominator, &Remainder);
+}
+
+uint64_t __umoddi3(uint64_t Numerator, uint64_t Denominator) {
+  uint64_t Remainder;
+  (void)udivmod64(Numerator, Denominator, &Remainder);
+  return Remainder;
+}
+
+int64_t __divdi3(int64_t Numerator, int64_t Denominator) {
+  uint64_t UnsignedNumerator = (uint64_t)Numerator;
+  uint64_t UnsignedDenominator = (uint64_t)Denominator;
+  unsigned NumeratorNegative = UnsignedNumerator >> 63;
+  unsigned DenominatorNegative = UnsignedDenominator >> 63;
+
+  if (NumeratorNegative)
+    UnsignedNumerator = 0 - UnsignedNumerator;
+  if (DenominatorNegative)
+    UnsignedDenominator = 0 - UnsignedDenominator;
+  uint64_t Remainder;
+  uint64_t Quotient = udivmod64(UnsignedNumerator, UnsignedDenominator,
+                                &Remainder);
+  if (NumeratorNegative ^ DenominatorNegative)
+    Quotient = 0 - Quotient;
+  return (int64_t)Quotient;
+}
+
+int64_t __moddi3(int64_t Numerator, int64_t Denominator) {
+  uint64_t UnsignedNumerator = (uint64_t)Numerator;
+  uint64_t UnsignedDenominator = (uint64_t)Denominator;
+  unsigned NumeratorNegative = UnsignedNumerator >> 63;
+  unsigned DenominatorNegative = UnsignedDenominator >> 63;
+  if (NumeratorNegative)
+    UnsignedNumerator = 0 - UnsignedNumerator;
+  if (DenominatorNegative)
+    UnsignedDenominator = 0 - UnsignedDenominator;
+  uint64_t Remainder;
+  (void)udivmod64(UnsignedNumerator, UnsignedDenominator, &Remainder);
+  if (NumeratorNegative)
+    Remainder = 0 - Remainder;
+  return (int64_t)Remainder;
+}
+
 static __attribute__((noinline)) uint32_t
 udivmod16(uint16_t Numerator, uint16_t Denominator) {
   uint16_t Quotient = 0;
