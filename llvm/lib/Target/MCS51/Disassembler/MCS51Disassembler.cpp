@@ -25,6 +25,14 @@ static DecodeStatus DecodeImm16(MCInst &Inst, unsigned Imm, uint64_t,
   return MCDisassembler::Success;
 }
 
+static DecodeStatus DecodeAddr11(MCInst &Inst, unsigned Imm, uint64_t Address,
+                                 const MCDisassembler *) {
+  uint64_t Next = Address + 2;
+  Inst.addOperand(MCOperand::createImm((Next & ~uint64_t(0x7ff)) |
+                                       (Imm & 0x7ff)));
+  return MCDisassembler::Success;
+}
+
 static DecodeStatus DecodeRel8(MCInst &Inst, unsigned Imm, uint64_t Address,
                                const MCDisassembler *) {
   unsigned Size = Inst.getOpcode() == MCS51::JB ||
@@ -109,6 +117,18 @@ public:
                                STI);
     }
     switch (Opcode) {
+    case 0x01: case 0x21: case 0x41: case 0x61:
+    case 0x81: case 0xa1: case 0xc1: case 0xe1:
+    case 0x11: case 0x31: case 0x51: case 0x71:
+    case 0x91: case 0xb1: case 0xd1: case 0xf1:
+      if (Bytes.size() < 2) {
+        Size = 0;
+        return Fail;
+      }
+      Size = 2;
+      return decodeInstruction(DecoderTable16, Inst,
+                               uint64_t(Opcode) | (uint64_t(Bytes[1]) << 8),
+                               Address, this, STI);
     case 0x05: // INC direct
     case 0x40: // JC rel
     case 0x50: // JNC rel

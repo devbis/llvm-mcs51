@@ -265,6 +265,12 @@ def MCS51Addr16 : Operand<OtherVT> {
   let DecoderMethod = "DecodeImm16";
 }
 
+def MCS51Addr11 : Operand<OtherVT> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getAddr11OpValue";
+  let DecoderMethod = "DecodeAddr11";
+}
+
 def MCS51Imm16 : Operand<i16>, ImmLeaf<i16, "return isUInt<16>(Imm);"> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm16OpValue";
@@ -810,6 +816,26 @@ class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
 def LJMP : MCS51Abs16Inst<0x02, "ljmp", MCS51Addr16> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
+
+class MCS51Abs11Inst<bits<5> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Addr11:$addr);
+  let AsmString = mnemonic # " $addr";
+  let Size = 2;
+  bits<11> addr;
+  bits<16> Inst;
+  let Inst{4-0} = opcode;
+  let Inst{7-5} = addr{10-8};
+  let Inst{15-8} = addr{7-0};
+}
+
+def AJMP : MCS51Abs11Inst<0b00001, "ajmp"> {
+  let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
+}
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+    Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
+def ACALL : MCS51Abs11Inst<0b10001, "acall">;
 let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
     Uses = [SP, DPTR, R7, R6, R5, R4], isCall = 1 in
 def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16> {
