@@ -27,6 +27,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UREM, MVT::i16, LibCall);
   setOperationAction(ISD::SDIV, MVT::i16, LibCall);
   setOperationAction(ISD::SREM, MVT::i16, LibCall);
+  setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
@@ -74,6 +75,15 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
+TargetLowering::ShiftLegalizationStrategy
+MCS51TargetLowering::preferredShiftLegalizationStrategy(
+    SelectionDAG &DAG, SDNode *N, unsigned ExpansionFactor) const {
+  if (N->getValueType(0) == MVT::i64)
+    return ShiftLegalizationStrategy::LowerToLibcall;
+  return TargetLowering::preferredShiftLegalizationStrategy(
+      DAG, N, ExpansionFactor);
+}
+
 void MCS51TargetLowering::ReplaceNodeResults(
     SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
   if ((N->getOpcode() == ISD::ADD || N->getOpcode() == ISD::SUB) &&
@@ -104,6 +114,12 @@ void MCS51TargetLowering::ReplaceNodeResults(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
+  if (Op.getOpcode() == ISD::ANY_EXTEND && Op.getValueType() == MVT::i16 &&
+      Op.getOperand(0).getValueType() == MVT::i8) {
+    // ANY_EXTEND leaves the high bits undefined, so zero is a valid choice.
+    return DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Op.getOperand(0));
+  }
+
   auto LowerWordCompare = [&](SDValue LHS, SDValue RHS, ISD::CondCode CC,
                               bool IsSigned) -> SDValue {
     bool Invert = false;
