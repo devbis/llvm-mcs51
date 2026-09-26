@@ -48,7 +48,7 @@ Clang and LLD, followed by Intel HEX generation. Keep new MCS-51-specific tests
 inside this checkout, even when nearby test directories are symlinks to another
 LLVM checkout.
 
-The initial CC2530 common-flash/XDATA linker layout is
+The CC2530 common-flash/XDATA linker layout is
 `llvm/lib/Target/MCS51/cc2530.ld`. Pass it to Clang/LLD with
 `-Wl,-T,<path-to-cc2530.ld> -Wl,--no-check-sections`; the overlap is expected
 because CODE and XDATA are separate 8051 buses. This profile covers the common
@@ -67,14 +67,14 @@ current reset stub in
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
 linker accepts manually placed `.bank1.*` through `.bank7.*` input sections
 and emits them at separate physical flash load addresses while retaining the
-shared `0x8000` execution VMA. Automatic code placement and indirect banked
-calls are not implemented yet; the linker profile currently models the
-256-KiB flash variant. A function placed with
+shared `0x8000` execution VMA. The linker profile models the 256 KiB flash
+variant. A function placed with
 `__attribute__((section(".bankN.text")))` gets a common-area trampoline for
 direct calls. The trampoline saves FMAP, selects the callee bank, calls the
 function, and restores FMAP, including when the caller is itself banked.
 Indirect calls through banked function pointers and automatic function
-placement remain unsupported.
+placement remain unsupported. Interrupt attributes, interrupt vector
+placement, and `RETI` generation are also not implemented yet.
 
 ## Final target and completion criteria
 
@@ -106,8 +106,11 @@ address-space, linker, startup, and image-generation feature. Inspect generated
 assembly and linked images for representative firmware to confirm both
 correctness and code size.
 
-Current work is incomplete. Ordinary unqualified globals are assigned to
-XDATA, and the initial linker profile maps zero-initialized globals there.
-The full CC2530 banked-memory model, broader startup/runtime support, and
-end-to-end verification of those features remain to be implemented. Do not
-describe the target as fully supported until those gaps are closed.
+Current work is incomplete. The CC2530 profile supports XDATA globals,
+initialized XDATA data, explicit DATA/IDATA globals, and manually selected
+flash banks with direct-call trampolines. It does not yet provide automatic
+placement across banks, indirect banked calls, interrupt/vector handling, or
+a complete runtime library. Classic 8051 and CC2530 support must be verified
+feature by feature; do not describe the target as fully supported until the
+remaining ABI, instruction, interrupt, memory-map, runtime, and firmware-image
+gaps are implemented and tested.
