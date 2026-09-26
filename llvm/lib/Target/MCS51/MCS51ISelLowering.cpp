@@ -28,6 +28,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRL, MVT::i8, Legal);
   setOperationAction(ISD::SRA, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i16, Custom);
+  setOperationAction(ISD::SHL_PARTS, MVT::i16, Custom);
+  setOperationAction(ISD::SRA_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::MUL, MVT::i16, Custom);
   setOperationAction(ISD::UMUL_LOHI, MVT::i16, Expand);
   setOperationAction(ISD::MULHU, MVT::i16, Expand);
@@ -150,10 +152,17 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if (Op.getOpcode() == ISD::MUL && Op.getValueType() == MVT::i16)
     return DAG.getNode(MCS51ISD::MUL16, DL, MVT::i16, Op.getOperand(0),
                        Op.getOperand(1));
-  if (Op.getOpcode() == ISD::SRL_PARTS)
-    return DAG.getNode(MCS51ISD::SRL32_PARTS, DL,
-                       DAG.getVTList(MVT::i16, MVT::i16), Op.getOperand(0),
-                       Op.getOperand(1), Op.getOperand(2));
+  if (Op.getOpcode() == ISD::SRL_PARTS ||
+      Op.getOpcode() == ISD::SHL_PARTS ||
+      Op.getOpcode() == ISD::SRA_PARTS) {
+    unsigned Opcode = Op.getOpcode() == ISD::SHL_PARTS
+                          ? MCS51ISD::SHL32_PARTS
+                          : Op.getOpcode() == ISD::SRA_PARTS
+                                ? MCS51ISD::SRA32_PARTS
+                                : MCS51ISD::SRL32_PARTS;
+    return DAG.getNode(Opcode, DL, DAG.getVTList(MVT::i16, MVT::i16),
+                       Op.getOperand(0), Op.getOperand(1), Op.getOperand(2));
+  }
   if (Op.getOpcode() == ISD::SETCC &&
       Op.getOperand(0).getValueType() == MVT::i16) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -705,7 +714,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::SRL32_PARTS) {
+  if (MI.getOpcode() == MCS51::SRL32_PARTS ||
+      MI.getOpcode() == MCS51::SHL32_PARTS ||
+      MI.getOpcode() == MCS51::SRA32_PARTS) {
+    bool IsLeft = MI.getOpcode() == MCS51::SHL32_PARTS;
+    bool IsArithmetic = MI.getOpcode() == MCS51::SRA32_PARTS;
     MachineFunction &MF = *MBB->getParent();
     Register DstLo = MI.getOperand(0).getReg();
     Register DstHi = MI.getOperand(1).getReg();
@@ -753,15 +766,21 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
 
     BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::FRAMEADDR_R1))
         .addFrameIndex(ScratchFI)
-        .addImm(3);
-    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::CLR_C));
+        .addImm(IsLeft ? 0 : 3);
+    if (IsLeft || !IsArithmetic)
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::CLR_C));
     for (unsigned I = 0; I != 4; ++I) {
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_IND_RI))
           .addReg(MCS51::R1);
-      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
+      if (IsArithmetic && I == 0)
+        BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_C_BIT))
+            .addImm(0xE7);
+      BuildMI(*Loop, Loop->end(), DL,
+              TII.get(IsLeft ? MCS51::RLC_A : MCS51::RRC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_IND_RI_A))
           .addReg(MCS51::R1);
-      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DEC_RN))
+      BuildMI(*Loop, Loop->end(), DL,
+              TII.get(IsLeft ? MCS51::INC_RN : MCS51::DEC_RN))
           .addReg(MCS51::R1, RegState::Define)
           .addReg(MCS51::R1);
     }
