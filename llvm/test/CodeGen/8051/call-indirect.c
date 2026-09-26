@@ -24,12 +24,12 @@ u8 call_indirect_with_arg(u8 (*fn)(u8), u8 value) {
 // CHECK: jmp @a+dptr
 
 // DIS-LABEL: <call_indirect>:
-// DIS: lcall 152
+// DIS: lcall 154
 // DIS: ret
 // DIS: clr a
 // DIS: jmp @a+dptr
 // DIS-LABEL: <call_indirect_with_arg>:
-// DIS: lcall 158
+// DIS: lcall 162
 // DIS: ret
 // DIS: clr a
 // DIS: jmp @a+dptr

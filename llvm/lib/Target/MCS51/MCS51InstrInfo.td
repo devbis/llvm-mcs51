@@ -2,6 +2,8 @@
 // operands and multi-byte encodings are described separately below.
 def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+def SDT_MCS51RetA : SDTypeProfile<0, 1, [SDTCisVT<0, i8>] >;
+def MCS51ret_a : SDNode<"MCS51ISD::RET_A", SDT_MCS51RetA, [SDNPHasChain]>;
 def MCS51retinterrupt : SDNode<"MCS51ISD::RET_INTERRUPT", SDTNone,
                                [SDNPHasChain]>;
 def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDTNone, [SDNPHasChain]>;
@@ -199,6 +201,18 @@ def RET16 : Instruction {
   let isReturn = 1;
   let isTerminator = 1;
 }
+def RET_A : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$value);
+  let AsmString = "";
+  let Size = 2;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 0;
+  let isReturn = 1;
+  let isTerminator = 1;
+}
 def SRL16_8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -323,7 +337,6 @@ def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1">;
 def RET  : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
   let isTerminator = 1;
-  let Uses = [A];
 }
 def RET_NOA : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
@@ -336,6 +349,7 @@ def RETI : MCS51Inst<0x32, "reti"> {
 }
 
 def : Pat<(MCS51retglue), (RET)>;
+def : Pat<(MCS51ret_a MCS51GPR8:$value), (RET_A MCS51GPR8:$value)>;
 def : Pat<(MCS51retinterrupt), (RETI)>;
 def : Pat<(MCS51retword), (RET16)>;
 def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,

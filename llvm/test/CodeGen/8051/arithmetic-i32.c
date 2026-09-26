@@ -44,6 +44,14 @@ int shift_right_signed_word(int value, unsigned int amount) {
   return value >> amount;
 }
 
+unsigned char less_than_unsigned_long(unsigned long lhs, unsigned long rhs) {
+  return lhs < rhs;
+}
+
+unsigned char less_than_signed_long(long lhs, long rhs) {
+  return lhs < rhs;
+}
+
 // CHECK-LABEL: add_long:
 // CHECK-COUNT-3: addc a,
 // CHECK-NOT: subb a,
@@ -97,6 +105,15 @@ int shift_right_signed_word(int value, unsigned int amount) {
 // CHECK: rrc a
 // CHECK: djnz r0,
 // CHECK: ljmp
+// CHECK-LABEL: less_than_unsigned_long:
+// CHECK: subb a,
+// CHECK: rlc a
+// CHECK: ret
+// CHECK-LABEL: less_than_signed_long:
+// CHECK: subb a,
+// CHECK: xrl a, #128
+// CHECK: rlc a
+// CHECK: ret
 
 // O0-LABEL: add_long:
 // O0-COUNT-3: addc a,
