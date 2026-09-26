@@ -1182,8 +1182,9 @@ def SPILL_STORE_A8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1, SP];
-  let Uses = [A, R1, SP];
+  // The expansion saves and restores A, so A is live through this pseudo.
+  let Defs = [R1, SP];
+  let Uses = [R1, SP];
 }
 
 def FRAMEADDR_R1 : Instruction {
