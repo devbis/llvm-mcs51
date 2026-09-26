@@ -22,6 +22,7 @@ def SDT_MCS51ShiftWord : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                               SDTCisVT<2, i16>] >;
 def MCS51srl16 : SDNode<"MCS51ISD::SRL16", SDT_MCS51ShiftWord>;
 def MCS51shl16 : SDNode<"MCS51ISD::SHL16", SDT_MCS51ShiftWord>;
+def MCS51sra16 : SDNode<"MCS51ISD::SRA16", SDT_MCS51ShiftWord>;
 def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                             SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>] >;
@@ -224,6 +225,16 @@ def SHL16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
 }
+def SRA16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src, MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
 def BUILDPAIR16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -296,6 +307,8 @@ def : Pat<(MCS51srl16 MCS51PTR:$src, MCS51PTR:$amount),
           (SRL16 MCS51PTR:$src, MCS51PTR:$amount)>;
 def : Pat<(MCS51shl16 MCS51PTR:$src, MCS51PTR:$amount),
           (SHL16 MCS51PTR:$src, MCS51PTR:$amount)>;
+def : Pat<(MCS51sra16 MCS51PTR:$src, MCS51PTR:$amount),
+          (SRA16 MCS51PTR:$src, MCS51PTR:$amount)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {

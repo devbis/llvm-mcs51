@@ -1,6 +1,8 @@
 // RUN: clang -target mcs51 -S -O1 %s -o - | FileCheck %s
 // RUN: clang -target mcs51 -S -O0 %s -o - | FileCheck %s --check-prefix=O0
 // RUN: clang -target mcs51 -S -O1 -mllvm -verify-machineinstrs %s -o /dev/null
+// RUN: clang -target mcs51 -S -O1 %s -o %t.s
+// RUN: llvm-mc -triple=mcs51 -filetype=obj %t.s -o %t.o
 
 unsigned long add_long(unsigned long lhs, unsigned long rhs) {
   return lhs + rhs;
@@ -28,6 +30,10 @@ unsigned int shift_right_word(unsigned int value, unsigned int amount) {
 
 unsigned int shift_left_word(unsigned int value, unsigned int amount) {
   return value << amount;
+}
+
+int shift_right_signed_word(int value, unsigned int amount) {
+  return value >> amount;
 }
 
 // CHECK-LABEL: add_long:
@@ -64,6 +70,11 @@ unsigned int shift_left_word(unsigned int value, unsigned int amount) {
 // CHECK: ret
 // CHECK-LABEL: shift_left_word:
 // CHECK: rlc a
+// CHECK: djnz r0,
+// CHECK: ret
+// CHECK-LABEL: shift_right_signed_word:
+// CHECK: mov c, 231
+// CHECK: rrc a
 // CHECK: djnz r0,
 // CHECK: ret
 
