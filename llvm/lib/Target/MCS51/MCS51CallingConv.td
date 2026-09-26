@@ -1,4 +1,7 @@
 def CC_MCS51 : CallingConv<[
+  CCIfVarArg<CCIfType<[i8], CCAssignToStack<1, 1>>>,
+  CCIfVarArg<CCIfType<[i16], CCAssignToStack<2, 1>>>,
+  CCIfVarArg<CCIfType<[f32], CCAssignToStack<4, 1>>>,
   CCIfType<[i16], CCAssignToReg<[DPTR]>>,
   CCIf<"OrigTy->isIntegerTy(64)",
        CCIfType<[i8], CCAssignToStack<1, 1>>>,

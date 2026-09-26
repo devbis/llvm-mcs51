@@ -1,5 +1,7 @@
 #include "MCS51ISelLowering.h"
+#include "MCS51.h"
 #include "MCS51Banking.h"
+#include "MCS51MachineFunctionInfo.h"
 #include "MCS51SelectionDAGInfo.h"
 #include "MCS51Subtarget.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
@@ -42,6 +44,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UREM, MVT::i16, LibCall);
   setOperationAction(ISD::SDIV, MVT::i16, LibCall);
   setOperationAction(ISD::SREM, MVT::i16, LibCall);
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG, MVT::Other, Custom);
+  setOperationAction(ISD::VACOPY, MVT::Other, Expand);
+  setOperationAction(ISD::VAEND, MVT::Other, Expand);
   setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::SUB);
@@ -132,6 +138,11 @@ void MCS51TargetLowering::ReplaceNodeResults(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
+  if (Op.getOpcode() == ISD::VASTART)
+    return LowerVASTART(Op, DAG);
+  if (Op.getOpcode() == ISD::VAARG)
+    return LowerVAARG(Op, DAG);
+
   if (Op.getOpcode() == ISD::ADD && Op.getValueType() == MVT::i16) {
     for (unsigned I = 0; I != 2; ++I) {
       SDValue Extended = Op.getOperand(I);
@@ -473,6 +484,7 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
   InVals.clear();
   SmallVector<CCValAssign, 8> ArgLocs;
   MachineFunction &MF = DAG.getMachineFunction();
+  IsVarArg |= MF.getFunction().isVarArg();
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_MCS51);
 
@@ -506,7 +518,86 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
       report_fatal_error("unsupported MCS-51 argument extension");
     InVals.push_back(Value);
   }
+  if (IsVarArg) {
+    int64_t Offset = -static_cast<int64_t>(CCInfo.getStackSize() + 2);
+    int FI = MF.getFrameInfo().CreateFixedObject(1, Offset, true);
+    MF.getInfo<MCS51MachineFunctionInfo>()->setVarArgsFrameIndex(FI);
+  }
   return Chain;
+}
+
+SDValue MCS51TargetLowering::LowerVASTART(SDValue Op,
+                                         SelectionDAG &DAG) const {
+  MachineFunction &MF = DAG.getMachineFunction();
+  const auto *FuncInfo = MF.getInfo<MCS51MachineFunctionInfo>();
+  if (!FuncInfo->hasVarArgsFrameIndex())
+    report_fatal_error("MCS-51 va_start used in a non-variadic function");
+
+  SDLoc DL(Op);
+  SDValue Frame = DAG.getFrameIndex(FuncInfo->getVarArgsFrameIndex(), MVT::i8);
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  return DAG.getStore(Op.getOperand(0), DL, Frame, Op.getOperand(1),
+                      MachinePointerInfo(SV));
+}
+
+SDValue MCS51TargetLowering::LowerVAARG(SDValue Op,
+                                       SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  EVT VT = Op.getValueType();
+  SDValue Chain = Op.getOperand(0);
+  SDValue VAListAddr = Op.getOperand(1);
+  const Value *SV = cast<SrcValueSDNode>(Op.getOperand(2))->getValue();
+  uint64_t Size = DAG.getDataLayout()
+                      .getTypeAllocSize(VT.getTypeForEVT(*DAG.getContext()))
+                      .getFixedValue();
+
+  // Stack arguments are laid out toward lower IDATA addresses. Keep vararg
+  // slots byte aligned so va_arg can walk them by subtracting each value size.
+  SDValue VAListLoad = DAG.getLoad(MVT::i8, DL, Chain, VAListAddr,
+                                   MachinePointerInfo(SV), Align(1));
+  SDValue ArgumentPtr = VAListLoad;
+  if (!Size || Size > 8 || (Size & (Size - 1)))
+    report_fatal_error("unsupported MCS-51 va_arg size");
+
+  // Caller pushes each scalar from its most significant byte toward its least
+  // significant byte. The va_list points at the least significant byte, and
+  // subsequent bytes live at successively lower IDATA addresses.
+  SmallVector<SDValue, 8> Parts;
+  SDValue ArgumentLoadChain = VAListLoad.getValue(1);
+  for (uint64_t I = 0; I < Size; ++I) {
+    SDValue BytePtr = ArgumentPtr;
+    if (I)
+      BytePtr = DAG.getNode(ISD::SUB, DL, MVT::i8, ArgumentPtr,
+                            DAG.getConstant(I, DL, MVT::i8));
+    SDValue Byte = DAG.getLoad(MVT::i8, DL, ArgumentLoadChain, BytePtr,
+                               MachinePointerInfo(MCS51::IData), Align(1));
+    Parts.push_back(Byte);
+    ArgumentLoadChain = Byte.getValue(1);
+  }
+
+  EVT IntVT = EVT::getIntegerVT(*DAG.getContext(), Size * 8);
+  while (Parts.size() > 1) {
+    SmallVector<SDValue, 8> WiderParts;
+    for (unsigned I = 0; I < Parts.size(); I += 2) {
+      EVT WideVT = EVT::getIntegerVT(*DAG.getContext(),
+                                     Parts[I].getValueType().getSizeInBits() * 2);
+      WiderParts.push_back(
+          DAG.getNode(ISD::BUILD_PAIR, DL, WideVT, Parts[I], Parts[I + 1]));
+    }
+    Parts = std::move(WiderParts);
+  }
+  SDValue ArgumentLoad = Parts.front();
+  if (VT != IntVT)
+    ArgumentLoad = DAG.getNode(ISD::BITCAST, DL, VT, ArgumentLoad);
+
+  SDValue NextPtr = DAG.getNode(
+      ISD::SUB, DL, MVT::i8, ArgumentPtr,
+      DAG.getConstant(Size, DL, MVT::i8));
+  SDValue VAListStore = DAG.getStore(
+      ArgumentLoadChain, DL, NextPtr, VAListAddr,
+      MachinePointerInfo(SV), Align(1));
+  SDValue Results[] = {ArgumentLoad, VAListStore};
+  return DAG.getMergeValues(Results, DL);
 }
 
 SDValue MCS51TargetLowering::LowerCall(
@@ -2198,6 +2289,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::LOADI16 || MI.getOpcode() == MCS51::LOADP16) {
     Register Dst = MI.getOperand(0).getReg();
     Register Addr = MI.getOperand(1).getReg();
+    Register AddrPlus1 = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51Indirect8RegClass);
     Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     unsigned LoadOpcode = MI.getOpcode() == MCS51::LOADI16
@@ -2209,13 +2302,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(Addr, RegState::Define);
-    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
+        .addReg(AddrPlus1, RegState::Define);
+    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(AddrPlus1);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(Addr, RegState::Define);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LowByte);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
@@ -2225,6 +2314,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREI16 || MI.getOpcode() == MCS51::STOREP16) {
     Register Addr = MI.getOperand(0).getReg();
+    Register AddrPlus1 = MBB->getParent()->getRegInfo().createVirtualRegister(
+        &MCS51::MCS51Indirect8RegClass);
     Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     Register HighByte = MBB->getParent()->getRegInfo().createVirtualRegister(
@@ -2245,12 +2336,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(Addr, RegState::Define);
+        .addReg(AddrPlus1, RegState::Define);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(HighByte);
-    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(AddrPlus1);
     MI.eraseFromParent();
     return MBB;
   }

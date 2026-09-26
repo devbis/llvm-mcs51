@@ -193,12 +193,12 @@ entry:
 
 ; CHECK-LABEL: read_idata_word:
 ; CHECK: mov a, @r{{[01]}}
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, r{{[01]}}
 ; CHECK: inc a
 ; CHECK: mov r{{[01]}}, a
 ; CHECK: mov a, @r{{[01]}}
 ; CHECK: mov 131, a
-; CHECK: dec a
-; CHECK: mov r{{[01]}}, a
 ; CHECK: mov a, r{{[0-7]}}
 ; CHECK: mov 130, a
 ; CHECK: ret
@@ -210,12 +210,11 @@ entry:
 ; CHECK: mov r{{[0-7]}}, a
 ; CHECK: mov a, r{{[0-7]}}
 ; CHECK: mov @r{{[01]}}, a
+; CHECK: mov a, r{{[01]}}
 ; CHECK: inc a
 ; CHECK: mov r{{[01]}}, a
 ; CHECK: mov a, r{{[0-7]}}
 ; CHECK: mov @r{{[01]}}, a
-; CHECK: dec a
-; CHECK: mov r{{[01]}}, a
 ; CHECK: ret
 
 ; CHECK-LABEL: read_pdata:
@@ -229,12 +228,12 @@ entry:
 
 ; CHECK-LABEL: read_pdata_word:
 ; CHECK: movx a, @r{{[01]}}
+; CHECK: mov r{{[0-7]}}, a
+; CHECK: mov a, r{{[01]}}
 ; CHECK: inc a
 ; CHECK: mov r{{[01]}}, a
 ; CHECK: movx a, @r{{[01]}}
 ; CHECK: mov 131, a
-; CHECK: dec a
-; CHECK: mov r{{[01]}}, a
 ; CHECK: mov a, r{{[0-7]}}
 ; CHECK: mov 130, a
 ; CHECK: ret
@@ -246,12 +245,11 @@ entry:
 ; CHECK: mov r{{[0-7]}}, a
 ; CHECK: mov a, r{{[0-7]}}
 ; CHECK: movx @r{{[01]}}, a
+; CHECK: mov a, r{{[01]}}
 ; CHECK: inc a
 ; CHECK: mov r{{[01]}}, a
 ; CHECK: mov a, r{{[0-7]}}
 ; CHECK: movx @r{{[01]}}, a
-; CHECK: dec a
-; CHECK: mov r{{[01]}}, a
 ; CHECK: ret
 
 ; CHECK-LABEL: read_code:
