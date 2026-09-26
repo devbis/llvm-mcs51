@@ -73,8 +73,10 @@ variant. A function placed with
 `__attribute__((section(".bankN.text")))` gets a common-area trampoline for
 direct calls. The trampoline saves FMAP, selects the callee bank, calls the
 function, and restores FMAP, including when the caller is itself banked.
-Indirect calls through banked function pointers and automatic function
-placement remain unsupported. CC2530 interrupt handlers use
+Taking the address of a banked function yields its common-area trampoline, so
+ordinary 16-bit function pointers can call banked functions indirectly; the
+trampoline saves and restores FMAP around the call. Automatic function
+placement across banks remains unsupported. CC2530 interrupt handlers use
 `__attribute__((interrupt(N)))`, where `N` is 0 through 17. The backend saves
 the interrupted register-bank-0 state and SFR registers, then returns with
 `RETI`. It emits a three-byte `LJMP` vector stub; `cc2530.ld` places vector N
@@ -114,9 +116,9 @@ correctness and code size.
 
 Current work is incomplete. The CC2530 profile supports XDATA globals,
 initialized XDATA data, explicit DATA/IDATA globals, manually selected flash
-banks with direct-call trampolines, and CC2530 interrupt vectors. It does not
-yet provide automatic placement across banks, indirect banked calls, or a
-complete runtime library. Classic 8051 and CC2530 support must be verified
+banks with direct and indirect-call trampolines, and CC2530 interrupt vectors.
+It does not yet provide automatic placement across banks or a complete runtime
+library. Classic 8051 and CC2530 support must be verified
 feature by feature; do not describe the target as fully supported until the
 remaining ABI, instruction, memory-map, runtime, optimization, and
 firmware-image gaps are implemented and tested.
