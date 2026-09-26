@@ -650,8 +650,10 @@ SDValue MCS51TargetLowering::LowerReturn(
     Ops.append(OutVals.begin(), OutVals.end());
     return DAG.getNode(MCS51ISD::RET_I64, DL, MVT::Other, Ops);
   } else if (!OutVals.empty() &&
-             (Outs.front().VT == MVT::i8 || Outs.front().Flags.isZExt() ||
-              Outs.front().Flags.isSExt())) {
+             (DAG.getMachineFunction().getFunction().getReturnType()
+                  ->isIntegerTy(1) ||
+              DAG.getMachineFunction().getFunction().getReturnType()
+                  ->isIntegerTy(8))) {
     SDValue RetVal = OutVals.front();
     if (RetVal.getValueType() == MVT::i16)
       RetVal = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, RetVal);
@@ -667,12 +669,42 @@ SDValue MCS51TargetLowering::LowerReturn(
     return DAG.getNode(MCS51ISD::RET_A, DL, MVT::Other, Ops);
   } else if (!OutVals.empty() && Outs.front().VT == MVT::i16) {
     SDValue RetVal = OutVals.front();
+    int Extension = -1;
+    SDValue ByteValue;
+    if ((RetVal.getOpcode() == ISD::ZERO_EXTEND ||
+         RetVal.getOpcode() == ISD::ANY_EXTEND ||
+         RetVal.getOpcode() == ISD::SIGN_EXTEND) &&
+        RetVal.getOperand(0).getValueType() == MVT::i8) {
+      Extension = RetVal.getOpcode() == ISD::SIGN_EXTEND ? 1 : 0;
+      ByteValue = RetVal.getOperand(0);
+    } else if (RetVal.getValueType() == MVT::i8) {
+      Extension = 0;
+      ByteValue = RetVal;
+    } else if ((RetVal.getOpcode() == ISD::ZERO_EXTEND ||
+                RetVal.getOpcode() == ISD::ANY_EXTEND) &&
+               RetVal.getOperand(0).getValueType() == MVT::i1) {
+      Extension = 0;
+      ByteValue = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i8,
+                              RetVal.getOperand(0));
+    } else if (auto *Load = dyn_cast<LoadSDNode>(RetVal)) {
+      if (Load->getMemoryVT() == MVT::i8 &&
+          (Load->getExtensionType() == ISD::ZEXTLOAD ||
+           Load->getExtensionType() == ISD::SEXTLOAD)) {
+        Extension = Load->getExtensionType() == ISD::SEXTLOAD ? 1 : 0;
+        ByteValue = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, RetVal);
+      }
+    }
+    if (Extension >= 0) {
+      SDValue Ops[] = {Chain, ByteValue};
+      unsigned Opcode = Extension ? MCS51ISD::RET_SEXT8
+                                  : MCS51ISD::RET_ZEXT8;
+      return DAG.getNode(Opcode, DL, MVT::Other, Ops);
+    }
     if (RetVal.getValueType() == MVT::i8)
       RetVal = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, RetVal);
     Chain = DAG.getCopyToReg(Chain, DL, MCS51::DPTR, RetVal);
   }
-  if (!Outs.empty() && Outs.front().VT == MVT::i16 &&
-      !Outs.front().Flags.isZExt() && !Outs.front().Flags.isSExt())
+  if (!Outs.empty() && Outs.front().VT == MVT::i16)
     return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain);
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
 }
@@ -682,6 +714,26 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::RET_ZEXT8 ||
+      MI.getOpcode() == MCS51::RET_SEXT8) {
+    Register Value = MI.getOperand(0).getReg();
+    bool IsSigned = MI.getOpcode() == MCS51::RET_SEXT8;
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Value);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    if (IsSigned) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT)).addImm(0xE7);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A).addImm(0);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    } else {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IMM))
+          .addImm(0x83).addImm(0);
+    }
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA))
+        .addReg(MCS51::DPTR, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::SELECT16) {
     MachineFunction &MF = *MBB->getParent();
     Register Dst = MI.getOperand(0).getReg();
