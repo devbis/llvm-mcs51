@@ -28,7 +28,7 @@ Build the compiler and core code-generation tools with:
 ```sh
 cmake --build ../llvm-8051-build \
   --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj \
-  FileCheck ld.lld -j 10
+  FileCheck lld -j 10
 ```
 
 ## Verification

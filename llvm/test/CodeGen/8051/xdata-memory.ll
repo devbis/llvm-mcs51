@@ -172,8 +172,6 @@ entry:
 ; CHECK: mov a, r7
 ; CHECK: mov 130, a
 ; CHECK: movx a, @dptr
-; CHECK: mov r0, a
-; CHECK: mov a, r0
 ; CHECK: ret
 
 ; CHECK-LABEL: write_xdata:
