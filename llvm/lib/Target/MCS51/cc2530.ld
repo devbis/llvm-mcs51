@@ -17,7 +17,13 @@ SECTIONS
     *(.rodata .rodata.*)
   } > CODE
 
-  /* Initial values are stored in flash; startup code must copy them to XDATA. */
-  .data : { *(.data .data.*) } > XDATA AT> CODE
+  /* Initial values are stored in flash and copied to XDATA by reset startup. */
+  .data :
+  {
+    __mcs51_data_start = .;
+    *(.data .data.*)
+    __mcs51_data_end = .;
+  } > XDATA AT> CODE
+  __mcs51_data_load = LOADADDR(.data);
   .bss (NOLOAD) : { *(.bss .bss.*) *(COMMON) } > XDATA
 }
