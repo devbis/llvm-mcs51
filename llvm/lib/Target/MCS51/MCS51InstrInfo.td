@@ -4,6 +4,10 @@ def MCS51retglue : SDNode<"MCS51ISD::RET_GLUE", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def SDT_MCS51RetA : SDTypeProfile<0, 1, [SDTCisVT<0, i8>] >;
 def MCS51ret_a : SDNode<"MCS51ISD::RET_A", SDT_MCS51RetA, [SDNPHasChain]>;
+def MCS51ret_zext8 : SDNode<"MCS51ISD::RET_ZEXT8", SDT_MCS51RetA,
+                             [SDNPHasChain]>;
+def MCS51ret_sext8 : SDNode<"MCS51ISD::RET_SEXT8", SDT_MCS51RetA,
+                             [SDNPHasChain]>;
 def MCS51retinterrupt : SDNode<"MCS51ISD::RET_INTERRUPT", SDTNone,
                                [SDNPHasChain]>;
 def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDTNone, [SDNPHasChain]>;
@@ -229,6 +233,21 @@ def RET_A : Instruction {
   let isReturn = 1;
   let isTerminator = 1;
 }
+class MCS51RetExt8Pseudo : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$value);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let isReturn = 1;
+  let isTerminator = 1;
+}
+def RET_ZEXT8 : MCS51RetExt8Pseudo;
+def RET_SEXT8 : MCS51RetExt8Pseudo;
 def SRL16_8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -366,6 +385,10 @@ def RETI : MCS51Inst<0x32, "reti"> {
 
 def : Pat<(MCS51retglue), (RET)>;
 def : Pat<(MCS51ret_a MCS51GPR8:$value), (RET_A MCS51GPR8:$value)>;
+def : Pat<(MCS51ret_zext8 MCS51GPR8:$value),
+          (RET_ZEXT8 MCS51GPR8:$value)>;
+def : Pat<(MCS51ret_sext8 MCS51GPR8:$value),
+          (RET_SEXT8 MCS51GPR8:$value)>;
 def : Pat<(MCS51retinterrupt), (RETI)>;
 def : Pat<(MCS51retword), (RET16)>;
 def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
