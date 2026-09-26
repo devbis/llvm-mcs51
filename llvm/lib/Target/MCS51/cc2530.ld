@@ -1,5 +1,7 @@
 /* CC2530 root-bank memory map for firmware that fits the common flash area.
  * CODE and XDATA have independent address buses, so their VMAs overlap. */
+ENTRY(reset)
+
 MEMORY
 {
   CODE  (rx) : ORIGIN = 0x0000, LENGTH = 0x8000
