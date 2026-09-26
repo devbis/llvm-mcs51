@@ -1,6 +1,56 @@
 /* Minimal arithmetic runtime for targets without a system libgcc. */
 #include <stdint.h>
 
+typedef union {
+  uint64_t Value;
+  uint8_t Bytes[8];
+} Word64Bytes;
+
+uint64_t __ashldi3(uint64_t Value, int Count) {
+  Word64Bytes Result = {.Value = Value};
+  if (Count >= 64)
+    return 0;
+  for (int I = 0; I < Count; ++I) {
+    uint8_t Carry = 0;
+    for (unsigned Byte = 0; Byte != 8; ++Byte) {
+      uint8_t NextCarry = Result.Bytes[Byte] >> 7;
+      Result.Bytes[Byte] = (uint8_t)((Result.Bytes[Byte] << 1) | Carry);
+      Carry = NextCarry;
+    }
+  }
+  return Result.Value;
+}
+
+uint64_t __lshrdi3(uint64_t Value, int Count) {
+  Word64Bytes Result = {.Value = Value};
+  if (Count >= 64)
+    return 0;
+  for (int I = 0; I < Count; ++I) {
+    uint8_t Carry = 0;
+    for (int Byte = 7; Byte >= 0; --Byte) {
+      uint8_t NextCarry = Result.Bytes[Byte] & 1;
+      Result.Bytes[Byte] = (uint8_t)((Result.Bytes[Byte] >> 1) | (Carry << 7));
+      Carry = NextCarry;
+    }
+  }
+  return Result.Value;
+}
+
+int64_t __ashrdi3(int64_t Value, int Count) {
+  Word64Bytes Result = {.Value = (uint64_t)Value};
+  if (Count >= 64)
+    Count = 64;
+  for (int I = 0; I < Count; ++I) {
+    uint8_t Carry = Result.Bytes[7] & 0x80;
+    for (int Byte = 7; Byte >= 0; --Byte) {
+      uint8_t NextCarry = (uint8_t)((Result.Bytes[Byte] & 1) << 7);
+      Result.Bytes[Byte] = (uint8_t)((Result.Bytes[Byte] >> 1) | Carry);
+      Carry = NextCarry;
+    }
+  }
+  return (int64_t)Result.Value;
+}
+
 static __attribute__((noinline)) uint32_t
 udivmod16(uint16_t Numerator, uint16_t Denominator) {
   uint16_t Quotient = 0;
