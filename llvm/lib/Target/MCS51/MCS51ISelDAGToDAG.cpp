@@ -319,6 +319,24 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return true;
     }
+    if (AS == MCS51::Code &&
+        (LD->getMemoryVT() == MVT::i8 || LD->getMemoryVT() == MVT::i16)) {
+      bool IsGlobal = false;
+      SDValue Addr = getMCS51AbsoluteAddress(
+          *CurDAG, LD->getBasePtr(), DL, /*AllowConstant=*/true, IsGlobal);
+      if (Addr) {
+        unsigned Opcode = LD->getMemoryVT() == MVT::i8
+                              ? MCS51::LOADCODEABS8
+                              : MCS51::LOADCODEABS16;
+        SDValue Ops[] = {Addr, LD->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(Opcode, DL, N->getVTList(), Ops);
+        CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+        ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+        ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+        CurDAG->RemoveDeadNode(N);
+        return true;
+      }
+    }
     if ((AS == MCS51::XData || AS == MCS51::Default) &&
         (LD->getMemoryVT() == MVT::i8 || LD->getMemoryVT() == MVT::i16)) {
       bool IsGlobal = false;
