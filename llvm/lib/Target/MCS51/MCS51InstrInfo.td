@@ -1120,6 +1120,23 @@ def ADDDPTR16ri : Instruction {
                       (add MCS51PTR:$src, MCS51Imm16NotOne:$imm))];
 }
 
+class MCS51WordArithmetic : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
+
+let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$lhs, MCS51PTR:$rhs))] in
+def ADD16rr : MCS51WordArithmetic;
+let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
+def SUB16rr : MCS51WordArithmetic;
+
 // The MCS-51 has no PC-relative unconditional branch with a long enough
 // range for arbitrary basic blocks. Use LJMP until branch relaxation can
 // select shorter forms safely.

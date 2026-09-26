@@ -463,6 +463,63 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::ADD16rr ||
+      MI.getOpcode() == MCS51::SUB16rr) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    Register LHSLo = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register LHSHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register RHSLo = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register RHSHi = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register ResultLo = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+
+    // DPTR is the only allocatable 16-bit register. Capture both operands
+    // into byte registers before performing the carry/borrow chain.
+    auto CopyDPTR = [&](Register Src) {
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Src);
+    };
+    auto ReadDPTRByte = [&](int64_t Address, Register DstByte) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(Address);
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), DstByte)
+          .addReg(MCS51::A);
+    };
+    CopyDPTR(LHS);
+    ReadDPTRByte(0x82, LHSLo);
+    ReadDPTRByte(0x83, LHSHi);
+    CopyDPTR(RHS);
+    ReadDPTRByte(0x82, RHSLo);
+    ReadDPTRByte(0x83, RHSHi);
+
+    bool IsAdd = MI.getOpcode() == MCS51::ADD16rr;
+    if (!IsAdd)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSLo);
+    BuildMI(*MBB, MII, DL,
+            TII.get(IsAdd ? MCS51::ADD_A_RN : MCS51::SUBB_A_RN))
+        .addReg(RHSLo);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ResultLo)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSHi);
+    BuildMI(*MBB, MII, DL,
+            TII.get(IsAdd ? MCS51::ADDC_A_RN : MCS51::SUBB_A_RN))
+        .addReg(RHSHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ResultLo);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::RET_I32) {
     static constexpr Register ReturnRegs[] = {MCS51::R4, MCS51::R5,
                                                MCS51::R6, MCS51::R7};
