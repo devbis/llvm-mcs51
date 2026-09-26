@@ -62,6 +62,11 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                               bool IsSigned) -> SDValue {
     bool Invert = false;
     switch (CC) {
+    case ISD::SETEQ:
+      return DAG.getNode(MCS51ISD::CMPEQ16, DL, MVT::i8, LHS, RHS);
+    case ISD::SETNE:
+      Invert = true;
+      break;
     case ISD::SETULT:
     case ISD::SETLT:
       break;
@@ -81,7 +86,10 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     default:
       return SDValue();
     }
-    unsigned Opcode = IsSigned ? MCS51ISD::CMPSLT16 : MCS51ISD::CMPULT16;
+    unsigned Opcode = CC == ISD::SETNE
+                          ? MCS51ISD::CMPEQ16
+                          : IsSigned ? MCS51ISD::CMPSLT16
+                                     : MCS51ISD::CMPULT16;
     SDValue Result = DAG.getNode(Opcode, DL, MVT::i8, LHS, RHS);
     return Invert ? DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
                                 DAG.getConstant(1, DL, MVT::i8))
@@ -127,6 +135,13 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
   if (LHS.getValueType() == MVT::i16 && RHS.getValueType() == MVT::i16) {
+    if (CC == ISD::SETEQ || CC == ISD::SETNE) {
+      SDValue Result = DAG.getNode(MCS51ISD::CMPEQ16, DL, MVT::i8, LHS, RHS);
+      unsigned BranchOpcode = CC == ISD::SETEQ ? MCS51ISD::BR_NE
+                                                : MCS51ISD::BR_EQ;
+      return DAG.getNode(BranchOpcode, DL, MVT::Other, Op.getOperand(0),
+                         Result, DAG.getConstant(0, DL, MVT::i8), Dest);
+    }
     bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
                     CC == ISD::SETGT || CC == ISD::SETLE;
     bool Invert = false;
@@ -602,7 +617,56 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Dst = MI.getOperand(0).getReg();
     Register LHS = MI.getOperand(1).getReg();
     Register RHS = MI.getOperand(2).getReg();
-    bool IsSigned = MI.getOperand(3).getImm() != 0;
+    int64_t CompareKind = MI.getOperand(3).getImm();
+    if (CompareKind == 2) {
+      MachineBasicBlock *Tail = MBB->splitAt(MI);
+      MachineBasicBlock *NotEqualBB = MF.CreateMachineBasicBlock(
+          MBB->getBasicBlock());
+      MF.insert(Tail->getIterator(), NotEqualBB);
+      MBB->addSuccessor(NotEqualBB);
+      NotEqualBB->addSuccessor(Tail);
+      Tail->addLiveIn(MCS51::A);
+      MI.eraseFromParent();
+
+      Register LHSLo = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
+      auto CopyDPTR = [&](Register Src) {
+        BuildMI(*MBB, MBB->end(), DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+            .addReg(Src);
+      };
+      CopyDPTR(LHS);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(TargetOpcode::COPY), LHSLo)
+          .addReg(MCS51::A);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_B_A));
+      CopyDPTR(RHS);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN)).addReg(LHSLo);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ))
+          .addMBB(NotEqualBB);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ))
+          .addMBB(NotEqualBB);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+          .addImm(1);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+      BuildMI(*NotEqualBB, NotEqualBB->end(), DL,
+              TII.get(MCS51::MOV_A_IMM), MCS51::A)
+          .addImm(0);
+      BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(MCS51::LJMP))
+          .addMBB(Tail);
+      BuildMI(*Tail, Tail->begin(), DL, TII.get(TargetOpcode::COPY), Dst)
+          .addReg(MCS51::A);
+      return Tail;
+    }
+    bool IsSigned = CompareKind != 0;
     Register LHSLo = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     auto CopyDPTR = [&](Register Src) {
