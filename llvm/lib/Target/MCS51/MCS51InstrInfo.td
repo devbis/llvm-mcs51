@@ -1296,6 +1296,33 @@ def SPILL_STORE8 : Instruction {
   let Uses = [SP];
 }
 
+def SPILL_LOAD_INDIRECT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51Indirect8:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
+def SPILL_STORE_INDIRECT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51Indirect8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
 def SPILL_LOAD16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);

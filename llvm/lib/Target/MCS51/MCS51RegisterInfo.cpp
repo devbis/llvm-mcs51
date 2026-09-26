@@ -113,6 +113,7 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   }
 
   if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
+      MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8 ||
       MI->getOpcode() == MCS51::LOAD_FRAME8 ||
       MI->getOpcode() == MCS51::SPILL_LOAD16 ||
       MI->getOpcode() == MCS51::SPILL_LOAD_A8 ||
@@ -129,6 +130,7 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     if (MI->getOpcode() == MCS51::SPILL_LOAD_A8) {
       // The load itself leaves the byte in the accumulator register class.
     } else if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
+        MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8 ||
         MI->getOpcode() == MCS51::LOAD_FRAME8) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
     } else {
@@ -141,6 +143,7 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
     }
   } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
+             MI->getOpcode() == MCS51::SPILL_STORE_INDIRECT8 ||
              MI->getOpcode() == MCS51::STORE_FRAME8 ||
              MI->getOpcode() == MCS51::SPILL_STORE16 ||
              MI->getOpcode() == MCS51::SPILL_STORE_A8 ||
@@ -156,6 +159,7 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
     } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
+        MI->getOpcode() == MCS51::SPILL_STORE_INDIRECT8 ||
         MI->getOpcode() == MCS51::STORE_FRAME8) {
       EmitAddress();
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);

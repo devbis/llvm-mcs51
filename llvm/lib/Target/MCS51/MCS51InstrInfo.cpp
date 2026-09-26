@@ -47,9 +47,10 @@ void MCS51InstrInfo::storeRegToStackSlot(
     bool IsKill, int FrameIndex, const TargetRegisterClass *RC, Register,
     MachineInstr::MIFlag Flags) const {
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
+  bool IsIndirectByte = RC == &MCS51::MCS51Indirect8RegClass;
   bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
   bool IsWord = RC == &MCS51::MCS51PTRRegClass;
-  if (!IsByte && !IsAccumulator && !IsWord)
+  if (!IsByte && !IsIndirectByte && !IsAccumulator && !IsWord)
     llvm_unreachable("unsupported MCS-51 spill register class");
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -58,6 +59,7 @@ void MCS51InstrInfo::storeRegToStackSlot(
       MachineMemOperand::MOStore, MFI.getObjectSize(FrameIndex),
       MFI.getObjectAlign(FrameIndex));
   unsigned Opcode = IsByte ? MCS51::SPILL_STORE8
+                           : IsIndirectByte ? MCS51::SPILL_STORE_INDIRECT8
                            : IsAccumulator ? MCS51::SPILL_STORE_A8
                                             : MCS51::SPILL_STORE16;
   BuildMI(MBB, MI, DebugLoc(), get(Opcode))
@@ -73,9 +75,10 @@ void MCS51InstrInfo::loadRegFromStackSlot(
     int FrameIndex, const TargetRegisterClass *RC, Register, unsigned SubReg,
     MachineInstr::MIFlag Flags) const {
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
+  bool IsIndirectByte = RC == &MCS51::MCS51Indirect8RegClass;
   bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
   bool IsWord = RC == &MCS51::MCS51PTRRegClass;
-  if ((!IsByte && !IsAccumulator && !IsWord) || SubReg)
+  if ((!IsByte && !IsIndirectByte && !IsAccumulator && !IsWord) || SubReg)
     llvm_unreachable("unsupported MCS-51 reload register class");
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -84,6 +87,7 @@ void MCS51InstrInfo::loadRegFromStackSlot(
       MachineMemOperand::MOLoad, MFI.getObjectSize(FrameIndex),
       MFI.getObjectAlign(FrameIndex));
   unsigned Opcode = IsByte ? MCS51::SPILL_LOAD8
+                           : IsIndirectByte ? MCS51::SPILL_LOAD_INDIRECT8
                            : IsAccumulator ? MCS51::SPILL_LOAD_A8
                                             : MCS51::SPILL_LOAD16;
   BuildMI(MBB, MI, DebugLoc(), get(Opcode), DestReg)
