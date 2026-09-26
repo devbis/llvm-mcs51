@@ -28,6 +28,23 @@ public:
 
   StringRef getPassName() const override { return "MCS-51 Assembly Printer"; }
 
+  const MCExpr *lowerConstant(const Constant *CV, const Constant *BaseCV,
+                              uint64_t Offset) override {
+    if (const auto *F = dyn_cast<Function>(CV)) {
+      unsigned Bank = F->hasSection() ? getMCS51CodeBank(F->getSection()) : 0;
+      if (Bank) {
+        const MCExpr *Address = MCSymbolRefExpr::create(
+            getBankThunkSymbol(*F), OutContext);
+        if (Offset)
+          Address = MCBinaryExpr::createAdd(
+              Address, MCConstantExpr::create(Offset, OutContext),
+              OutContext);
+        return Address;
+      }
+    }
+    return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
+  }
+
   void emitFunctionBodyEnd() override {
     const Function &F = MF->getFunction();
     unsigned Bank = F.hasSection() ? getMCS51CodeBank(F.getSection()) : 0;
@@ -112,8 +129,25 @@ public:
         Inst.addOperand(MCOperand::createExpr(
             MCSymbolRefExpr::create(MO.getMBB()->getSymbol(), OutContext)));
       else if (MO.isGlobal()) {
-        const MCExpr *Expr =
-            MCSymbolRefExpr::create(getSymbol(MO.getGlobal()), OutContext);
+        const GlobalValue *GV = MO.getGlobal();
+        MCSymbol *Symbol = getSymbol(GV);
+        if (const auto *Target = dyn_cast<Function>(GV)) {
+          unsigned TargetBank = Target->hasSection()
+                                    ? getMCS51CodeBank(Target->getSection())
+                                    : 0;
+          unsigned CallerBank = MF->getFunction().hasSection()
+                                    ? getMCS51CodeBank(
+                                          MF->getFunction().getSection())
+                                    : 0;
+          // A banked function's 16-bit code address is shared by every bank.
+          // Use its common-area trampoline whenever the address escapes as a
+          // value. Direct calls within the same bank still target the body.
+          if (TargetBank &&
+              (MI->getOpcode() != MCS51::LCALL ||
+               TargetBank != CallerBank))
+            Symbol = getBankThunkSymbol(*Target);
+        }
+        const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, OutContext);
         if (MO.getOffset())
           Expr = MCBinaryExpr::createAdd(
               Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
@@ -134,6 +168,11 @@ public:
   }
 
 private:
+  MCSymbol *getBankThunkSymbol(const Function &F) {
+    return OutContext.getOrCreateSymbol(
+        getMCS51BankThunkName(getSymbol(&F)->getName()));
+  }
+
   MCSymbol *getIndirectCallThunkSymbol(const Function &F) {
     SmallString<64> Name(".L");
     Name.append(getSymbol(&F)->getName());
