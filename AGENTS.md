@@ -54,8 +54,8 @@ The initial CC2530 common-flash/XDATA linker layout is
 because CODE and XDATA are separate 8051 buses. This profile covers the common
 32 KiB code window and 8 KiB XDATA RAM only. The current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
-XDATA before calling `entry`. It does not yet implement code banks or copy
-initialized `.data` from flash to XDATA.
+XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
+profile does not yet implement code banks.
 
 ## Completion criteria
 
@@ -76,7 +76,6 @@ verified:
 
 Current work is incomplete. Ordinary unqualified globals are assigned to
 XDATA, and the initial linker profile maps zero-initialized globals there.
-Initialized data startup, the full CC2530 banked-memory model, broader
-startup/runtime support, and end-to-end verification of those features remain
-to be implemented. Do not describe the target as fully supported until those
-gaps are closed.
+The full CC2530 banked-memory model, broader startup/runtime support, and
+end-to-end verification of those features remain to be implemented. Do not
+describe the target as fully supported until those gaps are closed.
