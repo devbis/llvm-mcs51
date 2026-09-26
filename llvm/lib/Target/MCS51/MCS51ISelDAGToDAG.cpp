@@ -9,6 +9,50 @@
 
 using namespace llvm;
 
+static SDValue getMCS51AbsoluteAddress(SelectionDAG &DAG, SDValue Addr,
+                                       SDLoc DL, bool AllowConstant,
+                                       bool &IsGlobal) {
+  int64_t Offset = 0;
+  while (Addr) {
+    if (Addr.getOpcode() == ISD::ADDRSPACECAST ||
+        Addr.getOpcode() == ISD::BITCAST) {
+      Addr = Addr.getOperand(0);
+      continue;
+    }
+    if (Addr.getOpcode() == ISD::ADD) {
+      if (auto *C = dyn_cast<ConstantSDNode>(Addr.getOperand(0))) {
+        Offset += C->getSExtValue();
+        Addr = Addr.getOperand(1);
+        continue;
+      }
+      if (auto *C = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
+        Offset += C->getSExtValue();
+        Addr = Addr.getOperand(0);
+        continue;
+      }
+    }
+    break;
+  }
+
+  if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr)) {
+    IsGlobal = true;
+    return DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16,
+                                      GA->getOffset() + Offset,
+                                      GA->getTargetFlags());
+  }
+  if (Addr.getOpcode() == ISD::TargetGlobalAddress) {
+    IsGlobal = true;
+    auto *GA = cast<GlobalAddressSDNode>(Addr);
+    return DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16,
+                                      GA->getOffset() + Offset,
+                                      GA->getTargetFlags());
+  }
+  if (AllowConstant)
+    if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+      return DAG.getTargetConstant(C->getZExtValue() + Offset, DL, MVT::i16);
+  return SDValue();
+}
+
 namespace {
 static bool getFrameAddress(SDValue Ptr, int &FI, int64_t &Offset) {
   Offset = 0;
@@ -195,18 +239,12 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return true;
     }
-    if (AS == MCS51::XData &&
+    if ((AS == MCS51::XData || AS == MCS51::Default) &&
         (LD->getMemoryVT() == MVT::i8 || LD->getMemoryVT() == MVT::i16)) {
-      SDValue Addr = LD->getBasePtr();
-      if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
-        Addr = CurDAG->getTargetGlobalAddress(
-            GA->getGlobal(), DL, MVT::i16, GA->getOffset(),
-            GA->getTargetFlags());
-      else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
-        Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i16);
-      else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
-        Addr = SDValue();
-      if (Addr) {
+      bool IsGlobal = false;
+      SDValue Addr = getMCS51AbsoluteAddress(
+          *CurDAG, LD->getBasePtr(), DL, AS == MCS51::XData, IsGlobal);
+      if (Addr && (AS == MCS51::XData || IsGlobal)) {
         unsigned Opcode = LD->getMemoryVT() == MVT::i8
                               ? MCS51::LOADXABS8
                               : MCS51::LOADXABS16;
@@ -331,18 +369,12 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     CurDAG->RemoveDeadNode(N);
     return true;
   }
-  if (AS == MCS51::XData &&
+  if ((AS == MCS51::XData || AS == MCS51::Default) &&
       (ST->getMemoryVT() == MVT::i8 || ST->getMemoryVT() == MVT::i16)) {
-    SDValue Addr = ST->getBasePtr();
-    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
-      Addr = CurDAG->getTargetGlobalAddress(
-          GA->getGlobal(), DL, MVT::i16, GA->getOffset(),
-          GA->getTargetFlags());
-    else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
-      Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i16);
-    else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
-      Addr = SDValue();
-    if (Addr) {
+    bool IsGlobal = false;
+    SDValue Addr = getMCS51AbsoluteAddress(
+        *CurDAG, ST->getBasePtr(), DL, AS == MCS51::XData, IsGlobal);
+    if (Addr && (AS == MCS51::XData || IsGlobal)) {
       unsigned Opcode = ST->getMemoryVT() == MVT::i8
                             ? MCS51::STOREXABS8
                             : MCS51::STOREXABS16;
