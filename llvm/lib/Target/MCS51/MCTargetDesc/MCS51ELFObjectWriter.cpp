@@ -16,6 +16,8 @@ protected:
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &,
                         bool IsPCRel) const override {
     if (IsPCRel) {
+      if (Fixup.getKind() == MCS51::fixup_11)
+        return ELF::R_8051_11;
       if (Fixup.getKind() == MCS51::fixup_pcrel8)
         return ELF::R_8051_PCREL8;
       llvm_unreachable("unsupported PC-relative MCS-51 relocation");
