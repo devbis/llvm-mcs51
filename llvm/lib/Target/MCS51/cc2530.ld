@@ -36,6 +36,41 @@ SECTIONS
     *(.rodata .rodata.*)
   } > CODE
 
+  /*
+   * Banked code executes at the same 0x8000-0xffff CPU address range, but
+   * each output section has a distinct physical flash load address. Put code
+   * in these banks with input sections such as .bank1.text and .bank2.rodata.
+   * A bank-aware call ABI is still required before code may call across banks.
+   */
+  .bank1 0x8000 : AT(0x08000)
+  {
+    __cc2530_bank1_start = .; *(.bank1 .bank1.*) __cc2530_bank1_end = .;
+  } > XDATA_BANK
+  .bank2 0x8000 : AT(0x10000)
+  {
+    __cc2530_bank2_start = .; *(.bank2 .bank2.*) __cc2530_bank2_end = .;
+  } > XDATA_BANK
+  .bank3 0x8000 : AT(0x18000)
+  {
+    __cc2530_bank3_start = .; *(.bank3 .bank3.*) __cc2530_bank3_end = .;
+  } > XDATA_BANK
+  .bank4 0x8000 : AT(0x20000)
+  {
+    __cc2530_bank4_start = .; *(.bank4 .bank4.*) __cc2530_bank4_end = .;
+  } > XDATA_BANK
+  .bank5 0x8000 : AT(0x28000)
+  {
+    __cc2530_bank5_start = .; *(.bank5 .bank5.*) __cc2530_bank5_end = .;
+  } > XDATA_BANK
+  .bank6 0x8000 : AT(0x30000)
+  {
+    __cc2530_bank6_start = .; *(.bank6 .bank6.*) __cc2530_bank6_end = .;
+  } > XDATA_BANK
+  .bank7 0x8000 : AT(0x38000)
+  {
+    __cc2530_bank7_start = .; *(.bank7 .bank7.*) __cc2530_bank7_end = .;
+  } > XDATA_BANK
+
   /* Initial values are stored in flash and copied to XDATA by reset startup. */
   .data :
   {
@@ -89,3 +124,14 @@ ASSERT(__mcs51_data1_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA globals exceed directly addressable internal RAM")
 ASSERT(__mcs51_data2_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA/IDATA globals overlap the hardware stack")
+ASSERT(ADDR(.text) + SIZEOF(.text) <= 0x8000,
+       "CC2530 common code exceeds the 32-KiB root bank")
+ASSERT(SIZEOF(.bank1) <= LENGTH(XDATA_BANK), "CC2530 bank 1 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank2) <= LENGTH(XDATA_BANK), "CC2530 bank 2 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank3) <= LENGTH(XDATA_BANK), "CC2530 bank 3 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank4) <= LENGTH(XDATA_BANK), "CC2530 bank 4 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank5) <= LENGTH(XDATA_BANK), "CC2530 bank 5 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank6) <= LENGTH(XDATA_BANK), "CC2530 bank 6 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank7) <= LENGTH(XDATA_BANK), "CC2530 bank 7 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank7) == 0 || 0x38000 + SIZEOF(.bank7) <= 0x40000,
+       "CC2530 banked image exceeds 256-KiB flash")
