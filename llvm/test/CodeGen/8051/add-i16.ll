@@ -23,12 +23,16 @@ entry:
 ; CHECK: ret
 
 ; CHECK-LABEL: add_words:
-; CHECK: add a,
-; CHECK: addc a,
+; CHECK: add a, 130
+; CHECK: mov 130, a
+; CHECK: addc a, 131
+; CHECK: mov 131, a
 ; CHECK: ret
 
 ; CHECK-LABEL: subtract_words:
 ; CHECK: clr c
-; CHECK: subb a,
-; CHECK: subb a,
+; CHECK: subb a, 130
+; CHECK: mov 130, a
+; CHECK: subb a, 131
+; CHECK: mov 131, a
 ; CHECK: ret

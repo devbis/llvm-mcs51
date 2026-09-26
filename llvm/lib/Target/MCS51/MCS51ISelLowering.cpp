@@ -491,50 +491,39 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register RHS = MI.getOperand(2).getReg();
     Register LHSLo = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
-    Register LHSHi = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    Register RHSLo = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    Register RHSHi = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    Register ResultLo = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
 
-    // DPTR is the only allocatable 16-bit register. Capture both operands
-    // into byte registers before performing the carry/borrow chain.
+    // DPTR is the only allocatable 16-bit register. Keep the left low byte in
+    // one temporary and its high byte in B while loading the right operand.
     auto CopyDPTR = [&](Register Src) {
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
           .addReg(Src);
     };
-    auto ReadDPTRByte = [&](int64_t Address, Register DstByte) {
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(Address);
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), DstByte)
-          .addReg(MCS51::A);
-    };
     CopyDPTR(LHS);
-    ReadDPTRByte(0x82, LHSLo);
-    ReadDPTRByte(0x83, LHSHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LHSLo)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
     CopyDPTR(RHS);
-    ReadDPTRByte(0x82, RHSLo);
-    ReadDPTRByte(0x83, RHSHi);
 
     bool IsAdd = MI.getOpcode() == MCS51::ADD16rr;
     if (!IsAdd)
       BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSLo);
     BuildMI(*MBB, MII, DL,
-            TII.get(IsAdd ? MCS51::ADD_A_RN : MCS51::SUBB_A_RN))
-        .addReg(RHSLo);
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ResultLo)
-        .addReg(MCS51::A);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSHi);
+            TII.get(IsAdd ? MCS51::ADD_A_DIRECT : MCS51::SUBB_A_DIRECT),
+            MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0xF0);
     BuildMI(*MBB, MII, DL,
-            TII.get(IsAdd ? MCS51::ADDC_A_RN : MCS51::SUBB_A_RN))
-        .addReg(RHSHi);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ResultLo);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
+            TII.get(IsAdd ? MCS51::ADDC_A_DIRECT : MCS51::SUBB_A_DIRECT),
+            MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
     MI.eraseFromParent();
@@ -547,33 +536,27 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register RHS = MI.getOperand(2).getReg();
     Register LHSLo = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
-    Register LHSHi = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    Register RHSLo = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    Register RHSHi = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
     auto CopyDPTR = [&](Register Src) {
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
           .addReg(Src);
     };
-    auto ReadDPTRByte = [&](int64_t Address, Register DstByte) {
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(Address);
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), DstByte)
-          .addReg(MCS51::A);
-    };
     CopyDPTR(LHS);
-    ReadDPTRByte(0x82, LHSLo);
-    ReadDPTRByte(0x83, LHSHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), LHSLo)
+        .addReg(MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
     CopyDPTR(RHS);
-    ReadDPTRByte(0x82, RHSLo);
-    ReadDPTRByte(0x83, RHSHi);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSLo);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHSLo);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSHi);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHSHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0xF0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+        .addImm(0x83);
     // CLR A preserves CY, and RLC moves the borrow into bit zero.
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
