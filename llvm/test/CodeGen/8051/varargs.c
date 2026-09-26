@@ -41,6 +41,18 @@ unsigned long call_first_long_vararg(void) {
   return first_long_vararg(1, 0x12345678ul);
 }
 
+unsigned long long first_long_long_vararg(int count, ...) {
+  va_list args;
+  va_start(args, count);
+  unsigned long long value = va_arg(args, unsigned long long);
+  va_end(args);
+  return value;
+}
+
+unsigned long long call_first_long_long_vararg(void) {
+  return first_long_long_vararg(1, 0x123456789abcdef0ull);
+}
+
 // ASM-LABEL: first_vararg:
 // ASM: add a, #-1
 // ASM: add a, #-2
