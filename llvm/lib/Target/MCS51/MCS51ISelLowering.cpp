@@ -132,11 +132,15 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if ((Op.getOpcode() == ISD::SRL || Op.getOpcode() == ISD::SHL) &&
       Op.getValueType() == MVT::i16) {
     auto *Amount = dyn_cast<ConstantSDNode>(Op.getOperand(1));
-    if (!Amount || Amount->getZExtValue() != 8)
-      report_fatal_error("unsupported MCS-51 16-bit shift");
-    unsigned Opcode = Op.getOpcode() == ISD::SHL ? MCS51ISD::SHL16_8
-                                                 : MCS51ISD::SRL16_8;
-    return DAG.getNode(Opcode, DL, MVT::i16, Op.getOperand(0));
+    if (Amount && Amount->getZExtValue() == 8) {
+      unsigned Opcode = Op.getOpcode() == ISD::SHL ? MCS51ISD::SHL16_8
+                                                   : MCS51ISD::SRL16_8;
+      return DAG.getNode(Opcode, DL, MVT::i16, Op.getOperand(0));
+    }
+    unsigned Opcode = Op.getOpcode() == ISD::SHL ? MCS51ISD::SHL16
+                                                 : MCS51ISD::SRL16;
+    return DAG.getNode(Opcode, DL, MVT::i16, Op.getOperand(0),
+                       Op.getOperand(1));
   }
   if (Op.getOpcode() == ISD::MUL && Op.getValueType() == MVT::i16)
     return DAG.getNode(MCS51ISD::MUL16, DL, MVT::i16, Op.getOperand(0),
@@ -1039,6 +1043,133 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addReg(MCS51::DPTR);
     MI.eraseFromParent();
     return MBB;
+  }
+  if (MI.getOpcode() == MCS51::SRL16 || MI.getOpcode() == MCS51::SHL16) {
+    MachineFunction &MF = *MBB->getParent();
+    bool IsLeft = MI.getOpcode() == MCS51::SHL16;
+    Register Dst = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    Register Amount = MI.getOperand(2).getReg();
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    MachineBasicBlock *CheckAmount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *LoadCount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *Loop = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *Zero = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), CheckAmount);
+    MF.insert(Tail->getIterator(), LoadCount);
+    MF.insert(Tail->getIterator(), Zero);
+    MF.insert(Tail->getIterator(), Loop);
+    Loop->addLiveIn(MCS51::B);
+    Loop->addLiveIn(MCS51::R0);
+    Loop->addLiveIn(MCS51::R2);
+    CheckAmount->addLiveIn(MCS51::B);
+    LoadCount->addLiveIn(MCS51::B);
+    Tail->addLiveIn(MCS51::B);
+    Tail->addLiveIn(MCS51::R2);
+
+    auto CopyDPTR = [&](MachineBasicBlock &Block,
+                        MachineBasicBlock::iterator I, Register Reg) {
+      BuildMI(Block, I, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Reg);
+    };
+    CopyDPTR(*MBB, MBB->end(), Src);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_B_A));
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R2, RegState::Define);
+
+    CopyDPTR(*MBB, MBB->end(), Amount);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x83);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(Zero);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(CheckAmount);
+
+    CopyDPTR(*CheckAmount, CheckAmount->end(), Amount);
+    BuildMI(*CheckAmount, CheckAmount->end(), DL,
+            TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*CheckAmount, CheckAmount->end(), DL, TII.get(MCS51::CLR_C));
+    BuildMI(*CheckAmount, CheckAmount->end(), DL,
+            TII.get(MCS51::SUBB_A_IMM), MCS51::A)
+        .addImm(16);
+    BuildMI(*CheckAmount, CheckAmount->end(), DL, TII.get(MCS51::JNC))
+        .addMBB(Zero);
+    BuildMI(*CheckAmount, CheckAmount->end(), DL, TII.get(MCS51::LJMP))
+        .addMBB(LoadCount);
+    CopyDPTR(*LoadCount, LoadCount->end(), Amount);
+    BuildMI(*LoadCount, LoadCount->end(), DL,
+            TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R0, RegState::Define);
+    BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::JZ))
+        .addMBB(Tail);
+    BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::LJMP))
+        .addMBB(Loop);
+
+    auto ClearSuccessors = [](MachineBasicBlock *Block) {
+      while (!Block->succ_empty())
+        Block->removeSuccessor(Block->succ_begin());
+    };
+    ClearSuccessors(MBB);
+    ClearSuccessors(CheckAmount);
+    ClearSuccessors(LoadCount);
+    ClearSuccessors(Loop);
+    ClearSuccessors(Zero);
+    MBB->addSuccessor(CheckAmount);
+    MBB->addSuccessor(Zero);
+    CheckAmount->addSuccessor(Zero);
+    CheckAmount->addSuccessor(LoadCount);
+    LoadCount->addSuccessor(Tail);
+    LoadCount->addSuccessor(Loop);
+    Loop->addSuccessor(Loop);
+    Loop->addSuccessor(Tail);
+    Zero->addSuccessor(Tail);
+
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::CLR_C));
+    if (IsLeft) {
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RLC_A));
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_B_A));
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_RN))
+          .addReg(MCS51::R2);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RLC_A));
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_RN_A))
+          .addReg(MCS51::R2, RegState::Define);
+    } else {
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_RN))
+          .addReg(MCS51::R2);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_RN_A))
+          .addReg(MCS51::R2, RegState::Define);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_B_A));
+    }
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DJNZ_RN), MCS51::R0)
+        .addReg(MCS51::R0)
+        .addMBB(Loop);
+
+    BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+        .addImm(0);
+    BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(MCS51::R2, RegState::Define);
+    BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_B_A));
+    BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+
+    MI.eraseFromParent();
+    MachineBasicBlock::iterator TailBody = Tail->getFirstNonPHI();
+    BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
+    BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_DPL_A));
+    BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_A_RN))
+        .addReg(MCS51::R2);
+    BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_DPH_A));
+    BuildMI(*Tail, TailBody, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    return Tail;
   }
   if (MI.getOpcode() == MCS51::AND16rr || MI.getOpcode() == MCS51::OR16rr ||
       MI.getOpcode() == MCS51::XOR16rr) {
