@@ -11,7 +11,7 @@ reset:
 .type __mcs51_start,@function
 __mcs51_start:
   /* Keep the hardware stack above register banks and bit-addressable RAM. */
-  mov 129, #127
+  mov sp, #127
 
   /* Clear the full 8 KiB XDATA SRAM, including all zero-initialized globals. */
   mov dptr, #0
@@ -31,25 +31,25 @@ __mcs51_start:
 
   /* Copy initialized globals from their CODE load image to XDATA. */
   mov dptr, #__mcs51_data_start
-  mov r2, 130
-  mov r3, 131
+  mov r2, dpl
+  mov r3, dph
   mov dptr, #__mcs51_data_end
-  mov a, 130
+  mov a, dpl
   xrl a, r2
   jnz .Ldata_nonempty
-  mov a, 131
+  mov a, dph
   xrl a, r3
   jz .Ldata_done
 .Ldata_nonempty:
   mov dptr, #__mcs51_data_load
-  mov r0, 130
-  mov r1, 131
+  mov r0, dpl
+  mov r1, dph
   mov dptr, #__mcs51_data_end
-  mov r4, 130
-  mov r5, 131
+  mov r4, dpl
+  mov r5, dph
 .Lcopy_data:
-  mov 130, r0
-  mov 131, r1
+  mov dpl, r0
+  mov dph, r1
   clr a
   movc a, @a+dptr
   mov r6, a
@@ -57,13 +57,13 @@ __mcs51_start:
   cjne r0, #0, .Lsource_no_carry
   inc r1
 .Lsource_no_carry:
-  mov 130, r2
-  mov 131, r3
+  mov dpl, r2
+  mov dph, r3
   mov a, r6
   movx @dptr, a
   inc dptr
-  mov r2, 130
-  mov r3, 131
+  mov r2, dpl
+  mov r3, dph
   mov a, r2
   xrl a, r4
   jnz .Lcopy_data

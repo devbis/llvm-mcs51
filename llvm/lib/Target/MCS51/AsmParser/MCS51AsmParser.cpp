@@ -137,7 +137,20 @@ class MCS51AsmParser final : public MCTargetAsmParser {
       MCRegister Reg = Tok.is(AsmToken::Identifier)
                            ? getRegister(Tok.getString())
                            : MCRegister();
-      if (Reg) {
+      StringRef Token = Tok.getString();
+      unsigned DirectAddress = StringSwitch<unsigned>(Token.lower())
+                                   .Case("sp", 0x81)
+                                   .Case("dpl", 0x82)
+                                   .Case("dph", 0x83)
+                                   .Case("psw", 0xD0)
+                                   .Case("b", 0xF0)
+                                   .Default(0);
+      if (DirectAddress != 0) {
+        const MCExpr *Expr =
+            MCConstantExpr::create(DirectAddress, Parser.getContext());
+        Operands.push_back(std::make_unique<MCS51Operand>(Tok.getLoc(), Expr));
+        Parser.Lex();
+      } else if (Reg) {
         Operands.push_back(std::make_unique<MCS51Operand>(Tok.getLoc(), Reg));
         Parser.Lex();
       } else if (Tok.is(AsmToken::Identifier) &&
