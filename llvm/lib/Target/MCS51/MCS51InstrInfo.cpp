@@ -4,6 +4,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/Support/MathExtras.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "MCS51GenInstrInfo.inc"
@@ -122,18 +123,47 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
 namespace {
 bool isMCS51CondBranch(unsigned Opcode) {
-  return Opcode == MCS51::JZ || Opcode == MCS51::JNZ ||
-         Opcode == MCS51::JC || Opcode == MCS51::JNC;
+  switch (Opcode) {
+  case MCS51::JZ:
+  case MCS51::JNZ:
+  case MCS51::JC:
+  case MCS51::JNC:
+  case MCS51::JB:
+  case MCS51::JNB:
+  case MCS51::JBC:
+  case MCS51::DJNZ_RN:
+  case MCS51::DJNZ_DIRECT:
+  case MCS51::CJNE_A_IMM:
+  case MCS51::CJNE_A_DIRECT:
+  case MCS51::CJNE_IND_R0:
+  case MCS51::CJNE_IND_R1:
+  case MCS51::CJNE_RN:
+    return true;
+  default:
+    return false;
+  }
 }
 
 bool isMCS51UncondBranch(unsigned Opcode) {
-  return Opcode == MCS51::LJMP || Opcode == MCS51::SJMP;
+  return Opcode == MCS51::LJMP || Opcode == MCS51::SJMP ||
+         Opcode == MCS51::AJMP;
 }
 } // namespace
 
 bool MCS51InstrInfo::analyzeBranch(
     MachineBasicBlock &MBB, MachineBasicBlock *&TBB, MachineBasicBlock *&FBB,
     SmallVectorImpl<MachineOperand> &Cond, bool AllowModify) const {
+  auto AppendCondition = [&](const MachineInstr &MI) {
+    unsigned Opcode = MI.getOpcode();
+    Cond.push_back(MachineOperand::CreateImm(Opcode));
+    if (Opcode == MCS51::JZ || Opcode == MCS51::JNZ ||
+        Opcode == MCS51::JC || Opcode == MCS51::JNC)
+      return;
+    for (const MachineOperand &MO : MI.operands())
+      if (!MO.isImplicit() && !MO.isMBB())
+        Cond.push_back(MO);
+  };
+
   TBB = FBB = nullptr;
   Cond.clear();
   auto I = MBB.getLastNonDebugInstr();
@@ -150,8 +180,10 @@ bool MCS51InstrInfo::analyzeBranch(
       --Prev;
     if (isMCS51CondBranch(Prev->getOpcode())) {
       FBB = TBB;
-      TBB = Prev->getOperand(0).getMBB();
-      Cond.push_back(MachineOperand::CreateImm(Prev->getOpcode()));
+      TBB = getBranchDestBlock(*Prev);
+      if (!TBB)
+        return true;
+      AppendCondition(*Prev);
     }
     if (AllowModify && !Cond.empty() && MBB.isLayoutSuccessor(FBB)) {
       I->eraseFromParent();
@@ -161,8 +193,10 @@ bool MCS51InstrInfo::analyzeBranch(
   }
 
   if (isMCS51CondBranch(Opcode)) {
-    TBB = I->getOperand(0).getMBB();
-    Cond.push_back(MachineOperand::CreateImm(Opcode));
+    TBB = getBranchDestBlock(*I);
+    if (!TBB)
+      return true;
+    AppendCondition(*I);
     return false;
   }
 
@@ -203,11 +237,18 @@ unsigned MCS51InstrInfo::insertBranch(
     if (BytesAdded)
       *BytesAdded = 3;
   } else {
-    assert(Cond.size() == 1 && Cond[0].isImm() &&
+    assert(!Cond.empty() && Cond[0].isImm() &&
            "unsupported MCS-51 branch condition");
     unsigned Opcode = Cond[0].getImm();
     assert(isMCS51CondBranch(Opcode) && "invalid MCS-51 branch condition");
-    BuildMI(&MBB, DL, get(Opcode)).addMBB(TBB);
+    if (Cond.size() == 1) {
+      BuildMI(&MBB, DL, get(Opcode)).addMBB(TBB);
+    } else {
+      MachineInstrBuilder Branch = BuildMI(&MBB, DL, get(Opcode));
+      for (unsigned I = 1; I != Cond.size(); ++I)
+        Branch.add(Cond[I]);
+      Branch.addMBB(TBB);
+    }
     Count = 1;
     if (BytesAdded)
       *BytesAdded = get(Opcode).getSize();
@@ -234,4 +275,35 @@ bool MCS51InstrInfo::reverseBranchCondition(
     return true;
   }
   return false;
+}
+
+unsigned MCS51InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  return get(MI.getOpcode()).getSize();
+}
+
+MachineBasicBlock *
+MCS51InstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
+  for (const MachineOperand &MO : MI.operands())
+    if (MO.isMBB())
+      return MO.getMBB();
+  return nullptr;
+}
+
+bool MCS51InstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
+                                           int64_t BrOffset) const {
+  if (isMCS51CondBranch(BranchOpc) || BranchOpc == MCS51::SJMP)
+    // BranchRelaxation measures from the instruction start, while the 8051
+    // displacement is relative to the byte after the branch instruction.
+    return isInt<8>(BrOffset - get(BranchOpc).getSize());
+  if (BranchOpc == MCS51::LJMP || BranchOpc == MCS51::AJMP)
+    return true;
+  llvm_unreachable("unexpected MCS-51 branch opcode");
+}
+
+void MCS51InstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
+                                         MachineBasicBlock &NewDestBB,
+                                         MachineBasicBlock &,
+                                         const DebugLoc &DL, int64_t,
+                                         RegScavenger *) const {
+  BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(&NewDestBB);
 }

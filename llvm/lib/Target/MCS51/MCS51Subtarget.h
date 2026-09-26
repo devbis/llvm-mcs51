@@ -31,6 +31,8 @@ public:
     return &InstrInfo.getRegisterInfo();
   }
 
+  void initLibcallLoweringInfo(LibcallLoweringInfo &Info) const override;
+
   void ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU,
                               StringRef FS);
 

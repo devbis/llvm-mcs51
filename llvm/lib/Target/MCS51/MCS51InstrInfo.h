@@ -42,6 +42,15 @@ public:
                         int *BytesAdded = nullptr) const override;
   bool reverseBranchCondition(
       SmallVectorImpl<MachineOperand> &Cond) const override;
+  unsigned getInstSizeInBytes(const MachineInstr &MI) const override;
+  MachineBasicBlock *getBranchDestBlock(const MachineInstr &MI) const override;
+  bool isBranchOffsetInRange(unsigned BranchOpc,
+                             int64_t BrOffset) const override;
+  void insertIndirectBranch(MachineBasicBlock &MBB,
+                            MachineBasicBlock &NewDestBB,
+                            MachineBasicBlock &RestoreBB,
+                            const DebugLoc &DL, int64_t BrOffset,
+                            RegScavenger *RS = nullptr) const override;
 
 private:
   const MCS51RegisterInfo RI;
