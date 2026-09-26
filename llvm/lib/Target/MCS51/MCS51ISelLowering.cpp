@@ -57,26 +57,31 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
-  auto LowerUnsignedWordCompare = [&](SDValue LHS, SDValue RHS,
-                                      ISD::CondCode CC) -> SDValue {
+  auto LowerWordCompare = [&](SDValue LHS, SDValue RHS, ISD::CondCode CC,
+                              bool IsSigned) -> SDValue {
     bool Invert = false;
     switch (CC) {
     case ISD::SETULT:
+    case ISD::SETLT:
       break;
     case ISD::SETUGE:
+    case ISD::SETGE:
       Invert = true;
       break;
     case ISD::SETUGT:
+    case ISD::SETGT:
       std::swap(LHS, RHS);
       break;
     case ISD::SETULE:
+    case ISD::SETLE:
       std::swap(LHS, RHS);
       Invert = true;
       break;
     default:
       return SDValue();
     }
-    SDValue Result = DAG.getNode(MCS51ISD::CMPULT16, DL, MVT::i8, LHS, RHS);
+    unsigned Opcode = IsSigned ? MCS51ISD::CMPSLT16 : MCS51ISD::CMPULT16;
+    SDValue Result = DAG.getNode(Opcode, DL, MVT::i8, LHS, RHS);
     return Invert ? DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
                                 DAG.getConstant(1, DL, MVT::i8))
                   : Result;
@@ -90,7 +95,9 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if (Op.getOpcode() == ISD::SETCC &&
       Op.getOperand(0).getValueType() == MVT::i16) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
-    return LowerUnsignedWordCompare(Op.getOperand(0), Op.getOperand(2), CC);
+    bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
+                    CC == ISD::SETGT || CC == ISD::SETLE;
+    return LowerWordCompare(Op.getOperand(0), Op.getOperand(2), CC, IsSigned);
   }
   if (Op.getOpcode() == ISD::SELECT_CC &&
       Op.getOperand(0).getValueType() == MVT::i16 &&
@@ -101,8 +108,10 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     if (TrueValue && FalseValue &&
         ((TrueValue->isOne() && FalseValue->isZero()) ||
          (TrueValue->isZero() && FalseValue->isOne()))) {
-      SDValue Result = LowerUnsignedWordCompare(Op.getOperand(0),
-                                                 Op.getOperand(1), CC);
+      bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
+                      CC == ISD::SETGT || CC == ISD::SETLE;
+      SDValue Result = LowerWordCompare(Op.getOperand(0), Op.getOperand(1),
+                                        CC, IsSigned);
       if (Result && TrueValue->isZero())
         Result = DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
                              DAG.getConstant(1, DL, MVT::i8));
@@ -556,11 +565,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::CMPULT16) {
+  if (MI.getOpcode() == MCS51::CMP16) {
     MachineFunction &MF = *MBB->getParent();
     Register Dst = MI.getOperand(0).getReg();
     Register LHS = MI.getOperand(1).getReg();
     Register RHS = MI.getOperand(2).getReg();
+    bool IsSigned = MI.getOperand(3).getImm() != 0;
     Register LHSLo = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     auto CopyDPTR = [&](Register Src) {
@@ -580,9 +590,23 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHSLo);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
         .addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
-        .addImm(0x83);
+    if (IsSigned) {
+      // Bias both high bytes by 0x80 so unsigned borrow reflects signed order.
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(0x80);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XCH_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(0x80);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    } else {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+    }
     // CLR A preserves CY, and RLC moves the borrow into bit zero.
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
