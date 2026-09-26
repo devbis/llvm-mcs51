@@ -17,6 +17,11 @@ def SDT_MCS51ShiftWord8 : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
                                               SDTCisVT<1, i16>] >;
 def MCS51srl16_8 : SDNode<"MCS51ISD::SRL16_8", SDT_MCS51ShiftWord8>;
 def MCS51shl16_8 : SDNode<"MCS51ISD::SHL16_8", SDT_MCS51ShiftWord8>;
+def SDT_MCS51ShiftWord : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
+                                              SDTCisVT<1, i16>,
+                                              SDTCisVT<2, i16>] >;
+def MCS51srl16 : SDNode<"MCS51ISD::SRL16", SDT_MCS51ShiftWord>;
+def MCS51shl16 : SDNode<"MCS51ISD::SHL16", SDT_MCS51ShiftWord>;
 def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                             SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>] >;
@@ -199,6 +204,26 @@ def SHL16_8 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
 }
+def SRL16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src, MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def SHL16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src, MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
 def BUILDPAIR16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -267,6 +292,10 @@ def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
                    MCS51GPR8:$b2, MCS51GPR8:$b3)>;
 def : Pat<(MCS51srl16_8 MCS51PTR:$src), (SRL16_8 MCS51PTR:$src)>;
 def : Pat<(MCS51shl16_8 MCS51PTR:$src), (SHL16_8 MCS51PTR:$src)>;
+def : Pat<(MCS51srl16 MCS51PTR:$src, MCS51PTR:$amount),
+          (SRL16 MCS51PTR:$src, MCS51PTR:$amount)>;
+def : Pat<(MCS51shl16 MCS51PTR:$src, MCS51PTR:$amount),
+          (SHL16 MCS51PTR:$src, MCS51PTR:$amount)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
@@ -398,6 +427,7 @@ class MCS51DJNZReg<bits<5> opcode> : Instruction {
   let AsmString = "djnz $rn, $target";
   let Size = 2;
   let isBranch = 1;
+  let isTerminator = 1;
   let Constraints = "$dst = $rn";
   bits<3> dst;
   bits<3> rn;
@@ -415,6 +445,7 @@ def DJNZ_DIRECT : Instruction {
   let AsmString = "djnz $addr, $target";
   let Size = 3;
   let isBranch = 1;
+  let isTerminator = 1;
   let mayLoad = 1;
   let mayStore = 1;
   let Defs = [B];
@@ -437,6 +468,7 @@ def CJNE_A_IMM : Instruction {
   let Size = 3;
   let Defs = [C];
   let isBranch = 1;
+  let isTerminator = 1;
   bits<8> imm; bits<8> target; bits<24> Inst;
   let Inst{7-0} = 0xB4; let Inst{15-8} = imm; let Inst{23-16} = target;
 }
@@ -448,6 +480,7 @@ def CJNE_A_DIRECT : Instruction {
   let Size = 3;
   let Defs = [C];
   let isBranch = 1;
+  let isTerminator = 1;
   bits<8> addr; bits<8> target; bits<24> Inst;
   let Inst{7-0} = 0xB5; let Inst{15-8} = addr; let Inst{23-16} = target;
 }
@@ -459,6 +492,7 @@ class MCS51CJNE_IND<bits<8> opcode, string reg> : Instruction {
   let Size = 3;
   let Defs = [C];
   let isBranch = 1;
+  let isTerminator = 1;
   bits<8> imm; bits<8> target; bits<24> Inst;
   let Inst{7-0} = opcode;
   let Inst{15-8} = imm; let Inst{23-16} = target;
@@ -474,6 +508,7 @@ class MCS51CJNE_RN<bits<8> opcode> : Instruction {
   let Size = 3;
   let Defs = [C];
   let isBranch = 1;
+  let isTerminator = 1;
   bits<3> rn; bits<8> imm; bits<8> target; bits<24> Inst;
   let Inst{7-3} = opcode{7-3}; let Inst{2-0} = rn;
   let Inst{15-8} = imm; let Inst{23-16} = target;
