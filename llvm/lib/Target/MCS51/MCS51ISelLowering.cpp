@@ -30,6 +30,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::MUL, MVT::i16, Custom);
   setOperationAction(ISD::UMUL_LOHI, MVT::i16, Expand);
   setOperationAction(ISD::MULHU, MVT::i16, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::ADD, MVT::i32, Custom);
   setOperationAction(ISD::SUB, MVT::i32, Custom);
   setOperationAction(ISD::SETCC, MVT::i16, Custom);
@@ -140,6 +141,10 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if (Op.getOpcode() == ISD::MUL && Op.getValueType() == MVT::i16)
     return DAG.getNode(MCS51ISD::MUL16, DL, MVT::i16, Op.getOperand(0),
                        Op.getOperand(1));
+  if (Op.getOpcode() == ISD::SRL_PARTS)
+    return DAG.getNode(MCS51ISD::SRL32_PARTS, DL,
+                       DAG.getVTList(MVT::i16, MVT::i16), Op.getOperand(0),
+                       Op.getOperand(1), Op.getOperand(2));
   if (Op.getOpcode() == ISD::SETCC &&
       Op.getOperand(0).getValueType() == MVT::i16) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(1))->get();
@@ -627,8 +632,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         &MCS51::MCS51GPR8RegClass);
     Register ProductHi = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
-    Register Partial = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
     for (Register &Byte : Bytes)
       Byte = MF.getRegInfo().createVirtualRegister(
           &MCS51::MCS51GPR8RegClass);
@@ -664,6 +667,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addReg(MCS51::A);
 
     auto AddCrossProductLow = [&](Register L, Register R) {
+      Register Partial = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(L);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_RN))
           .addImm(0xF0)
@@ -691,6 +696,90 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::SRL32_PARTS) {
+    MachineFunction &MF = *MBB->getParent();
+    Register DstLo = MI.getOperand(0).getReg();
+    Register DstHi = MI.getOperand(1).getReg();
+    Register SrcLo = MI.getOperand(2).getReg();
+    Register SrcHi = MI.getOperand(3).getReg();
+    Register Amount = MI.getOperand(4).getReg();
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    MachineBasicBlock *Loop = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), Loop);
+    MBB->addSuccessor(Loop);
+    Loop->addSuccessor(Loop);
+    Loop->addSuccessor(Tail);
+    Loop->addLiveIn(MCS51::B);
+    int ScratchFI = MF.getFrameInfo().CreateStackObject(4, Align(1), true);
+
+    auto CopyDPTR = [&](MachineBasicBlock &Block, MachineBasicBlock::iterator I,
+                        Register Src) {
+      BuildMI(Block, I, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Src);
+    };
+    auto StoreA = [&](int64_t Offset) {
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::SPILL_STORE_A8))
+          .addFrameIndex(ScratchFI)
+          .addImm(Offset)
+          .addReg(MCS51::A);
+    };
+    auto ExtractWord = [&](Register Src, int64_t LoOffset,
+                           int64_t HiOffset) {
+      CopyDPTR(*MBB, MBB->end(), Src);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      StoreA(LoOffset);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      StoreA(HiOffset);
+    };
+    ExtractWord(SrcLo, 0, 1);
+    ExtractWord(SrcHi, 2, 3);
+    CopyDPTR(*MBB, MBB->end(), Amount);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_B_A));
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(Tail);
+
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::FRAMEADDR_R1))
+        .addFrameIndex(ScratchFI)
+        .addImm(3);
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::CLR_C));
+    for (unsigned I = 0; I != 4; ++I) {
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_IND_RI))
+          .addReg(MCS51::R1);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_IND_RI_A))
+          .addReg(MCS51::R1);
+      BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DEC_RN))
+          .addReg(MCS51::R1, RegState::Define)
+          .addReg(MCS51::R1);
+    }
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DJNZ_DIRECT))
+        .addImm(0xF0)
+        .addMBB(Loop);
+    MI.eraseFromParent();
+
+    MachineBasicBlock::iterator TailBody = Tail->getFirstNonPHI();
+    auto LoadA = [&](int64_t Offset) {
+      BuildMI(*Tail, TailBody, DL, TII.get(MCS51::SPILL_LOAD_A8),
+              MCS51::A)
+          .addFrameIndex(ScratchFI)
+          .addImm(Offset);
+    };
+    auto WriteWord = [&](Register Dst, int64_t LoOffset, int64_t HiOffset) {
+      LoadA(LoOffset);
+      BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_DPL_A));
+      LoadA(HiOffset);
+      BuildMI(*Tail, TailBody, DL, TII.get(MCS51::MOV_DPH_A));
+      BuildMI(*Tail, TailBody, DL, TII.get(TargetOpcode::COPY), Dst)
+          .addReg(MCS51::DPTR);
+    };
+    WriteWord(DstLo, 0, 1);
+    WriteWord(DstHi, 2, 3);
+    return Tail;
+  }
   if (MI.getOpcode() == MCS51::ADD32rr ||
       MI.getOpcode() == MCS51::SUB32rr) {
     MachineFunction &MF = *MBB->getParent();
@@ -701,8 +790,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                            MI.getOperand(3).getReg(),
                            MI.getOperand(4).getReg(),
                            MI.getOperand(5).getReg()};
-    Register Work = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
     Register Sum[4];
     for (Register &Part : Sum)
       Part = MF.getRegInfo().createVirtualRegister(
@@ -715,6 +802,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     for (unsigned I = 0; I != 4; ++I) {
       Register LHS = Operands[I < 2 ? 0 : 1];
       Register RHS = Operands[I < 2 ? 2 : 3];
+      Register Work = MF.getRegInfo().createVirtualRegister(
+          &MCS51::MCS51GPR8RegClass);
       unsigned Direct = (I & 1) ? 0x83 : 0x82;
       CopyDPTR(LHS);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
