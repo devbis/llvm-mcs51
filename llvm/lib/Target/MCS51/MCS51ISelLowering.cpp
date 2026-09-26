@@ -1,4 +1,5 @@
 #include "MCS51ISelLowering.h"
+#include "MCS51Banking.h"
 #include "MCS51Subtarget.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -214,9 +215,25 @@ SDValue MCS51TargetLowering::LowerCall(
 
   SDValue Callee = CLI.Callee;
   unsigned CallOpcode = MCS51ISD::CALL;
-  if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee))
-    Callee = DAG.getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i16);
-  else if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Callee))
+  if (auto *GA = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    const GlobalValue *GV = GA->getGlobal();
+    const auto *F = dyn_cast<Function>(GV);
+    unsigned Bank = F && F->hasSection()
+                        ? getMCS51CodeBank(F->getSection())
+                        : 0;
+    const Function &Caller = MF.getFunction();
+    unsigned CallerBank = Caller.hasSection()
+                              ? getMCS51CodeBank(Caller.getSection())
+                              : 0;
+    if (Bank && Bank != CallerBank) {
+      std::string Thunk = getMCS51BankThunkName(GV->getName());
+      MCSymbol *ThunkSym = MF.getContext().getOrCreateSymbol(Thunk);
+      Callee = DAG.getTargetExternalSymbol(ThunkSym->getName().data(),
+                                           MVT::i16);
+    } else {
+      Callee = DAG.getTargetGlobalAddress(GV, DL, MVT::i16);
+    }
+  } else if (auto *ES = dyn_cast<ExternalSymbolSDNode>(Callee))
     Callee = DAG.getTargetExternalSymbol(ES->getSymbol(), MVT::i16);
   else {
     if (Callee.getValueType() != MVT::i16)

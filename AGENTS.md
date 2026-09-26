@@ -67,9 +67,14 @@ current reset stub in
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
 linker accepts manually placed `.bank1.*` through `.bank7.*` input sections
 and emits them at separate physical flash load addresses while retaining the
-shared `0x8000` execution VMA. Automatic code placement and a cross-bank
-call/return ABI are not implemented yet; the linker profile currently models
-the 256-KiB flash variant.
+shared `0x8000` execution VMA. Automatic code placement and indirect banked
+calls are not implemented yet; the linker profile currently models the
+256-KiB flash variant. A function placed with
+`__attribute__((section(".bankN.text")))` gets a common-area trampoline for
+direct calls. The trampoline saves FMAP, selects the callee bank, calls the
+function, and restores FMAP, including when the caller is itself banked.
+Indirect calls through banked function pointers and automatic function
+placement remain unsupported.
 
 ## Final target and completion criteria
 
