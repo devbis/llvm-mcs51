@@ -25,6 +25,16 @@ int main(void) {
 // MAP: Value: 0x0
 // MAP: Name: counter
 // MAP: Value: 0x1
+// MAP-DAG: Name: __cc2530_data_alias_start
+// MAP-DAG: Value: 0x1F00
+// MAP-DAG: Name: __cc2530_xreg_start
+// MAP-DAG: Value: 0x6000
+// MAP-DAG: Name: __cc2530_sfr_xdata_start
+// MAP-DAG: Value: 0x7080
+// MAP-DAG: Name: __cc2530_info_start
+// MAP-DAG: Value: 0x7800
+// MAP-DAG: Name: __cc2530_xbank_start
+// MAP-DAG: Value: 0x8000
 
 // DIS-LABEL: <reset>:
 // DIS: ljmp
