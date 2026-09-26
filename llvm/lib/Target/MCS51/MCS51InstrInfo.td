@@ -20,6 +20,7 @@ def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                             SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>] >;
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
+def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -1141,10 +1142,11 @@ def ADD16rr : MCS51WordArithmetic;
 let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
 
-def CMPULT16 : Instruction {
+def CMP16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs,
+                           MCS51Imm8:$signed);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1152,7 +1154,9 @@ def CMPULT16 : Instruction {
   let usesCustomInserter = 1;
 }
 def : Pat<(MCS51cmpult16 MCS51PTR:$lhs, MCS51PTR:$rhs),
-          (CMPULT16 MCS51PTR:$lhs, MCS51PTR:$rhs)>;
+          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 0)>;
+def : Pat<(MCS51cmpslt16 MCS51PTR:$lhs, MCS51PTR:$rhs),
+          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 1)>;
 
 // The MCS-51 has no PC-relative unconditional branch with a long enough
 // range for arbitrary basic blocks. Use LJMP until branch relaxation can
