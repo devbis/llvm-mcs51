@@ -16,6 +16,7 @@ def MCS51ret_i32_imm : SDNode<"MCS51ISD::RET_I32_IMM", SDT_MCS51RetI32,
 def SDT_MCS51ShiftWord8 : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
                                               SDTCisVT<1, i16>] >;
 def MCS51srl16_8 : SDNode<"MCS51ISD::SRL16_8", SDT_MCS51ShiftWord8>;
+def MCS51shl16_8 : SDNode<"MCS51ISD::SHL16_8", SDT_MCS51ShiftWord8>;
 def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                             SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>] >;
@@ -25,11 +26,15 @@ def SDT_MCS51Add32 : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
                                          SDTCisVT<3, i16>,
                                          SDTCisVT<4, i16>,
                                          SDTCisVT<5, i16>] >;
+def SDT_MCS51Mul16 : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
+                                          SDTCisVT<1, i16>,
+                                          SDTCisVT<2, i16>] >;
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
 def MCS51cmpeq16 : SDNode<"MCS51ISD::CMPEQ16", SDT_MCS51CmpUlt16>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
+def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
 def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
@@ -174,6 +179,16 @@ def SRL16_8 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
 }
+def SHL16_8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
 def BUILDPAIR16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
@@ -241,6 +256,7 @@ def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
           (RET_I32 MCS51GPR8:$b0, MCS51GPR8:$b1,
                    MCS51GPR8:$b2, MCS51GPR8:$b3)>;
 def : Pat<(MCS51srl16_8 MCS51PTR:$src), (SRL16_8 MCS51PTR:$src)>;
+def : Pat<(MCS51shl16_8 MCS51PTR:$src), (SHL16_8 MCS51PTR:$src)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
@@ -1150,10 +1166,42 @@ class MCS51WordArithmetic : Instruction {
   let hasSideEffects = 1;
 }
 
+class MCS51WordLogic<SDPatternOperator Op> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst,
+                      (Op MCS51PTR:$lhs, MCS51PTR:$rhs))];
+}
+
+def AND16rr : MCS51WordLogic<and>;
+def OR16rr : MCS51WordLogic<or>;
+def XOR16rr : MCS51WordLogic<xor>;
+
 let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def ADD16rr : MCS51WordArithmetic;
 let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
+
+let Pattern = [(set MCS51PTR:$dst,
+                    (MCS51mul16 MCS51PTR:$lhs, MCS51PTR:$rhs))] in
+def MUL16rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
 
 let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
                     (MCS51add32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
