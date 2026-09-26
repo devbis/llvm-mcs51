@@ -57,9 +57,10 @@ static uint64_t udivmod64(uint64_t Numerator, uint64_t Denominator,
   uint64_t Rest = 0;
 
   for (unsigned I = 0; I != 64; ++I) {
-    unsigned Carry = Numerator >> 63;
+    unsigned RemainderCarry = Rest >> 63;
+    unsigned InputBit = Numerator >> 63;
     Numerator <<= 1;
-    Rest = (Rest << 1) | Carry;
+    Rest = (Rest << 1) | InputBit;
     Word64Bytes RestBytes = {.Value = Rest};
     Word64Bytes DenominatorBytes = {.Value = Denominator};
     unsigned GreaterOrEqual = 1;
@@ -71,7 +72,7 @@ static uint64_t udivmod64(uint64_t Numerator, uint64_t Denominator,
         break;
       }
     }
-    if (Carry || GreaterOrEqual) {
+    if (RemainderCarry || GreaterOrEqual) {
       Rest -= Denominator;
       Numerator |= 1;
     }
@@ -132,10 +133,11 @@ udivmod16(uint16_t Numerator, uint16_t Denominator) {
   uint16_t Rest = 0;
 
   for (unsigned I = 0; I != 16; ++I) {
-    unsigned Carry = Numerator >> 15;
+    unsigned RemainderCarry = Rest >> 15;
+    unsigned InputBit = Numerator >> 15;
     Numerator <<= 1;
-    Rest = (uint16_t)((Rest << 1) | Carry);
-    if (Carry || Rest >= Denominator) {
+    Rest = (uint16_t)((Rest << 1) | InputBit);
+    if (RemainderCarry || Rest >= Denominator) {
       Rest -= Denominator;
       Numerator |= 1;
     }
@@ -187,12 +189,13 @@ udivmod32(uint32_t Numerator, uint32_t Denominator, uint32_t *Remainder) {
   uint16_t DenominatorLow = (uint16_t)Denominator;
 
   for (unsigned I = 0; I != 32; ++I) {
-    unsigned Carry = Numerator >> 31;
+    unsigned RemainderCarry = Rest >> 31;
+    unsigned InputBit = Numerator >> 31;
     Numerator <<= 1;
-    Rest = (Rest << 1) | Carry;
+    Rest = (Rest << 1) | InputBit;
     uint16_t RestHigh = (uint16_t)(Rest >> 16);
     uint16_t RestLow = (uint16_t)Rest;
-    if (Carry || RestHigh > DenominatorHigh ||
+    if (RemainderCarry || RestHigh > DenominatorHigh ||
         (RestHigh == DenominatorHigh && RestLow >= DenominatorLow)) {
       Rest -= Denominator;
       Numerator |= 1;
