@@ -20,14 +20,18 @@ public:
                                     const TargetMachine &TM) const override {
     const auto *GV = dyn_cast<GlobalVariable>(GO);
     if (GV && !GV->hasSection() &&
-        (GV->getAddressSpace() == MCS51::Bit ||
+        (GV->getAddressSpace() == MCS51::PData ||
+         GV->getAddressSpace() == MCS51::Bit ||
          GV->getAddressSpace() == MCS51::Data ||
          GV->getAddressSpace() == MCS51::IData)) {
       bool IsBit = GV->getAddressSpace() == MCS51::Bit;
+      bool IsPData = GV->getAddressSpace() == MCS51::PData;
       bool IsData = GV->getAddressSpace() == MCS51::Data;
       StringRef Name;
       if (IsBit)
         Name = Kind.isBSS() ? ".mcs51.bit.bss" : ".mcs51.bit";
+      else if (IsPData)
+        Name = Kind.isBSS() ? ".mcs51.pdata.bss" : ".mcs51.pdata";
       else if (IsData)
         Name = Kind.isBSS() ? ".mcs51.data1.bss" : ".mcs51.data1";
       else

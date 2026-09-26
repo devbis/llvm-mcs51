@@ -58,6 +58,21 @@ SECTIONS
     *(.rodata .rodata.*)
   } > CODE
 
+  /* PDATA uses an 8-bit offset in the XDATA page selected by MPAGE. Startup
+     leaves the reset-selected page zero active and initializes this page. */
+  .mcs51_pdata 0 :
+  {
+    __mcs51_pdata_start = .;
+    *(.mcs51.pdata)
+    __mcs51_pdata_end = .;
+  } > XRAM AT> CODE
+  __mcs51_pdata_load = LOADADDR(.mcs51_pdata);
+  .mcs51_pdata_bss (NOLOAD) :
+  {
+    *(.mcs51.pdata.bss)
+    __mcs51_pdata_bss_end = .;
+  } > XRAM
+
   /*
    * Banked code executes at the same 0x8000-0xffff CPU address range, but
    * each output section has a distinct physical flash load address. Put code
@@ -156,6 +171,8 @@ ASSERT(ADDR(.data) + SIZEOF(.data) <= __cc2530_data_alias_start,
        "CC2530 .data overlaps the DATA-space SRAM alias")
 ASSERT(ADDR(.bss) + SIZEOF(.bss) <= __cc2530_data_alias_start,
        "CC2530 .bss overlaps the DATA-space SRAM alias")
+ASSERT(__mcs51_pdata_bss_end <= 0x100,
+       "CC2530 PDATA globals exceed the MPAGE zero page")
 ASSERT(__mcs51_data1_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA globals exceed directly addressable internal RAM")
 ASSERT(__mcs51_data2_bss_end <= __cc2530_static_data_end,
