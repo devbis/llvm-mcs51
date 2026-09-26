@@ -29,6 +29,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SETCC, MVT::i16, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
+  setOperationAction(ISD::BR_CC, MVT::i16, Custom);
   setBooleanContents(ZeroOrOneBooleanContent);
   setStackPointerRegisterToSaveRestore(MCS51::SP);
   computeRegisterProperties(STI.getRegisterInfo());
@@ -125,6 +126,37 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   SDValue LHS = Op.getOperand(2);
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
+  if (LHS.getValueType() == MVT::i16 && RHS.getValueType() == MVT::i16) {
+    bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
+                    CC == ISD::SETGT || CC == ISD::SETLE;
+    bool Invert = false;
+    switch (CC) {
+    case ISD::SETULT:
+    case ISD::SETLT:
+      break;
+    case ISD::SETUGE:
+    case ISD::SETGE:
+      Invert = true;
+      break;
+    case ISD::SETUGT:
+    case ISD::SETGT:
+      std::swap(LHS, RHS);
+      break;
+    case ISD::SETULE:
+    case ISD::SETLE:
+      std::swap(LHS, RHS);
+      Invert = true;
+      break;
+    default:
+      report_fatal_error("unsupported MCS-51 16-bit branch predicate");
+    }
+    unsigned CompareOpcode = IsSigned ? MCS51ISD::CMPSLT16
+                                      : MCS51ISD::CMPULT16;
+    SDValue Result = DAG.getNode(CompareOpcode, DL, MVT::i8, LHS, RHS);
+    unsigned BranchOpcode = Invert ? MCS51ISD::BR_EQ : MCS51ISD::BR_NE;
+    return DAG.getNode(BranchOpcode, DL, MVT::Other, Op.getOperand(0),
+                       Result, DAG.getConstant(0, DL, MVT::i8), Dest);
+  }
   if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8)
     report_fatal_error("unsupported MCS-51 conditional branch");
 
