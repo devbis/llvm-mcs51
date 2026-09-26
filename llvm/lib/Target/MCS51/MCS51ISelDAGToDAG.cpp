@@ -195,6 +195,30 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       CurDAG->RemoveDeadNode(N);
       return true;
     }
+    if (AS == MCS51::XData &&
+        (LD->getMemoryVT() == MVT::i8 || LD->getMemoryVT() == MVT::i16)) {
+      SDValue Addr = LD->getBasePtr();
+      if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+        Addr = CurDAG->getTargetGlobalAddress(
+            GA->getGlobal(), DL, MVT::i16, GA->getOffset(),
+            GA->getTargetFlags());
+      else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+        Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i16);
+      else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
+        Addr = SDValue();
+      if (Addr) {
+        unsigned Opcode = LD->getMemoryVT() == MVT::i8
+                              ? MCS51::LOADXABS8
+                              : MCS51::LOADXABS16;
+        SDValue Ops[] = {Addr, LD->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(Opcode, DL, N->getVTList(), Ops);
+        CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {LD->getMemOperand()});
+        ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+        ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+        CurDAG->RemoveDeadNode(N);
+        return true;
+      }
+    }
     if (AS != MCS51::IData && AS != MCS51::PData &&
         AS != MCS51::XData && AS != MCS51::Code)
       return false;
@@ -306,6 +330,29 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
     CurDAG->RemoveDeadNode(N);
     return true;
+  }
+  if (AS == MCS51::XData &&
+      (ST->getMemoryVT() == MVT::i8 || ST->getMemoryVT() == MVT::i16)) {
+    SDValue Addr = ST->getBasePtr();
+    if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+      Addr = CurDAG->getTargetGlobalAddress(
+          GA->getGlobal(), DL, MVT::i16, GA->getOffset(),
+          GA->getTargetFlags());
+    else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+      Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i16);
+    else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
+      Addr = SDValue();
+    if (Addr) {
+      unsigned Opcode = ST->getMemoryVT() == MVT::i8
+                            ? MCS51::STOREXABS8
+                            : MCS51::STOREXABS16;
+      SDValue Ops[] = {Addr, ST->getValue(), ST->getChain()};
+      SDNode *Res = CurDAG->getMachineNode(Opcode, DL, MVT::Other, Ops);
+      CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), {ST->getMemOperand()});
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return true;
+    }
   }
   if (AS != MCS51::IData && AS != MCS51::PData && AS != MCS51::XData)
     return false;
