@@ -1311,6 +1311,25 @@ def XRL_A_DIRECT : MCS51AccDirectInst<0x65, "xrl"> {
   let Defs = [A]; let Uses = [A];
 }
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
+// Precise implicit register effects for the SFR moves used by wide
+// arithmetic. The generic direct form conservatively clobbers B and DPTR.
+class MCS51FixedSFRStore<bits<8> address, string mnemonic,
+                         Register DefReg> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = mnemonic;
+  let Size = 2;
+  let hasSideEffects = 1;
+  let Defs = [DefReg];
+  let Uses = [A];
+  bits<16> Inst;
+  let Inst{7-0} = 0xF5;
+  let Inst{15-8} = address;
+}
+def MOV_DPL_A : MCS51FixedSFRStore<0x82, "mov 130, a", DPTR>;
+def MOV_DPH_A : MCS51FixedSFRStore<0x83, "mov 131, a", DPTR>;
+def MOV_B_A : MCS51FixedSFRStore<0xF0, "mov 240, a", B>;
 def ANL_DIRECT_A : MCS51DirectAccInst<0x52, "anl">;
 def ORL_DIRECT_A : MCS51DirectAccInst<0x42, "orl">;
 def XRL_DIRECT_A : MCS51DirectAccInst<0x62, "xrl">;
