@@ -1290,7 +1290,10 @@ class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
   let Inst{15-8} = imm;
 }
 
-def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov">;
+def MOV_A_DIRECT : MCS51AccDirectInst<0xE5, "mov"> {
+  let Defs = [];
+  let Uses = [B];
+}
 def XCH_A_DIRECT : MCS51AccDirectInst<0xC5, "xch">;
 def ADD_A_DIRECT : MCS51AccDirectInst<0x25, "add"> {
   let Defs = [A]; let Uses = [A];
@@ -1327,9 +1330,26 @@ class MCS51FixedSFRStore<bits<8> address, string mnemonic,
   let Inst{7-0} = 0xF5;
   let Inst{15-8} = address;
 }
+class MCS51FixedSFRLoad<bits<8> address, string mnemonic,
+                        Register UseReg> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins);
+  let AsmString = mnemonic;
+  let Size = 2;
+  let hasSideEffects = 1;
+  let Defs = [];
+  let Uses = [UseReg];
+  bits<1> dst;
+  let dst = 0;
+  bits<16> Inst;
+  let Inst{7-0} = 0xE5;
+  let Inst{15-8} = address;
+}
 def MOV_DPL_A : MCS51FixedSFRStore<0x82, "mov 130, a", DPTR>;
 def MOV_DPH_A : MCS51FixedSFRStore<0x83, "mov 131, a", DPTR>;
 def MOV_B_A : MCS51FixedSFRStore<0xF0, "mov 240, a", B>;
+def MOV_A_B : MCS51FixedSFRLoad<0xF0, "mov a, 240", B>;
 def ANL_DIRECT_A : MCS51DirectAccInst<0x52, "anl">;
 def ORL_DIRECT_A : MCS51DirectAccInst<0x42, "orl">;
 def XRL_DIRECT_A : MCS51DirectAccInst<0x62, "xrl">;
