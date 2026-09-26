@@ -42,6 +42,20 @@ long remainder_signed_long(long Numerator, long Denominator) {
   return Numerator % Denominator;
 }
 
+unsigned long long shift_left_long_long(unsigned long long Value,
+                                        unsigned Amount) {
+  return Value << Amount;
+}
+
+unsigned long long shift_right_unsigned_long_long(unsigned long long Value,
+                                                  unsigned Amount) {
+  return Value >> Amount;
+}
+
+long long shift_right_signed_long_long(long long Value, unsigned Amount) {
+  return Value >> Amount;
+}
+
 int main(void) {
   volatile unsigned long Numerator = 70001;
   volatile unsigned long Denominator = 191;
@@ -73,6 +87,12 @@ int main(void) {
 // CALL: lcall __umodsi3
 // CALL-LABEL: remainder_signed_long:
 // CALL: lcall __modsi3
+// CALL-LABEL: shift_left_long_long:
+// CALL: lcall __ashldi3
+// CALL-LABEL: shift_right_unsigned_long_long:
+// CALL: lcall __lshrdi3
+// CALL-LABEL: shift_right_signed_long_long:
+// CALL: lcall __ashrdi3
 
 // LINK-DAG: Name: __udivhi3
 // LINK-DAG: Name: __divhi3
@@ -82,5 +102,8 @@ int main(void) {
 // LINK-DAG: Name: __divsi3
 // LINK-DAG: Name: __umodsi3
 // LINK-DAG: Name: __modsi3
+// LINK-DAG: Name: __ashldi3
+// LINK-DAG: Name: __lshrdi3
+// LINK-DAG: Name: __ashrdi3
 
 // IHEX: :00000001FF
