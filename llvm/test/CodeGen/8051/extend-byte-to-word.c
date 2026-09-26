@@ -15,6 +15,12 @@ unsigned short zero_extend_plus_constant(unsigned char value) {
   return value + 0x12fe;
 }
 
+unsigned short add_unsigned_byte(unsigned short base, unsigned char value) {
+  return base + value;
+}
+
+short add_signed_byte(short base, signed char value) { return base + value; }
+
 // CHECK-LABEL: zero_extend_byte:
 // CHECK: mov 130, a
 // CHECK: mov 131, #0
@@ -61,6 +67,16 @@ unsigned short zero_extend_plus_constant(unsigned char value) {
 // OPT: mov 131, a
 // OPT: inc dptr
 // OPT: ret
+// CHECK-LABEL: add_unsigned_byte:
+// CHECK: add a, 130
+// CHECK: addc a, #0
+// CHECK: ret
+// CHECK-LABEL: add_signed_byte:
+// CHECK: add a, 130
+// CHECK: addc a, #0
+// CHECK: jnc
+// CHECK: add a, #255
+// CHECK: ret
 // OPT-LABEL: zero_extend_before_add:
 // OPT: mov 131, #0
 // OPT: inc dptr
@@ -69,4 +85,14 @@ unsigned short zero_extend_plus_constant(unsigned char value) {
 // OPT: add a, #254
 // OPT: addc a, #18
 // OPT: mov 131, a
+// OPT: ret
+// OPT-LABEL: add_unsigned_byte:
+// OPT: add a, 130
+// OPT: addc a, #0
+// OPT: ret
+// OPT-LABEL: add_signed_byte:
+// OPT: add a, 130
+// OPT: addc a, #0
+// OPT: jnc
+// OPT: add a, #255
 // OPT: ret
