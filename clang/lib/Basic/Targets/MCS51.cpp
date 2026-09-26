@@ -20,6 +20,7 @@ void MCS51TargetInfo::getTargetDefines(const LangOptions &,
   Builder.defineMacro("__idata", "__attribute__((address_space(2)))");
   Builder.defineMacro("__xdata", "__attribute__((address_space(4)))");
   Builder.defineMacro("__code", "__attribute__((address_space(5)))");
+  Builder.defineMacro("__bit", "__attribute__((address_space(6)))");
   if (IsCC2530)
     Builder.defineMacro("__CC2530__");
 }

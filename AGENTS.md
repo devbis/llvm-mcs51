@@ -67,8 +67,10 @@ assigns explicit DATA/IDATA globals offsets `0x30` through `0x7f`; startup adds
 the SRAM alias base when copying their initial values. DATA-space globals use
 direct accesses, while IDATA globals support byte and word accesses through
 `@R0`. Lower offsets remain available for register banks and bit-addressable
-RAM, and the upper half of the alias is reserved for the hardware stack. The
-current reset stub in
+RAM, and the upper half of the alias is reserved for the hardware stack.
+`__bit` globals use the bit-address range `0x00` through `0x7f`; initialized
+values are loaded from CODE and merged into the corresponding bit-addressable
+RAM byte during reset. The current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
 linker accepts manually placed `.bank1.*` through `.bank7.*` input sections

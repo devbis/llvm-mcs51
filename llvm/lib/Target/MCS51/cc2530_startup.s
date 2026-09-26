@@ -29,6 +29,15 @@ __mcs51_start:
   orl a, r7
   jnz .Lclear_xdata
 
+  /* Bit-address-space globals use bit addresses 0 through 127. Their backing
+     bytes are in the just-cleared 0x20-0x2f internal DATA window. */
+  mov dptr, #__mcs51_bit_start
+  mov r2, dpl
+  mov dptr, #__mcs51_bit_end
+  mov r3, dpl
+  mov dptr, #__mcs51_bit_load
+  lcall .Lcopy_initialized_bits
+
   /* Copy initialized XDATA globals from their CODE load image. */
   mov dptr, #__mcs51_data_start
   mov r2, dpl
@@ -93,4 +102,56 @@ __mcs51_start:
   mov r3, dph
   sjmp .Lcopy_data_loop
 .Lcopy_data_done:
+  ret
+
+.Lcopy_initialized_bits:
+  mov r1, #1
+.Lcopy_bit_loop:
+  mov a, r2
+  xrl a, r3
+  jz .Lcopy_bits_done
+  clr a
+  movc a, @a+dptr
+  anl a, #1
+  mov r6, a
+  inc dptr
+
+  /* Convert bit address N into DATA byte 0x20 + N/8 and mask 1 << N%8. */
+  mov a, r2
+  anl a, #7
+  mov r5, a
+  mov a, r2
+  rr a
+  rr a
+  rr a
+  anl a, #0x1f
+  add a, #0x20
+  mov r0, a
+  mov a, r5
+  jz .Lbit_mask_ready
+.Lmake_bit_mask:
+  mov a, r1
+  rl a
+  mov r1, a
+  dec r5
+  mov a, r5
+  jnz .Lmake_bit_mask
+.Lbit_mask_ready:
+  mov a, r6
+  jz .Lclear_initialized_bit
+  mov a, @r0
+  orl a, r1
+  sjmp .Lstore_initialized_bit
+.Lclear_initialized_bit:
+  mov a, r1
+  cpl a
+  mov r1, a
+  mov a, @r0
+  anl a, r1
+.Lstore_initialized_bit:
+  mov @r0, a
+  mov r1, #1
+  inc r2
+  sjmp .Lcopy_bit_loop
+.Lcopy_bits_done:
   ret
