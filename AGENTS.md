@@ -73,8 +73,13 @@ variant. A function placed with
 direct calls. The trampoline saves FMAP, selects the callee bank, calls the
 function, and restores FMAP, including when the caller is itself banked.
 Indirect calls through banked function pointers and automatic function
-placement remain unsupported. Interrupt attributes, interrupt vector
-placement, and `RETI` generation are also not implemented yet.
+placement remain unsupported. CC2530 interrupt handlers use
+`__attribute__((interrupt(N)))`, where `N` is 0 through 17. The backend saves
+the interrupted register-bank-0 state and SFR registers, then returns with
+`RETI`. It emits a three-byte `LJMP` vector stub; `cc2530.ld` places vector N
+at `0x03 + 8*N`, keeps reset at address zero, reserves the vector table, and
+rejects duplicate handlers for a vector. Interrupt handlers must reside in
+common flash and cannot be called directly.
 
 ## Final target and completion criteria
 
@@ -107,10 +112,10 @@ assembly and linked images for representative firmware to confirm both
 correctness and code size.
 
 Current work is incomplete. The CC2530 profile supports XDATA globals,
-initialized XDATA data, explicit DATA/IDATA globals, and manually selected
-flash banks with direct-call trampolines. It does not yet provide automatic
-placement across banks, indirect banked calls, interrupt/vector handling, or
-a complete runtime library. Classic 8051 and CC2530 support must be verified
+initialized XDATA data, explicit DATA/IDATA globals, manually selected flash
+banks with direct-call trampolines, and CC2530 interrupt vectors. It does not
+yet provide automatic placement across banks, indirect banked calls, or a
+complete runtime library. Classic 8051 and CC2530 support must be verified
 feature by feature; do not describe the target as fully supported until the
-remaining ABI, instruction, interrupt, memory-map, runtime, and firmware-image
-gaps are implemented and tested.
+remaining ABI, instruction, memory-map, runtime, optimization, and
+firmware-image gaps are implemented and tested.

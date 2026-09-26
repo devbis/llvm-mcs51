@@ -428,8 +428,10 @@ def warn_arm_interrupt_save_fp_without_vfp_unit : Warning<
    InGroup<DiagGroup<"arm-interrupt-save-fp-no-vfp-unit">>;
 def err_arm_interrupt_called : Error<
   "interrupt service routine cannot be called directly">;
+def err_mcs51_interrupt_called : Error<
+  "MCS-51 interrupt service routine cannot be called directly">;
 def warn_interrupt_signal_attribute_invalid
-    : Warning<"%select{MIPS|MSP430|RISC-V|AVR}0 '%select{interrupt|signal}1' "
+    : Warning<"%select{MIPS|MSP430|RISC-V|AVR|MCS-51}0 '%select{interrupt|signal}1' "
               "attribute only applies to functions that have "
               "%select{no parameters|a 'void' return type}2">,
       InGroup<IgnoredAttributes>,

@@ -8,6 +8,7 @@
 
 #include "ABIInfoImpl.h"
 #include "TargetInfo.h"
+#include "llvm/ADT/StringExtras.h"
 
 using namespace clang;
 using namespace clang::CodeGen;
@@ -26,6 +27,19 @@ public:
     // The default MCS-51 data model places unqualified globals in XDATA.
     // Explicit address-space-qualified variables keep their declared space.
     return getLangASFromTargetAS(4);
+  }
+
+  void setTargetAttributes(const Decl *D, llvm::GlobalValue *GV,
+                           CodeGen::CodeGenModule &M) const override {
+    if (GV->isDeclaration())
+      return;
+    const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
+    const auto *InterruptAttr = FD ? FD->getAttr<MCS51InterruptAttr>() : nullptr;
+    if (!InterruptAttr)
+      return;
+    auto *F = cast<llvm::Function>(GV);
+    F->addFnAttr(llvm::Attribute::NoInline);
+    F->addFnAttr("interrupt", llvm::utostr(InterruptAttr->getNumber()));
   }
 };
 } // namespace
