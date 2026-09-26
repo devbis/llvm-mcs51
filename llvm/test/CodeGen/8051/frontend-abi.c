@@ -1,8 +1,17 @@
 // RUN: clang -target mcs51 -fsyntax-only %s
 // RUN: clang -target mcs51 -S -emit-llvm -o - %s | FileCheck %s --check-prefix=IR
+// RUN: clang -target mcs51 -### -fsyntax-only %s 2>&1 | FileCheck %s --check-prefix=DEFAULT
+// RUN: clang -target mcs51 -fsigned-char -### -fsyntax-only %s 2>&1 | FileCheck %s --check-prefix=SIGNED --implicit-check-not=-fno-signed-char
+
+// DEFAULT: "-cc1" "-triple" "mcs51"
+// DEFAULT-SAME: "-fno-signed-char"
+// SIGNED: "-cc1" "-triple" "mcs51"
 
 #ifndef __8051__
 #error "missing MCS-51 predefined macro"
+#endif
+#ifndef __CHAR_UNSIGNED__
+#error "plain char must be unsigned on MCS-51"
 #endif
 
 _Static_assert(sizeof(void *) == 2, "near pointers are 16-bit");

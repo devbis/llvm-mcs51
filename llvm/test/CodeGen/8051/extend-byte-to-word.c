@@ -3,6 +3,8 @@
 
 unsigned short zero_extend_byte(unsigned char value) { return value; }
 
+unsigned short zero_extend_plain_char(char value) { return value; }
+
 short sign_extend_byte(signed char value) { return value; }
 
 unsigned short zero_extend_bool(_Bool value) { return value; }
@@ -44,6 +46,9 @@ short subtract_volatile_signed_byte(short base) {
 // CHECK-LABEL: zero_extend_byte:
 // CHECK: mov 130, a
 // CHECK: mov 131, #0
+// CHECK-LABEL: zero_extend_plain_char:
+// CHECK: mov 130, a
+// CHECK: mov 131, #0
 // CHECK-LABEL: sign_extend_byte:
 // CHECK: mov 130, a
 // CHECK: mov c, 231
@@ -54,6 +59,9 @@ short subtract_volatile_signed_byte(short base) {
 // CHECK: mov 131, #0
 
 // OPT-LABEL: zero_extend_byte:
+// OPT: mov 130, a
+// OPT: mov 131, #0
+// OPT-LABEL: zero_extend_plain_char:
 // OPT: mov 130, a
 // OPT: mov 131, #0
 // OPT-LABEL: sign_extend_byte:
