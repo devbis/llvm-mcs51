@@ -6665,6 +6665,52 @@ BTFDeclTagAttr *Sema::mergeBTFDeclTagAttr(Decl *D, const BTFDeclTagAttr &AL) {
 static void handleInterruptAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Dispatch the interrupt attribute based on the current target.
   switch (S.Context.getTargetInfo().getTriple().getArch()) {
+  case llvm::Triple::mcs51: {
+    if (!isFuncOrMethodForAttrSubject(D)) {
+      S.Diag(D->getLocation(), diag::warn_attribute_wrong_decl_type)
+          << AL << AL.isRegularKeywordAttribute() << ExpectedFunctionOrMethod;
+      return;
+    }
+    if (hasFunctionProto(D) && getFunctionOrMethodNumParams(D) != 0) {
+      S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
+          << /*MCS-51*/ 4 << /*interrupt*/ 0 << 0;
+      return;
+    }
+    if (!getFunctionOrMethodResultType(D)->isVoidType()) {
+      S.Diag(D->getLocation(), diag::warn_interrupt_signal_attribute_invalid)
+          << /*MCS-51*/ 4 << /*interrupt*/ 0 << 1;
+      return;
+    }
+    if (!AL.checkExactlyNumArgs(S, 1))
+      return;
+    if (!AL.isArgExpr(0)) {
+      S.Diag(AL.getLoc(), diag::err_attribute_argument_type)
+          << AL << AANT_ArgumentIntegerConstant;
+      return;
+    }
+    Expr *VectorExpr = AL.getArgAsExpr(0);
+    std::optional<llvm::APSInt> Vector =
+        VectorExpr->getIntegerConstantExpr(S.Context);
+    if (!Vector) {
+      S.Diag(AL.getLoc(), diag::err_attribute_argument_type)
+          << AL << AANT_ArgumentIntegerConstant << VectorExpr->getSourceRange();
+      return;
+    }
+    if (Vector->isSigned() && Vector->isNegative()) {
+      S.Diag(AL.getLoc(), diag::err_attribute_argument_out_of_bounds)
+          << AL << Vector->getSExtValue() << VectorExpr->getSourceRange();
+      return;
+    }
+    unsigned Number = Vector->getLimitedValue(255);
+    if (Number > 17) {
+      S.Diag(AL.getLoc(), diag::err_attribute_argument_out_of_bounds)
+          << AL << Number << VectorExpr->getSourceRange();
+      return;
+    }
+    D->addAttr(::new (S.Context) MCS51InterruptAttr(S.Context, AL, Number));
+    D->addAttr(UsedAttr::CreateImplicit(S.Context));
+    return;
+  }
   case llvm::Triple::msp430:
     S.MSP430().handleInterruptAttr(D, AL);
     break;

@@ -16,7 +16,7 @@ int main(void) {
 }
 
 // MAP: Name: .text
-// MAP: Address: 0x0
+// MAP: Address: 0x94
 // MAP: Name: .data
 // MAP: Address: 0x0
 // MAP: Name: .bss

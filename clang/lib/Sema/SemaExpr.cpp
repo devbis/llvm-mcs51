@@ -7134,6 +7134,10 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
       Diag(Fn->getExprLoc(), diag::err_arm_interrupt_called);
       return ExprError();
     }
+    if (FDecl->hasAttr<MCS51InterruptAttr>()) {
+      Diag(Fn->getExprLoc(), diag::err_mcs51_interrupt_called);
+      return ExprError();
+    }
   }
 
   // X86 interrupt handlers may only call routines with attribute
