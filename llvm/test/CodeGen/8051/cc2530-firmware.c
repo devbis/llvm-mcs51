@@ -42,8 +42,8 @@ int main(void) {
 // DIS: mov 129, #127
 // DIS: mov dptr, #0
 // DIS: movx @dptr, a
-// DIS: movc a, @a+dptr
 // DIS: lcall
+// DIS: movc a, @a+dptr
 // DIS-LABEL: <main>:
 // DIS: mov dptr, #0
 // DIS: movx @dptr, a

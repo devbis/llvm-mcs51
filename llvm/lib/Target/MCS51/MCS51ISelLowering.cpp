@@ -349,6 +349,33 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             TII.get(MCS51::JMP_ADPTR));
     return ReturnBB;
   }
+  if (MI.getOpcode() == MCS51::LOADIDATA_GLOBAL8) {
+    Register Dst = MI.getOperand(0).getReg();
+    MachineMemOperand *MMO = MI.memoperands().front();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
+        .addReg(MCS51::R0, RegState::Define)
+        .add(MI.getOperand(1));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI))
+        .addReg(MCS51::R0)
+        .addMemOperand(MMO);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(Dst, RegState::Define);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::STOREIDATA_GLOBAL8) {
+    MachineMemOperand *MMO = MI.memoperands().front();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
+        .addReg(MI.getOperand(1).getReg());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
+        .addReg(MCS51::R0, RegState::Define)
+        .add(MI.getOperand(0));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_IND_RI_A))
+        .addReg(MCS51::R0)
+        .addMemOperand(MMO);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::ADDDPTR16ri) {
     Register Dst = MI.getOperand(0).getReg();
     int64_t Amount = MI.getOperand(2).getImm();

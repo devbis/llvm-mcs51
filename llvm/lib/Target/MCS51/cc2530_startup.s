@@ -29,25 +29,52 @@ __mcs51_start:
   orl a, r7
   jnz .Lclear_xdata
 
-  /* Copy initialized globals from their CODE load image to XDATA. */
+  /* Copy initialized XDATA globals from their CODE load image. */
   mov dptr, #__mcs51_data_start
   mov r2, dpl
   mov r3, dph
   mov dptr, #__mcs51_data_end
-  mov a, dpl
-  xrl a, r2
-  jnz .Ldata_nonempty
-  mov a, dph
-  xrl a, r3
-  jz .Ldata_done
-.Ldata_nonempty:
-  mov dptr, #__mcs51_data_load
-  mov r0, dpl
-  mov r1, dph
-  mov dptr, #__mcs51_data_end
   mov r4, dpl
   mov r5, dph
-.Lcopy_data:
+  mov dptr, #__mcs51_data_load
+  lcall .Lcopy_initialized_data
+
+  /* Copy initialized DATA-space and IDATA-space globals into their SRAM
+     alias. The helper skips empty ranges. */
+  mov dptr, #__mcs51_data1_xdata_start
+  mov r2, dpl
+  mov r3, dph
+  mov dptr, #__mcs51_data1_xdata_end
+  mov r4, dpl
+  mov r5, dph
+  mov dptr, #__mcs51_data1_load
+  lcall .Lcopy_initialized_data
+
+  mov dptr, #__mcs51_data2_xdata_start
+  mov r2, dpl
+  mov r3, dph
+  mov dptr, #__mcs51_data2_xdata_end
+  mov r4, dpl
+  mov r5, dph
+  mov dptr, #__mcs51_data2_load
+  lcall .Lcopy_initialized_data
+
+  lcall main
+.Lhalt:
+  sjmp .Lhalt
+.size __mcs51_start, .-__mcs51_start
+
+.Lcopy_initialized_data:
+  mov r0, dpl
+  mov r1, dph
+.Lcopy_data_loop:
+  mov a, r2
+  xrl a, r4
+  jnz .Lcopy_data_byte
+  mov a, r3
+  xrl a, r5
+  jz .Lcopy_data_done
+.Lcopy_data_byte:
   mov dpl, r0
   mov dph, r1
   clr a
@@ -64,15 +91,6 @@ __mcs51_start:
   inc dptr
   mov r2, dpl
   mov r3, dph
-  mov a, r2
-  xrl a, r4
-  jnz .Lcopy_data
-  mov a, r3
-  xrl a, r5
-  jnz .Lcopy_data
-.Ldata_done:
-
-  lcall main
-.Lhalt:
-  sjmp .Lhalt
-.size __mcs51_start, .-__mcs51_start
+  sjmp .Lcopy_data_loop
+.Lcopy_data_done:
+  ret
