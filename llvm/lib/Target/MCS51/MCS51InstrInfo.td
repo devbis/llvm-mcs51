@@ -116,7 +116,7 @@ def MOVX_IND_RI_A : MCS51IndirectStoreInst<0xF2, "movx">;
 def MOVX_AR0 : MCS51Inst<0xE2, "movx a, @r0">;
 def MOVX_AR1 : MCS51Inst<0xE3, "movx a, @r1">;
 def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a"> {
-  let Uses = [A];
+  let Uses = [A, DPTR];
 }
 def RET16 : Instruction {
   let Namespace = "MCS51";
