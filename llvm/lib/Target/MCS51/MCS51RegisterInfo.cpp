@@ -61,28 +61,23 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                        ->getFrameIndexReference(MF, FI, FrameReg)
                        .getFixed();
   Offset += MI->getOperand(FIOperandNum + 1).getImm();
-  if (Offset < -128 || Offset > 127)
-    report_fatal_error("MCS-51 stack frame exceeds 128-byte displacement");
+  if (Offset < -256 || Offset > 255)
+    report_fatal_error("MCS-51 stack frame exceeds 256-byte displacement");
 
   auto I = MI->getIterator();
   auto EmitAddressAtOffset = [&](int64_t AddressOffset) {
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x81);
     BuildMI(MBB, I, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
-        .addImm(AddressOffset);
+        .addImm(static_cast<uint8_t>(AddressOffset));
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
         .addReg(MCS51::R1, RegState::Define);
   };
   auto EmitAddress = [&]() { EmitAddressAtOffset(Offset); };
   auto OffsetAfterPush = [&](int64_t Count) {
-    int64_t Adjusted = Offset - Count;
-    if (Adjusted < -128)
-      Adjusted += 256;
-    return Adjusted;
+    return static_cast<uint8_t>(Offset - Count);
   };
 
   if (MI->getOpcode() == MCS51::FRAMEADDR_R1) {
-    if (Offset < -128 || Offset > 127)
-      report_fatal_error("MCS-51 stack frame exceeds 128-byte displacement");
     EmitAddressAtOffset(Offset);
     MI->eraseFromParent();
     return true;
