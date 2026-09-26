@@ -1,4 +1,5 @@
 #include "MCS51TargetMachine.h"
+#include "MCS51MachineFunctionInfo.h"
 #include "MCS51.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/Passes.h"
@@ -93,6 +94,13 @@ bool MCS51TargetMachine::addPassesToEmitFile(
 
 TargetPassConfig *MCS51TargetMachine::createPassConfig(PassManagerBase &PM) {
   return new MCS51PassConfig(*this, PM);
+}
+
+MachineFunctionInfo *MCS51TargetMachine::createMachineFunctionInfo(
+    BumpPtrAllocator &Allocator, const Function &F,
+    const TargetSubtargetInfo *STI) const {
+  return MCS51MachineFunctionInfo::create<MCS51MachineFunctionInfo>(
+      Allocator, F, STI);
 }
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMCS51Target() {

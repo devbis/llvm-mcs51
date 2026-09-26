@@ -1363,6 +1363,18 @@ def FRAMEADDR_R1 : Instruction {
   let Uses = [SP];
 }
 
+def FRAMEADDR8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let Defs = [A, R1];
+  let Uses = [SP];
+}
+
 def LOAD_FRAME8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);

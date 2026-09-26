@@ -105,6 +105,18 @@ public:
   bool selectXDataMemory(SDNode *N);
   void Select(SDNode *N) override {
     SDLoc DL(N);
+    if (N->getOpcode() == ISD::FrameIndex &&
+        N->getValueType(0) == MVT::i8) {
+      int FI = cast<FrameIndexSDNode>(N)->getIndex();
+      SDValue Ops[] = {
+          CurDAG->getTargetFrameIndex(FI, MVT::i16),
+          CurDAG->getTargetConstant(0, DL, MVT::i8)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::FRAMEADDR8, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
     if (N->getOpcode() == ISD::GlobalAddress &&
         N->getValueType(0) == MVT::i8 &&
         cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
