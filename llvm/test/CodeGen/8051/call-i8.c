@@ -53,8 +53,8 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 
 // CHECK-LABEL: caller_promoted:
 // CHECK: lcall callee
-// CHECK: mov 131, #0
 // CHECK: mov 130, a
+// CHECK: mov 131, #0
 // CHECK: ret
 
 // CHECK-LABEL: caller_word_arg:
