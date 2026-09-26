@@ -73,7 +73,10 @@ values are loaded from CODE and merged into the corresponding bit-addressable
 RAM byte during reset. Clang also provides `__sbit` and `__sfr` qualifiers for
 absolute bit-addressed and SFR accesses; use volatile-qualified accesses for
 hardware registers. These aliases map to the target's bit and SFR address
-spaces. The current reset stub in
+spaces. `__pdata` objects occupy the low 256 bytes of CC2530 XDATA, which are
+accessed through the hardware-reset `MPAGE` page zero and 8-bit `@Ri` pointers;
+initialized objects are copied from CODE at startup, and the linker rejects a
+PDATA allocation larger than one page. The current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
 linker accepts manually placed `.bank1.*` through `.bank7.*` input sections

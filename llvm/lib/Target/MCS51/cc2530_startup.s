@@ -48,6 +48,16 @@ __mcs51_start:
   mov dptr, #__mcs51_data_load
   lcall .Lcopy_initialized_data
 
+  /* PDATA objects occupy page zero selected by the reset value of MPAGE. */
+  mov dptr, #__mcs51_pdata_start
+  mov r2, dpl
+  mov r3, dph
+  mov dptr, #__mcs51_pdata_end
+  mov r4, dpl
+  mov r5, dph
+  mov dptr, #__mcs51_pdata_load
+  lcall .Lcopy_initialized_data
+
   /* Copy initialized DATA-space and IDATA-space globals into their SRAM
      alias. The helper skips empty ranges. */
   mov dptr, #__mcs51_data1_xdata_start

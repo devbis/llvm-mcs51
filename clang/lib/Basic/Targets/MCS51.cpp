@@ -18,6 +18,7 @@ void MCS51TargetInfo::getTargetDefines(const LangOptions &,
   Builder.defineMacro("__8051__");
   Builder.defineMacro("__data", "__attribute__((address_space(1)))");
   Builder.defineMacro("__idata", "__attribute__((address_space(2)))");
+  Builder.defineMacro("__pdata", "__attribute__((address_space(3)))");
   Builder.defineMacro("__xdata", "__attribute__((address_space(4)))");
   Builder.defineMacro("__code", "__attribute__((address_space(5)))");
   Builder.defineMacro("__bit", "__attribute__((address_space(6)))");
