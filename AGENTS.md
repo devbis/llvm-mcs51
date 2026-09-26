@@ -65,8 +65,11 @@ RAM, and the upper half of the alias is reserved for the hardware stack. The
 current reset stub in
 `llvm/lib/Target/MCS51/cc2530_startup.s` sets the stack pointer and clears
 XDATA, copies initialized `.data` from CODE to XDATA, then calls `main`. The
-profile does not yet package physical bank images or implement code-bank
-switching calls.
+linker accepts manually placed `.bank1.*` through `.bank7.*` input sections
+and emits them at separate physical flash load addresses while retaining the
+shared `0x8000` execution VMA. Automatic code placement and a cross-bank
+call/return ABI are not implemented yet; the linker profile currently models
+the 256-KiB flash variant.
 
 ## Final target and completion criteria
 
