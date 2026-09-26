@@ -10,6 +10,7 @@
         mov a, #0x5a
         mov dptr, #0x1234
         add a, #1
+        addc a, #0x12
         subb a, #1
         mov a, r3
         mov 0xf0, r3
@@ -99,6 +100,7 @@
 # ASM: mov a, #90{{.*}}encoding: [0x74,0x5a]
 # ASM: mov dptr, #4660{{.*}}encoding: [0x90,0x34,0x12]
 # ASM: add a, #1{{.*}}encoding: [0x24,0x01]
+# ASM: addc a, #18{{.*}}encoding: [0x34,0x12]
 # ASM: subb a, #1{{.*}}encoding: [0x94,0x01]
 # ASM: mov a, r3{{.*}}encoding: [0xeb]
 # ASM: mov 240, r3{{.*}}encoding: [0x8b,0xf0]
@@ -181,6 +183,7 @@
 # DIS: mov a, #90
 # DIS: mov dptr, #4660
 # DIS: add a, #1
+# DIS: addc a, #18
 # DIS: subb a, #1
 # DIS: mov a, r3
 # DIS: mov 240, r3

@@ -7,6 +7,14 @@ short sign_extend_byte(signed char value) { return value; }
 
 unsigned short zero_extend_bool(_Bool value) { return value; }
 
+short sign_extend_before_add(signed char value) { return value + 1; }
+
+unsigned short zero_extend_before_add(unsigned char value) { return value + 1; }
+
+unsigned short zero_extend_plus_constant(unsigned char value) {
+  return value + 0x12fe;
+}
+
 // CHECK-LABEL: zero_extend_byte:
 // CHECK: mov 130, a
 // CHECK: mov 131, #0
@@ -30,3 +38,35 @@ unsigned short zero_extend_bool(_Bool value) { return value; }
 // OPT: mov 131, a
 // OPT-LABEL: zero_extend_bool:
 // OPT: mov 131, #0
+// CHECK-LABEL: sign_extend_before_add:
+// CHECK: mov c, 231
+// CHECK: clr a
+// CHECK: subb a, #0
+// CHECK: mov 131, a
+// CHECK: inc dptr
+// CHECK: ret
+// CHECK-LABEL: zero_extend_before_add:
+// CHECK: mov 131, #0
+// CHECK: inc dptr
+// CHECK: ret
+// CHECK-LABEL: zero_extend_plus_constant:
+// CHECK: add a, #254
+// CHECK: addc a, #18
+// CHECK: mov 131, a
+// CHECK: ret
+// OPT-LABEL: sign_extend_before_add:
+// OPT: mov c, 231
+// OPT: clr a
+// OPT: subb a, #0
+// OPT: mov 131, a
+// OPT: inc dptr
+// OPT: ret
+// OPT-LABEL: zero_extend_before_add:
+// OPT: mov 131, #0
+// OPT: inc dptr
+// OPT: ret
+// OPT-LABEL: zero_extend_plus_constant:
+// OPT: add a, #254
+// OPT: addc a, #18
+// OPT: mov 131, a
+// OPT: ret
