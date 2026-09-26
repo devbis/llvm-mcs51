@@ -103,6 +103,18 @@ public:
   bool selectXDataMemory(SDNode *N);
   void Select(SDNode *N) override {
     SDLoc DL(N);
+    if (N->getOpcode() == ISD::GlobalAddress &&
+        N->getValueType(0) == MVT::i16) {
+      auto *GA = cast<GlobalAddressSDNode>(N);
+      SDValue Addr = CurDAG->getTargetGlobalAddress(
+          GA->getGlobal(), DL, MVT::i16, GA->getOffset(),
+          GA->getTargetFlags());
+      SDNode *Res = CurDAG->getMachineNode(MCS51::MOV_DPTR_IMM, DL,
+                                           N->getVTList(), Addr);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
     if (N->getOpcode() == ISD::BUILD_PAIR &&
         N->getValueType(0) == MVT::i16) {
       SDValue Ops[] = {N->getOperand(0), N->getOperand(1)};

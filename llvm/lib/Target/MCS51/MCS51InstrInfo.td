@@ -1038,6 +1038,8 @@ def MOV_DPTR_IMM : Instruction {
   let Pattern = [(set MCS51PTR:$dst, MCS51Imm16:$imm)];
 }
 
+def : Pat<(i16 tglobaladdr:$addr), (MOV_DPTR_IMM tglobaladdr:$addr)>;
+
 def LOADSTACKARG8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
