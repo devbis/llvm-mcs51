@@ -39,7 +39,8 @@ Run the MCS-51 CodeGen, MC, and LLD relocation tests with:
 ../llvm-8051-build/bin/llvm-lit -q \
   llvm/test/CodeGen/8051 \
   llvm/test/MC/MCS51 \
-  lld/test/ELF/mcs51-relocations.s
+  lld/test/ELF/mcs51-relocations.s \
+  lld/test/ELF/mcs51-11-bit-branch.s
 ```
 
 The CC2530 end-to-end test is
