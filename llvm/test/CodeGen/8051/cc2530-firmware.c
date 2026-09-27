@@ -1,4 +1,5 @@
-// RUN: %S/../../../lib/Target/MCS51/cc2530-build.sh %s -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O2 %s -o %t.elf
+// RUN: llvm-objcopy --output-target=ihex %t.elf %t.hex
 // RUN: llvm-readobj --sections --symbols %t.elf | FileCheck %s --check-prefix=MAP
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=DIS
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex

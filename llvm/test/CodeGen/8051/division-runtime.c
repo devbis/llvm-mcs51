@@ -1,5 +1,5 @@
 // RUN: clang -target mcs51 -O2 -S %s -o - | FileCheck %s --check-prefix=CALL
-// RUN: %S/../../../lib/Target/MCS51/cc2530-build.sh -O2 %s -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O2 %s -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex
 

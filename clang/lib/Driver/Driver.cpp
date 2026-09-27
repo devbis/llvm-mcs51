@@ -130,7 +130,41 @@ class MCS51ToolChain final : public toolchains::Generic_ELF {
 public:
   MCS51ToolChain(const Driver &D, const llvm::Triple &Triple,
                  const ArgList &Args)
-      : Generic_ELF(D, Triple, Args) {}
+      : Generic_ELF(D, Triple, Args) {
+    const Arg *CPUArg = Args.getLastArg(options::OPT_mcpu_EQ);
+    if (!CPUArg || !StringRef(CPUArg->getValue()).equals_insensitive("cc2530") ||
+        Args.hasArg(options::OPT_nostdlib))
+      return;
+
+    SmallString<256> ResourceDir(D.ResourceDir);
+    llvm::sys::path::append(ResourceDir, "mcs51");
+    SmallString<256> RuntimeObject(ResourceDir);
+    llvm::sys::path::append(RuntimeObject, "mcs51-runtime.o");
+    SmallString<256> StartupObject(ResourceDir);
+    llvm::sys::path::append(StartupObject, "cc2530_startup.o");
+    SmallString<256> LinkerScript(ResourceDir);
+    llvm::sys::path::append(LinkerScript, "cc2530.ld");
+
+    auto &VFS = D.getVFS();
+    if (!VFS.exists(RuntimeObject) || !VFS.exists(StartupObject) ||
+        !VFS.exists(LinkerScript))
+      return;
+
+    AutoCC2530 = true;
+    AddRuntime = !Args.hasArg(options::OPT_nodefaultlibs);
+    AddStartup = !Args.hasArg(options::OPT_nostartfiles);
+    RuntimeObjectPath = RuntimeObject.str().str();
+    StartupObjectPath = StartupObject.str().str();
+    LinkerScriptPath = LinkerScript.str().str();
+
+    HasLinkerScript = Args.hasArg(options::OPT_T);
+    HasNoGC = false;
+    for (const Arg *A : Args.filtered(options::OPT_Wl_COMMA))
+      for (StringRef Value : llvm::split(A->getValue(), ',')) {
+        HasLinkerScript |= Value == "-T" || Value.starts_with("-T");
+        HasNoGC |= Value == "--no-gc-sections";
+      }
+  }
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args, BoundArch BA,
@@ -158,10 +192,37 @@ public:
 
   const char *getDefaultLinker() const override { return "ld.lld"; }
 
+  void addExtraOpts(ArgStringList &CmdArgs) const override {
+    if (!AutoCC2530)
+      return;
+
+    if (!HasLinkerScript) {
+      CmdArgs.push_back("-T");
+      CmdArgs.push_back(LinkerScriptPath.c_str());
+      CmdArgs.push_back("--no-check-sections");
+    }
+    if (!HasNoGC)
+      CmdArgs.push_back("--gc-sections");
+    if (AddStartup)
+      CmdArgs.push_back(StartupObjectPath.c_str());
+    if (AddRuntime)
+      CmdArgs.push_back(RuntimeObjectPath.c_str());
+  }
+
 protected:
   Tool *buildLinker() const override {
     return new tools::gnutools::Linker(*this);
   }
+
+private:
+  bool AutoCC2530 = false;
+  bool AddRuntime = false;
+  bool AddStartup = false;
+  bool HasLinkerScript = false;
+  bool HasNoGC = false;
+  std::string RuntimeObjectPath;
+  std::string StartupObjectPath;
+  std::string LinkerScriptPath;
 };
 } // namespace
 

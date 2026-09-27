@@ -25,6 +25,8 @@ tablegen(LLVM MCS51GenSubtargetInfo.inc -gen-subtarget)
 
 add_public_tablegen_target(MCS51CommonTableGen)
 
+set_source_files_properties(mcs51-runtime.c PROPERTIES HEADER_FILE_ONLY TRUE)
+
 add_llvm_target(MCS51CodeGen
   MCS51AsmPrinter.cpp
   MCS51FrameLowering.cpp
@@ -35,6 +37,7 @@ add_llvm_target(MCS51CodeGen
   MCS51SelectionDAGInfo.cpp
   MCS51Subtarget.cpp
   MCS51TargetMachine.cpp
+  mcs51-runtime.c
 
   DEPENDS
   MCS51CommonTableGen
