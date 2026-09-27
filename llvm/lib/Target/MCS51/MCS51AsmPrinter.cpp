@@ -75,7 +75,8 @@ public:
       return true;
     const MachineOperand &MO = MI->getOperand(OpNo);
     if (!MO.isReg() ||
-        (MO.getReg() != MCS51::R0 && MO.getReg() != MCS51::R1))
+        (MO.getReg() != MCS51::R0 && MO.getReg() != MCS51::R1 &&
+         MO.getReg() != MCS51::DPTR))
       return true;
     OS << '@' << MCS51InstPrinter::getRegisterName(MO.getReg());
     return false;

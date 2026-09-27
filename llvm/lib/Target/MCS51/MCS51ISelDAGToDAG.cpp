@@ -103,6 +103,9 @@ public:
   void SelectCode(SDNode *N);
   bool CheckNodePredicate(SDValue Op, unsigned PredNo) const override;
   bool selectXDataMemory(SDNode *N);
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op,
+                                    InlineAsm::ConstraintCode ConstraintCode,
+                                    std::vector<SDValue> &OutOps) override;
   void Select(SDNode *N) override {
     SDLoc DL(N);
     if (N->getOpcode() == ISD::ADDRSPACECAST) {
@@ -731,6 +734,16 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
   CurDAG->RemoveDeadNode(N);
   return true;
+}
+
+bool MCS51DAGToDAGISel::SelectInlineAsmMemoryOperand(
+    const SDValue &Op, InlineAsm::ConstraintCode ConstraintCode,
+    std::vector<SDValue> &OutOps) {
+  if (ConstraintCode != InlineAsm::ConstraintCode::m ||
+      Op.getValueType() != MVT::i16)
+    return true;
+  OutOps.push_back(Op);
+  return false;
 }
 
 class MCS51DAGToDAGISelLegacy final : public SelectionDAGISelLegacy {
