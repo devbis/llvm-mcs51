@@ -73,6 +73,14 @@ long long remainder_signed_long_long(long long Numerator,
   return Numerator % Denominator;
 }
 
+unsigned long long __muldi3(unsigned long long LHS,
+                            unsigned long long RHS);
+
+unsigned long long multiply_runtime_long_long(unsigned long long LHS,
+                                              unsigned long long RHS) {
+  return __muldi3(LHS, RHS);
+}
+
 int main(void) {
   volatile unsigned long Numerator = 70001;
   volatile unsigned long Denominator = 191;
@@ -85,7 +93,8 @@ int main(void) {
          (int)divide_unsigned_long(Numerator, Denominator) +
          (int)divide_signed_long((long)Numerator, (long)Denominator) +
          (int)remainder_unsigned_long(Numerator, Denominator) +
-         (int)remainder_signed_long((long)Numerator, (long)Denominator);
+         (int)remainder_signed_long((long)Numerator, (long)Denominator) +
+         (int)multiply_runtime_long_long(Numerator, Denominator);
 }
 
 // CALL-LABEL: divide_unsigned_word:
@@ -118,11 +127,14 @@ int main(void) {
 // CALL: lcall __umoddi3
 // CALL-LABEL: remainder_signed_long_long:
 // CALL: lcall __moddi3
+// CALL-LABEL: multiply_runtime_long_long:
+// CALL: lcall __muldi3
 
 // LINK-DAG: Name: __udivhi3
 // LINK-DAG: Name: __divhi3
 // LINK-DAG: Name: __umodhi3
 // LINK-DAG: Name: __modhi3
+// LINK-DAG: Name: __muldi3
 // LINK-DAG: Name: __udivsi3
 // LINK-DAG: Name: __divsi3
 // LINK-DAG: Name: __umodsi3
