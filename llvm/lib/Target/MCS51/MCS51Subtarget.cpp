@@ -36,6 +36,8 @@ void MCS51Subtarget::initLibcallLoweringInfo(
       {RTLIB::SRA_I64, RTLIB::impl___ashrdi3},
       {RTLIB::FPTOSINT_F32_I32, RTLIB::impl___fixsfsi},
       {RTLIB::FPTOUINT_F32_I32, RTLIB::impl___fixunssfsi},
+      {RTLIB::SINTTOFP_I32_F32, RTLIB::impl___floatsisf},
+      {RTLIB::UINTTOFP_I32_F32, RTLIB::impl___floatunsisf},
       {RTLIB::ADD_F32, RTLIB::impl___addsf3},
       {RTLIB::SUB_F32, RTLIB::impl___subsf3},
       {RTLIB::MUL_F32, RTLIB::impl___mulsf3},

@@ -120,6 +120,25 @@ static int check(uint32_t LHSBits, uint32_t RHSBits) {
   return 1;
 }
 
+static int check_integer_to_float(int32_t SignedValue, uint32_t UnsignedValue) {
+  TestFloat32Bits SignedActual = {.Float = __floatsisf(SignedValue)};
+  TestFloat32Bits SignedExpected = {.Float = (float)SignedValue};
+  if (SignedActual.Bits != SignedExpected.Bits) {
+    fprintf(stderr, "signed int-to-float mismatch: %d = %08x, expected %08x\n",
+            SignedValue, SignedActual.Bits, SignedExpected.Bits);
+    return 0;
+  }
+
+  TestFloat32Bits UnsignedActual = {.Float = __floatunsisf(UnsignedValue)};
+  TestFloat32Bits UnsignedExpected = {.Float = (float)UnsignedValue};
+  if (UnsignedActual.Bits != UnsignedExpected.Bits) {
+    fprintf(stderr, "unsigned int-to-float mismatch: %u = %08x, expected %08x\n",
+            UnsignedValue, UnsignedActual.Bits, UnsignedExpected.Bits);
+    return 0;
+  }
+  return 1;
+}
+
 int main(void) {
   static const uint32_t EdgeValues[] = {
       0,          UINT32_C(0x80000000), UINT32_C(0x00000001),
@@ -132,9 +151,25 @@ int main(void) {
       if (!check(EdgeValues[I], EdgeValues[J]))
         return 1;
 
+  static const int32_t SignedEdges[] = {
+      INT32_MIN, INT32_MIN + 1, -16777217, -16777216, -1, 0, 1,
+      16777215, 16777216, 16777217, INT32_MAX};
+  static const uint32_t UnsignedEdges[] = {
+      0, 1, 16777215, 16777216, 16777217, UINT32_C(0x7fffffff),
+      UINT32_C(0x80000000), UINT32_MAX};
+  for (unsigned I = 0; I != sizeof(SignedEdges) / sizeof(SignedEdges[0]); ++I)
+    for (unsigned J = 0; J != sizeof(UnsignedEdges) / sizeof(UnsignedEdges[0]);
+         ++J)
+      if (!check_integer_to_float(SignedEdges[I], UnsignedEdges[J]))
+        return 1;
+
   uint32_t State = UINT32_C(0x12345678);
   for (unsigned I = 0; I != 20000; ++I) {
     State = State * UINT32_C(1664525) + UINT32_C(1013904223);
+    int32_t SignedValue = (int32_t)State;
+    uint32_t UnsignedValue = State;
+    if (!check_integer_to_float(SignedValue, UnsignedValue))
+      return 3;
     uint32_t LHS = State;
     State = State * UINT32_C(1664525) + UINT32_C(1013904223);
     if (!check(LHS, State))

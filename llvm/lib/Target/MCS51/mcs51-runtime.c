@@ -105,6 +105,57 @@ uint32_t __fixunssfsi(float Value) {
   return (Magnitude & ValidMask) | (UINT32_MAX & SaturateMask);
 }
 
+static uint32_t uint32_to_float32_bits(uint32_t Magnitude, uint32_t Sign) {
+  if (!Magnitude)
+    return 0;
+
+  int Exponent = 23;
+  uint32_t Probe = Magnitude;
+  while (Probe >= UINT32_C(0x01000000)) {
+    Probe >>= 1;
+    ++Exponent;
+  }
+  while (Probe < UINT32_C(0x00800000)) {
+    Probe <<= 1;
+    --Exponent;
+  }
+
+  uint32_t Significand;
+  if (Exponent > 23) {
+    unsigned Shift = Exponent - 23;
+    Significand = Magnitude >> Shift;
+    uint32_t Discarded = Magnitude & ((UINT32_C(1) << Shift) - 1);
+    uint32_t Halfway = UINT32_C(1) << (Shift - 1);
+    if (Discarded > Halfway ||
+        (Discarded == Halfway && (Significand & 1)))
+      ++Significand;
+  } else {
+    Significand = Magnitude << (23 - Exponent);
+  }
+
+  if (Significand == UINT32_C(0x01000000)) {
+    Significand >>= 1;
+    ++Exponent;
+  }
+
+  return (Sign << 31) | ((uint32_t)(Exponent + 127) << 23) |
+         (Significand & UINT32_C(0x007fffff));
+}
+
+float __floatsisf(int32_t Value) {
+  uint32_t Bits = (uint32_t)Value;
+  uint32_t Sign = Bits >> 31;
+  uint32_t SignMask = 0 - Sign;
+  uint32_t Magnitude = (Bits ^ SignMask) + Sign;
+  Float32Bits Result = {.Bits = uint32_to_float32_bits(Magnitude, Sign)};
+  return Result.Float;
+}
+
+float __floatunsisf(uint32_t Value) {
+  Float32Bits Result = {.Bits = uint32_to_float32_bits(Value, 0)};
+  return Result.Float;
+}
+
 static uint32_t shift_right_jam32(uint32_t Value, unsigned Count) {
   if (!Count)
     return Value;

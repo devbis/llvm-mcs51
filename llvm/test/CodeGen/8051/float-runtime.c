@@ -39,6 +39,14 @@ __attribute__((noinline)) unsigned long float_to_unsigned_long(float value) {
   return (unsigned long)value;
 }
 
+__attribute__((noinline)) float long_to_float(long value) {
+  return (float)value;
+}
+
+__attribute__((noinline)) float unsigned_long_to_float(unsigned long value) {
+  return (float)value;
+}
+
 volatile float Result;
 volatile long IntegerResult;
 volatile unsigned long UnsignedIntegerResult;
@@ -50,6 +58,8 @@ int main(void) {
   Result = divide_float(Result, 2.0f);
   IntegerResult = float_to_long(Result);
   UnsignedIntegerResult = float_to_unsigned_long(Result);
+  Result = long_to_float(IntegerResult);
+  Result = unsigned_long_to_float(UnsignedIntegerResult);
   if (float_less(Result, 0.0f))
     Result = 0.0f;
   return 0;
@@ -63,3 +73,5 @@ int main(void) {
 // LINK-DAG: Name: __unordsf2
 // LINK-DAG: Name: __fixsfsi
 // LINK-DAG: Name: __fixunssfsi
+// LINK-DAG: Name: __floatsisf
+// LINK-DAG: Name: __floatunsisf
