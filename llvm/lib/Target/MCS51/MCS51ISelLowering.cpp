@@ -64,6 +64,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FSUB, MVT::f32, LibCall);
   setOperationAction(ISD::FMUL, MVT::f32, LibCall);
   setOperationAction(ISD::FDIV, MVT::f32, LibCall);
+  setOperationAction(ISD::FP_TO_SINT, MVT::i64, LibCall);
+  setOperationAction(ISD::FP_TO_UINT, MVT::i64, LibCall);
+  setOperationAction(ISD::SINT_TO_FP, MVT::i64, LibCall);
+  setOperationAction(ISD::UINT_TO_FP, MVT::i64, LibCall);
   setOperationAction(ISD::SHL_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::SRA_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::MUL, MVT::i16, Custom);

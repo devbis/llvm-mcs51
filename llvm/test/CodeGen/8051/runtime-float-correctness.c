@@ -36,6 +36,25 @@ static uint32_t expected_float_to_u32(TestFloat32Bits Value) {
   return (uint32_t)(double)Value.Float;
 }
 
+static int64_t expected_float_to_i64(TestFloat32Bits Value) {
+  if (is_nan(Value.Bits))
+    return Value.Bits >> 31 ? INT64_MIN : INT64_MAX;
+  if ((double)Value.Float >= 9223372036854775808.0)
+    return INT64_MAX;
+  if ((double)Value.Float <= -9223372036854775808.0)
+    return INT64_MIN;
+  return (int64_t)(double)Value.Float;
+}
+
+static uint64_t expected_float_to_u64(TestFloat32Bits Value) {
+  uint32_t Exponent = (Value.Bits >> 23) & 0xff;
+  if ((Value.Bits >> 31) || Exponent < 127)
+    return 0;
+  if (Exponent >= 191)
+    return UINT64_MAX;
+  return (uint64_t)(double)Value.Float;
+}
+
 static int check(uint32_t LHSBits, uint32_t RHSBits) {
   TestFloat32Bits LHS = {.Bits = LHSBits};
   TestFloat32Bits RHS = {.Bits = RHSBits};
@@ -63,6 +82,21 @@ static int check(uint32_t LHSBits, uint32_t RHSBits) {
   if (UnsignedConverted != UnsignedExpected) {
     fprintf(stderr, "float-to-unsigned mismatch: %08x = %u, expected %u\n",
             LHSBits, UnsignedConverted, UnsignedExpected);
+    return 0;
+  }
+  int64_t WideConverted = __fixsfdi(LHS.Float);
+  int64_t WideExpected = expected_float_to_i64(LHS);
+  if (WideConverted != WideExpected) {
+    fprintf(stderr, "float-to-i64 mismatch: %08x = %lld, expected %lld\n",
+            LHSBits, (long long)WideConverted, (long long)WideExpected);
+    return 0;
+  }
+  uint64_t WideUnsignedConverted = __fixunssfdi(LHS.Float);
+  uint64_t WideUnsignedExpected = expected_float_to_u64(LHS);
+  if (WideUnsignedConverted != WideUnsignedExpected) {
+    fprintf(stderr, "float-to-u64 mismatch: %08x = %llu, expected %llu\n",
+            LHSBits, (unsigned long long)WideUnsignedConverted,
+            (unsigned long long)WideUnsignedExpected);
     return 0;
   }
 
@@ -120,7 +154,9 @@ static int check(uint32_t LHSBits, uint32_t RHSBits) {
   return 1;
 }
 
-static int check_integer_to_float(int32_t SignedValue, uint32_t UnsignedValue) {
+static int check_integer_to_float(int32_t SignedValue, uint32_t UnsignedValue,
+                                  int64_t WideSignedValue,
+                                  uint64_t WideUnsignedValue) {
   TestFloat32Bits SignedActual = {.Float = __floatsisf(SignedValue)};
   TestFloat32Bits SignedExpected = {.Float = (float)SignedValue};
   if (SignedActual.Bits != SignedExpected.Bits) {
@@ -134,6 +170,25 @@ static int check_integer_to_float(int32_t SignedValue, uint32_t UnsignedValue) {
   if (UnsignedActual.Bits != UnsignedExpected.Bits) {
     fprintf(stderr, "unsigned int-to-float mismatch: %u = %08x, expected %08x\n",
             UnsignedValue, UnsignedActual.Bits, UnsignedExpected.Bits);
+    return 0;
+  }
+
+  TestFloat32Bits WideSignedActual = {.Float = __floatdisf(WideSignedValue)};
+  TestFloat32Bits WideSignedExpected = {.Float = (float)WideSignedValue};
+  if (WideSignedActual.Bits != WideSignedExpected.Bits) {
+    fprintf(stderr, "signed i64-to-float mismatch: %lld = %08x, expected %08x\n",
+            (long long)WideSignedValue, WideSignedActual.Bits,
+            WideSignedExpected.Bits);
+    return 0;
+  }
+
+  TestFloat32Bits WideUnsignedActual = {
+      .Float = __floatundisf(WideUnsignedValue)};
+  TestFloat32Bits WideUnsignedExpected = {.Float = (float)WideUnsignedValue};
+  if (WideUnsignedActual.Bits != WideUnsignedExpected.Bits) {
+    fprintf(stderr, "unsigned i64-to-float mismatch: %llu = %08x, expected %08x\n",
+            (unsigned long long)WideUnsignedValue, WideUnsignedActual.Bits,
+            WideUnsignedExpected.Bits);
     return 0;
   }
   return 1;
@@ -151,6 +206,16 @@ int main(void) {
       if (!check(EdgeValues[I], EdgeValues[J]))
         return 1;
 
+  static const uint64_t WideEdges[] = {
+      0, 1, UINT64_C(0x00ffffff), UINT64_C(0x01000000),
+      UINT64_C(0x01000001), UINT64_C(0x7fffffffffffffff),
+      UINT64_C(0x8000000000000000), UINT64_MAX};
+  for (unsigned I = 0; I != sizeof(WideEdges) / sizeof(WideEdges[0]); ++I)
+    for (unsigned J = 0; J != sizeof(WideEdges) / sizeof(WideEdges[0]); ++J)
+      if (!check_integer_to_float((int32_t)WideEdges[I], (uint32_t)WideEdges[J],
+                                  (int64_t)WideEdges[I], WideEdges[J]))
+        return 1;
+
   static const int32_t SignedEdges[] = {
       INT32_MIN, INT32_MIN + 1, -16777217, -16777216, -1, 0, 1,
       16777215, 16777216, 16777217, INT32_MAX};
@@ -160,7 +225,8 @@ int main(void) {
   for (unsigned I = 0; I != sizeof(SignedEdges) / sizeof(SignedEdges[0]); ++I)
     for (unsigned J = 0; J != sizeof(UnsignedEdges) / sizeof(UnsignedEdges[0]);
          ++J)
-      if (!check_integer_to_float(SignedEdges[I], UnsignedEdges[J]))
+      if (!check_integer_to_float(SignedEdges[I], UnsignedEdges[J],
+                                  SignedEdges[I], UnsignedEdges[J]))
         return 1;
 
   uint32_t State = UINT32_C(0x12345678);
@@ -168,7 +234,10 @@ int main(void) {
     State = State * UINT32_C(1664525) + UINT32_C(1013904223);
     int32_t SignedValue = (int32_t)State;
     uint32_t UnsignedValue = State;
-    if (!check_integer_to_float(SignedValue, UnsignedValue))
+    State = State * UINT32_C(1664525) + UINT32_C(1013904223);
+    uint64_t WideValue = ((uint64_t)State << 32) | UnsignedValue;
+    if (!check_integer_to_float(SignedValue, UnsignedValue,
+                                (int64_t)WideValue, WideValue))
       return 3;
     uint32_t LHS = State;
     State = State * UINT32_C(1664525) + UINT32_C(1013904223);
