@@ -54,6 +54,12 @@ The CC2530 end-to-end test checks C compilation through Clang and LLD, followed
 by Intel HEX generation. Keep new MCS-51-specific tests inside this checkout,
 even when nearby test directories are symlinks to another LLVM checkout.
 
+For a standalone CC2530 image, use
+`llvm/lib/Target/MCS51/cc2530-build.sh source.c -o firmware.elf`. The script
+links the CC2530 reset startup and MCS-51 runtime with the application, then
+writes `firmware.hex` next to the ELF. `MCS51_CLANG` and `MCS51_OBJCOPY` can
+select non-default LLVM tool paths.
+
 The CC2530 common-flash/XDATA linker layout is
 `llvm/lib/Target/MCS51/cc2530.ld`. Pass it to Clang/LLD with
 `-Wl,-T,<path-to-cc2530.ld> -Wl,--no-check-sections`; the overlap is expected
