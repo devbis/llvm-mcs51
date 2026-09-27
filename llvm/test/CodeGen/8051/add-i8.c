@@ -103,6 +103,15 @@ signed char arithmetic_shift_variable(signed char value,
   return value >> amount;
 }
 
+// CHECK-LABEL: logical_shift_variable:
+// CHECK: clr c
+// CHECK: rrc a
+// CHECK: djnz
+unsigned char logical_shift_variable(unsigned char value,
+                                     unsigned char amount) {
+  return value >> amount;
+}
+
 // CHECK-LABEL: add_words:
 // CHECK: add a,
 // CHECK: addc a,

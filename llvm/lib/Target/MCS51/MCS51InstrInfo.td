@@ -38,6 +38,7 @@ def SDT_MCS51ShiftByteImm : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                                 SDTCisVT<2, i16>] >;
 def MCS51sra8_imm : SDNode<"MCS51ISD::SRA8_IMM", SDT_MCS51ShiftByteImm>;
 def MCS51sra8 : SDNode<"MCS51ISD::SRA8", SDT_MCS51ShiftByteImm>;
+def MCS51srl8 : SDNode<"MCS51ISD::SRL8", SDT_MCS51ShiftByteImm>;
 def MCS51srl16_8 : SDNode<"MCS51ISD::SRL16_8", SDT_MCS51ShiftWord8>;
 def MCS51shl16_8 : SDNode<"MCS51ISD::SHL16_8", SDT_MCS51ShiftWord8>;
 def SDT_MCS51ShiftWord : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
@@ -2216,6 +2217,20 @@ def SRA8rr : Instruction {
   let Defs = [B];
   let Pattern = [(set MCS51GPR8:$dst,
                       (MCS51sra8 MCS51GPR8:$lhs, MCS51PTR:$amount))];
+}
+def SRL8rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51PTR:$amount);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [B];
+  let Pattern = [(set MCS51GPR8:$dst,
+                      (MCS51srl8 MCS51GPR8:$lhs, MCS51PTR:$amount))];
 }
 
 def ZEXT8TO16 : Instruction {
