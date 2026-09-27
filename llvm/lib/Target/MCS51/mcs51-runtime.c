@@ -11,6 +11,11 @@ typedef union {
   uint32_t Bits;
 } Float32Bits;
 
+typedef volatile uint8_t __attribute__((address_space(2))) *MCS51IDataPtr;
+typedef volatile uint8_t __attribute__((address_space(3))) *MCS51PDataPtr;
+typedef volatile uint8_t __attribute__((address_space(4))) *MCS51XDataPtr;
+typedef const volatile uint8_t __attribute__((address_space(5))) *MCS51CodePtr;
+
 int32_t __unordsf2(float LHS, float RHS) {
   Float32Bits A = {.Float = LHS};
   Float32Bits B = {.Float = RHS};
@@ -977,4 +982,140 @@ uint16_t strlen(const char *String) {
   while (*End)
     ++End;
   return (uint16_t)(End - String);
+}
+
+// Generic pointers follow the classic MCS-51 three-byte encoding in the low
+// 24 bits: address in bits 0-15 and a memory-space tag in bits 16-23. The
+// compiler currently transports this value in a padded i32.
+static __attribute__((noinline)) uint8_t
+__mcs51_gptr_read_byte(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                       uint8_t Offset) {
+  uint16_t Address = (uint16_t)AddressLow | ((uint16_t)AddressHigh << 8);
+  Address += Offset;
+  if (Tag & 0x80)
+    return *(MCS51CodePtr)Address;
+  if (!(Tag & 0x40))
+    return *(MCS51XDataPtr)Address;
+  if (Tag & 0x20)
+    return *(MCS51PDataPtr)(uint8_t)Address;
+  return *(MCS51IDataPtr)(uint8_t)Address;
+}
+
+static __attribute__((noinline)) void
+__mcs51_gptr_write_byte(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                        uint8_t Offset, uint8_t Value) {
+  uint16_t Address = (uint16_t)AddressLow | ((uint16_t)AddressHigh << 8);
+  Address += Offset;
+  if (Tag & 0x80) {
+    // MCS-51 code memory is read-only. Match the established runtime
+    // behavior for attempts to write through a code-space generic pointer.
+    for (;;) {}
+  }
+  if (!(Tag & 0x40))
+    *(MCS51XDataPtr)Address = Value;
+  else if (Tag & 0x20)
+    *(MCS51PDataPtr)(uint8_t)Address = Value;
+  else
+    *(MCS51IDataPtr)(uint8_t)Address = Value;
+}
+
+uint16_t __mcs51_gptrget8(uint8_t AddressLow, uint8_t AddressHigh,
+                          uint8_t Tag, uint8_t Padding) {
+  (void)Padding;
+  return __mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 0);
+}
+
+uint16_t __mcs51_gptrget16(uint8_t AddressLow, uint8_t AddressHigh,
+                           uint8_t Tag, uint8_t Padding) {
+  (void)Padding;
+  return (uint16_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 0) |
+         ((uint16_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 1)
+          << 8);
+}
+
+uint32_t __mcs51_gptrget32(uint8_t AddressLow, uint8_t AddressHigh,
+                           uint8_t Tag, uint8_t Padding) {
+  (void)Padding;
+  return (uint32_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 0) |
+         ((uint32_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 1)
+          << 8) |
+         ((uint32_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 2)
+          << 16) |
+         ((uint32_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 3)
+          << 24);
+}
+
+uint64_t __mcs51_gptrget64(uint8_t AddressLow, uint8_t AddressHigh,
+                           uint8_t Tag, uint8_t Padding) {
+  (void)Padding;
+  return (uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 0) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 1)
+          << 8) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 2)
+          << 16) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 3)
+          << 24) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 4)
+          << 32) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 5)
+          << 40) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 6)
+          << 48) |
+         ((uint64_t)__mcs51_gptr_read_byte(AddressLow, AddressHigh, Tag, 7)
+          << 56);
+}
+
+float __mcs51_gptrgetf32(uint8_t AddressLow, uint8_t AddressHigh,
+                         uint8_t Tag, uint8_t Padding) {
+  (void)Padding;
+  Float32Bits Value = {
+      .Bits = __mcs51_gptrget32(AddressLow, AddressHigh, Tag, Padding)};
+  return Value.Float;
+}
+
+void __mcs51_gptrput8(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                     uint8_t Padding, uint8_t Value) {
+  (void)Padding;
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 0, Value);
+}
+
+void __mcs51_gptrput16(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                       uint8_t Padding, uint8_t ValueLow,
+                       uint8_t ValueHigh) {
+  (void)Padding;
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 0, ValueLow);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 1, ValueHigh);
+}
+
+void __mcs51_gptrput32(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                       uint8_t Padding, uint8_t Value0, uint8_t Value1,
+                       uint8_t Value2, uint8_t Value3) {
+  (void)Padding;
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 0, Value0);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 1, Value1);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 2, Value2);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 3, Value3);
+}
+
+void __mcs51_gptrput64(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                       uint8_t Padding, uint8_t Value0, uint8_t Value1,
+                       uint8_t Value2, uint8_t Value3, uint8_t Value4,
+                       uint8_t Value5, uint8_t Value6, uint8_t Value7) {
+  (void)Padding;
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 0, Value0);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 1, Value1);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 2, Value2);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 3, Value3);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 4, Value4);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 5, Value5);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 6, Value6);
+  __mcs51_gptr_write_byte(AddressLow, AddressHigh, Tag, 7, Value7);
+}
+
+void __mcs51_gptrputf32(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
+                        uint8_t Padding, uint8_t Value0, uint8_t Value1,
+                        uint8_t Value2, uint8_t Value3) {
+  (void)Padding;
+  __mcs51_gptrput32(AddressLow, AddressHigh, Tag, Padding, Value0, Value1,
+                    Value2, Value3);
 }

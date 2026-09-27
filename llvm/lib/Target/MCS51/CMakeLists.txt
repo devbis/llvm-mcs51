@@ -30,6 +30,7 @@ set_source_files_properties(mcs51-runtime.c PROPERTIES HEADER_FILE_ONLY TRUE)
 add_llvm_target(MCS51CodeGen
   MCS51AsmPrinter.cpp
   MCS51FrameLowering.cpp
+  MCS51GenericPointerLowering.cpp
   MCS51InstrInfo.cpp
   MCS51ISelDAGToDAG.cpp
   MCS51ISelLowering.cpp
