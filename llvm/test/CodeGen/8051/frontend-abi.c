@@ -2,10 +2,15 @@
 // RUN: clang -target mcs51 -S -emit-llvm -o - %s | FileCheck %s --check-prefix=IR
 // RUN: clang -target mcs51 -### -fsyntax-only %s 2>&1 | FileCheck %s --check-prefix=DEFAULT
 // RUN: clang -target mcs51 -fsigned-char -### -fsyntax-only %s 2>&1 | FileCheck %s --check-prefix=SIGNED --implicit-check-not=-fno-signed-char
+// RUN: clang -target mcs51 -mcpu=cc2530 -### %s -o %t 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=LINK --implicit-check-not=crt1.o \
+// RUN:       --implicit-check-not=crti.o --implicit-check-not=-lgcc \
+// RUN:       --implicit-check-not=-lc --implicit-check-not=-dynamic-linker
 
 // DEFAULT: "-cc1" "-triple" "mcs51"
 // DEFAULT-SAME: "-fno-signed-char"
 // SIGNED: "-cc1" "-triple" "mcs51"
+// LINK: {{ld.lld}}
 
 #ifndef __8051__
 #error "missing MCS-51 predefined macro"
