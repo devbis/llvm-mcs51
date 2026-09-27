@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <limits.h>
 
 #include "../../../lib/Target/MCS51/mcs51-runtime.c"
 
@@ -14,6 +15,25 @@ typedef union {
 static int is_nan(uint32_t Bits) {
   return (Bits & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000) &&
          (Bits & UINT32_C(0x007fffff));
+}
+
+static int32_t expected_float_to_i32(TestFloat32Bits Value) {
+  if (is_nan(Value.Bits))
+    return Value.Bits >> 31 ? INT32_MIN : INT32_MAX;
+  if (Value.Float >= 2147483648.0f)
+    return INT32_MAX;
+  if (Value.Float <= -2147483648.0f)
+    return INT32_MIN;
+  return (int32_t)(double)Value.Float;
+}
+
+static uint32_t expected_float_to_u32(TestFloat32Bits Value) {
+  uint32_t Exponent = (Value.Bits >> 23) & 0xff;
+  if ((Value.Bits >> 31) || Exponent < 127)
+    return 0;
+  if (Exponent >= 159)
+    return UINT32_MAX;
+  return (uint32_t)(double)Value.Float;
 }
 
 static int check(uint32_t LHSBits, uint32_t RHSBits) {
@@ -31,6 +51,20 @@ static int check(uint32_t LHSBits, uint32_t RHSBits) {
   TestFloat32Bits DifferenceExpected = {.Float = ExpectedDifference};
   TestFloat32Bits ProductExpected = {.Float = ExpectedProduct};
   TestFloat32Bits QuotientExpected = {.Float = ExpectedQuotient};
+  int32_t Converted = __fixsfsi(LHS.Float);
+  int32_t ConvertedExpected = expected_float_to_i32(LHS);
+  if (Converted != ConvertedExpected) {
+    fprintf(stderr, "float-to-int mismatch: %08x = %d, expected %d\n",
+            LHSBits, Converted, ConvertedExpected);
+    return 0;
+  }
+  uint32_t UnsignedConverted = __fixunssfsi(LHS.Float);
+  uint32_t UnsignedExpected = expected_float_to_u32(LHS);
+  if (UnsignedConverted != UnsignedExpected) {
+    fprintf(stderr, "float-to-unsigned mismatch: %08x = %u, expected %u\n",
+            LHSBits, UnsignedConverted, UnsignedExpected);
+    return 0;
+  }
 
   if (is_nan(SumExpected.Bits) ? !is_nan(Sum.Bits)
                                : SumExpected.Bits != Sum.Bits) {
