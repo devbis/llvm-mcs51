@@ -997,8 +997,8 @@ __mcs51_gptr_read_byte(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
   if (!(Tag & 0x40))
     return *(MCS51XDataPtr)Address;
   if (Tag & 0x20)
-    return *(MCS51PDataPtr)(uint8_t)Address;
-  return *(MCS51IDataPtr)(uint8_t)Address;
+    return *(MCS51PDataPtr)(uint16_t)(uint8_t)Address;
+  return *(MCS51IDataPtr)(uint16_t)(uint8_t)Address;
 }
 
 static __attribute__((noinline)) void
@@ -1014,9 +1014,9 @@ __mcs51_gptr_write_byte(uint8_t AddressLow, uint8_t AddressHigh, uint8_t Tag,
   if (!(Tag & 0x40))
     *(MCS51XDataPtr)Address = Value;
   else if (Tag & 0x20)
-    *(MCS51PDataPtr)(uint8_t)Address = Value;
+    *(MCS51PDataPtr)(uint16_t)(uint8_t)Address = Value;
   else
-    *(MCS51IDataPtr)(uint8_t)Address = Value;
+    *(MCS51IDataPtr)(uint16_t)(uint8_t)Address = Value;
 }
 
 uint16_t __mcs51_gptrget8(uint8_t AddressLow, uint8_t AddressHigh,
