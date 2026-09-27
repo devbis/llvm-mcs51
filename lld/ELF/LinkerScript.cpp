@@ -23,6 +23,7 @@
 #include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Strings.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Casting.h"
@@ -899,34 +900,73 @@ void LinkerScript::distributeMCS51AutoBankSections() {
   if (ctx.arg.emachine != EM_8051)
     return;
 
-  SmallVector<InputSectionBase *, 0> candidates;
+  bool hasInterruptVectors = false;
+  auto noteVector = [&](InputSectionBase *base) {
+    hasInterruptVectors |= base->name.starts_with(".mcs51.vector.");
+  };
+  for (InputSectionBase *base : ctx.inputSections)
+    noteVector(base);
   for (SectionCommand *cmd : sectionCommands) {
     auto *osd = dyn_cast<OutputDesc>(cmd);
-    if (!osd || !osd->osec.name.starts_with(".mcs51.autobank."))
+    if (!osd)
+      continue;
+    for (SectionCommand *subCmd : osd->osec.commands) {
+      auto *isd = dyn_cast<InputSectionDescription>(subCmd);
+      if (!isd)
+        continue;
+      for (InputSectionBase *section : isd->sectionBases)
+        noteVector(section);
+    }
+  }
+
+  std::array<OutputSection *, 7> banks{};
+  bool haveAllBanks = true;
+  for (unsigned bank = 0; bank != banks.size(); ++bank) {
+    std::string name = (Twine(".bank") + Twine(bank + 1)).str();
+    banks[bank] = findByName(sectionCommands, name);
+    haveAllBanks &= banks[bank] != nullptr;
+  }
+
+  struct Candidate {
+    InputSectionBase *section;
+    InputSectionDescription *source;
+  };
+  SmallVector<Candidate, 0> candidates;
+  for (SectionCommand *cmd : sectionCommands) {
+    auto *osd = dyn_cast<OutputDesc>(cmd);
+    if (!osd)
       continue;
     for (SectionCommand *subCmd : osd->osec.commands) {
       auto *isd = dyn_cast<InputSectionDescription>(subCmd);
       if (!isd)
         continue;
       for (InputSectionBase *section : isd->sectionBases) {
+        bool ExplicitAutoBank = section->name.starts_with(".mcs51.autobank.");
+        bool AutoText = haveAllBanks && section->name.starts_with(".text.") &&
+                        section->name != ".text.main" &&
+                        !section->name.starts_with(".text.main.") &&
+                        !section->name.starts_with(".text.startup") &&
+                        !section->name.starts_with(".text.bankthunks.") &&
+                        !section->name.starts_with(".text.autobankthunks.") &&
+                        !hasInterruptVectors;
+        if (!ExplicitAutoBank && !AutoText)
+          continue;
         if (!(section->flags & SHF_EXECINSTR)) {
           Err(ctx) << "MCS-51 automatic bank section '" << section->name
                    << "' is not executable";
           continue;
         }
-        candidates.push_back(section);
+        candidates.push_back({section, isd});
       }
     }
   }
   if (candidates.empty())
     return;
 
-  std::array<OutputSection *, 7> banks{};
   std::array<InputSectionDescription *, 7> bankDescriptions{};
   std::array<uint64_t, 7> bankSizes{};
   for (unsigned bank = 0; bank != banks.size(); ++bank) {
     std::string name = (Twine(".bank") + Twine(bank + 1)).str();
-    banks[bank] = findByName(sectionCommands, name);
     if (!banks[bank]) {
       Err(ctx) << "MCS-51 automatic banking requires output section '" << name
                << "'";
@@ -945,17 +985,18 @@ void LinkerScript::distributeMCS51AutoBankSections() {
     }
   }
 
-  llvm::sort(candidates, [](InputSectionBase *lhs, InputSectionBase *rhs) {
-    if (lhs->getSize() != rhs->getSize())
-      return lhs->getSize() > rhs->getSize();
-    return lhs->name < rhs->name;
+  llvm::sort(candidates, [](const Candidate &lhs, const Candidate &rhs) {
+    if (lhs.section->getSize() != rhs.section->getSize())
+      return lhs.section->getSize() > rhs.section->getSize();
+    return lhs.section->name < rhs.section->name;
   });
 
-  for (InputSectionBase *candidate : candidates) {
+  for (const Candidate &candidate : candidates) {
     unsigned bank = llvm::min_element(bankSizes) - bankSizes.begin();
-    bankDescriptions[bank]->sectionBases.push_back(candidate);
-    candidate->parent = banks[bank];
-    bankSizes[bank] += candidate->getSize();
+    bankDescriptions[bank]->sectionBases.push_back(candidate.section);
+    candidate.section->parent = banks[bank];
+    bankSizes[bank] += candidate.section->getSize();
+    llvm::erase(candidate.source->sectionBases, candidate.section);
   }
 
   llvm::erase_if(sectionCommands, [](SectionCommand *cmd) {

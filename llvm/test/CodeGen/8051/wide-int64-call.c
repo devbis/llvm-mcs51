@@ -30,11 +30,11 @@ int main(void) { return (int)forward64(0x123456789abcdef0ull, 0x2345); }
 #endif
 
 // CHECK-LABEL: forward64:
-// CHECK: lcall helper
+// CHECK: lcall __mcs51_bankcall_helper
 // CHECK: ret
 
+// LINK-LABEL: <helper>:
+// LINK: ret
 // LINK-LABEL: <forward64>:
 // LINK-COUNT-8: push 224
 // LINK: lcall
-// LINK-LABEL: <helper>:
-// LINK: ret
