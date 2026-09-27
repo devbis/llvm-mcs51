@@ -96,23 +96,35 @@ signed char arithmetic_shift_one(signed char value) { return value >> 1; }
 signed char arithmetic_shift_two(signed char value) { return value >> 2; }
 
 // CHECK-LABEL: arithmetic_shift_variable:
+// CHECK: mov a, r6
+// CHECK-NEXT: mov 240, a
+// CHECK-NEXT: clr c
+// CHECK-NEXT: subb a, #8
 // CHECK: mov c, 231
-// CHECK: djnz
+// CHECK: djnz 240
 signed char arithmetic_shift_variable(signed char value,
                                        unsigned char amount) {
   return value >> amount;
 }
 
 // CHECK-LABEL: logical_shift_variable:
+// CHECK: mov a, r6
+// CHECK-NEXT: mov 240, a
+// CHECK-NEXT: clr c
+// CHECK-NEXT: subb a, #8
 // CHECK: clr c
 // CHECK: rrc a
-// CHECK: djnz
+// CHECK: djnz 240
 unsigned char logical_shift_variable(unsigned char value,
                                      unsigned char amount) {
   return value >> amount;
 }
 
 // CHECK-LABEL: left_shift_variable:
+// CHECK: mov a, r6
+// CHECK-NEXT: mov 240, a
+// CHECK-NEXT: clr c
+// CHECK-NEXT: subb a, #8
 // CHECK: clr c
 // CHECK: rlc a
 // CHECK-NOT: mov b, a

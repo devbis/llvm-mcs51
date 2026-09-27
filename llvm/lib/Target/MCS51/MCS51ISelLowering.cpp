@@ -927,26 +927,50 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
     if (Shift.getOpcode() == ISD::SRA &&
         Shift.getValueType() == MVT::i16 &&
         Shift.getOperand(0).getOpcode() == ISD::SIGN_EXTEND &&
-        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8)
-      return DCI.DAG.getNode(MCS51ISD::SRA8, SDLoc(N), MVT::i8,
+        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8) {
+      SDValue Amount = Shift.getOperand(1);
+      bool NarrowAmount =
+          (Amount.getOpcode() == ISD::ZERO_EXTEND ||
+           Amount.getOpcode() == ISD::SIGN_EXTEND) &&
+          Amount.getOperand(0).getValueType() == MVT::i8;
+      return DCI.DAG.getNode(NarrowAmount ? MCS51ISD::SRA8_REG
+                                          : MCS51ISD::SRA8,
+                             SDLoc(N), MVT::i8,
                              Shift.getOperand(0).getOperand(0),
-                             Shift.getOperand(1));
+                             NarrowAmount ? Amount.getOperand(0) : Amount);
+    }
     if (Shift.getOpcode() == ISD::SRL &&
         Shift.getValueType() == MVT::i16 &&
         Shift.getOperand(0).getOpcode() == ISD::ZERO_EXTEND &&
-        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8)
-      return DCI.DAG.getNode(MCS51ISD::SRL8, SDLoc(N), MVT::i8,
+        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8) {
+      SDValue Amount = Shift.getOperand(1);
+      bool NarrowAmount =
+          (Amount.getOpcode() == ISD::ZERO_EXTEND ||
+           Amount.getOpcode() == ISD::SIGN_EXTEND) &&
+          Amount.getOperand(0).getValueType() == MVT::i8;
+      return DCI.DAG.getNode(NarrowAmount ? MCS51ISD::SRL8_REG
+                                          : MCS51ISD::SRL8,
+                             SDLoc(N), MVT::i8,
                              Shift.getOperand(0).getOperand(0),
-                             Shift.getOperand(1));
+                             NarrowAmount ? Amount.getOperand(0) : Amount);
+    }
     if ((Shift.getOpcode() == ISD::SHL ||
          Shift.getOpcode() == MCS51ISD::SHL16) &&
         Shift.getValueType() == MVT::i16 &&
         (Shift.getOperand(0).getOpcode() == ISD::SIGN_EXTEND ||
          Shift.getOperand(0).getOpcode() == ISD::ZERO_EXTEND) &&
-        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8)
-      return DCI.DAG.getNode(MCS51ISD::SHL8, SDLoc(N), MVT::i8,
+        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8) {
+      SDValue Amount = Shift.getOperand(1);
+      bool NarrowAmount =
+          (Amount.getOpcode() == ISD::ZERO_EXTEND ||
+           Amount.getOpcode() == ISD::SIGN_EXTEND) &&
+          Amount.getOperand(0).getValueType() == MVT::i8;
+      return DCI.DAG.getNode(NarrowAmount ? MCS51ISD::SHL8_REG
+                                          : MCS51ISD::SHL8,
+                             SDLoc(N), MVT::i8,
                              Shift.getOperand(0).getOperand(0),
-                             Shift.getOperand(1));
+                             NarrowAmount ? Amount.getOperand(0) : Amount);
+    }
     return SDValue();
   }
   if (N->getOpcode() != ISD::SUB || N->getValueType(0) != MVT::i16)
@@ -2691,16 +2715,26 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::SRA8rr || MI.getOpcode() == MCS51::SRL8rr ||
-      MI.getOpcode() == MCS51::SHL8rr) {
+      MI.getOpcode() == MCS51::SHL8rr ||
+      MI.getOpcode() == MCS51::SRA8rrReg ||
+      MI.getOpcode() == MCS51::SRL8rrReg ||
+      MI.getOpcode() == MCS51::SHL8rrReg) {
     MachineFunction &MF = *MBB->getParent();
-    bool IsArithmetic = MI.getOpcode() == MCS51::SRA8rr;
-    bool IsLeft = MI.getOpcode() == MCS51::SHL8rr;
+    bool IsNarrowCount = MI.getOpcode() == MCS51::SRA8rrReg ||
+                         MI.getOpcode() == MCS51::SRL8rrReg ||
+                         MI.getOpcode() == MCS51::SHL8rrReg;
+    bool IsArithmetic = MI.getOpcode() == MCS51::SRA8rr ||
+                        MI.getOpcode() == MCS51::SRA8rrReg;
+    bool IsLeft = MI.getOpcode() == MCS51::SHL8rr ||
+                  MI.getOpcode() == MCS51::SHL8rrReg;
     Register Dst = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();
     Register Amount = MI.getOperand(2).getReg();
     MachineBasicBlock *Tail = MBB->splitAt(MI);
-    MachineBasicBlock *CheckLow =
-        MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *CheckLow = IsNarrowCount
+                                      ? nullptr
+                                      : MF.CreateMachineBasicBlock(
+                                            MBB->getBasicBlock());
     MachineBasicBlock *CheckCount =
         MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *Saturate =
@@ -2713,35 +2747,53 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *ZeroShift =
         MF.CreateMachineBasicBlock(MBB->getBasicBlock());
-    for (MachineBasicBlock *Block : {CheckLow, CheckCount, StartShift,
-                                     ShiftLoop, ShiftDone, ZeroShift,
-                                     Saturate})
+    if (CheckLow)
+      MF.insert(Tail->getIterator(), CheckLow);
+    for (MachineBasicBlock *Block : {CheckCount, StartShift, ShiftLoop,
+                                     ShiftDone, ZeroShift, Saturate})
       MF.insert(Tail->getIterator(), Block);
 
-    BuildMI(*MBB, MBB->end(), DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .addReg(Amount);
-    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x83);
-    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(Saturate);
-    BuildMI(*CheckLow, CheckLow->end(), DL,
-            TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82);
-    BuildMI(*CheckLow, CheckLow->end(), DL, TII.get(MCS51::CLR_C));
-    BuildMI(*CheckLow, CheckLow->end(), DL,
-            TII.get(MCS51::SUBB_A_IMM), MCS51::A)
-        .addImm(8);
-    BuildMI(*CheckLow, CheckLow->end(), DL, TII.get(MCS51::JNC))
-        .addMBB(Saturate);
+    if (IsNarrowCount) {
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN))
+          .addReg(Amount);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_DIRECT_A))
+          .addImm(0xF0);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A)
+          .addImm(8);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNC)).addMBB(Saturate);
+    } else {
+      BuildMI(*MBB, MBB->end(), DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Amount);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(Saturate);
+      BuildMI(*CheckLow, CheckLow->end(), DL,
+              TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*CheckLow, CheckLow->end(), DL, TII.get(MCS51::CLR_C));
+      BuildMI(*CheckLow, CheckLow->end(), DL,
+              TII.get(MCS51::SUBB_A_IMM), MCS51::A)
+          .addImm(8);
+      BuildMI(*CheckLow, CheckLow->end(), DL, TII.get(MCS51::JNC))
+          .addMBB(Saturate);
+    }
 
-    BuildMI(*CheckCount, CheckCount->end(), DL,
-            TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82);
-    BuildMI(*CheckCount, CheckCount->end(), DL,
-            TII.get(MCS51::MOV_DIRECT_A))
-        .addImm(0xF0);
-    BuildMI(*CheckCount, CheckCount->end(), DL,
-            TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0xF0);
+    if (IsNarrowCount) {
+      BuildMI(*CheckCount, CheckCount->end(), DL,
+              TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    } else {
+      BuildMI(*CheckCount, CheckCount->end(), DL,
+              TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*CheckCount, CheckCount->end(), DL,
+              TII.get(MCS51::MOV_DIRECT_A))
+          .addImm(0xF0);
+      BuildMI(*CheckCount, CheckCount->end(), DL,
+              TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    }
     BuildMI(*CheckCount, CheckCount->end(), DL, TII.get(MCS51::JZ))
         .addMBB(ZeroShift);
 
@@ -2792,12 +2844,16 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         Block->removeSuccessor(Block->succ_begin());
     };
     ClearSuccessors(MBB);
-    MBB->addSuccessor(CheckLow);
+    MBB->addSuccessor(IsNarrowCount ? CheckCount : CheckLow);
     MBB->addSuccessor(Saturate);
-    CheckLow->addSuccessor(CheckCount);
-    CheckLow->addSuccessor(Saturate);
+    if (CheckLow) {
+      CheckLow->addSuccessor(CheckCount);
+      CheckLow->addSuccessor(Saturate);
+    }
     CheckCount->addSuccessor(ZeroShift);
     CheckCount->addSuccessor(StartShift);
+    if (IsNarrowCount)
+      CheckCount->addLiveIn(MCS51::B);
     StartShift->addSuccessor(ShiftLoop);
     ShiftLoop->addSuccessor(ShiftLoop);
     ShiftLoop->addSuccessor(ShiftDone);
