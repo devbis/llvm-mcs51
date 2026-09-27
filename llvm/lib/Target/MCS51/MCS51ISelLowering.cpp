@@ -85,7 +85,7 @@ EVT MCS51TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
 
 MVT MCS51TargetLowering::getRegisterTypeForCallingConv(
     LLVMContext &Context, CallingConv::ID CC, EVT VT) const {
-  if (VT == MVT::i32 || VT == MVT::i64)
+  if (VT == MVT::i32 || VT == MVT::i64 || VT == MVT::f32)
     return MVT::i8;
   return TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT);
 }
@@ -96,6 +96,8 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
     return 4;
   if (VT == MVT::i64)
     return 8;
+  if (VT == MVT::f32)
+    return 4;
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
@@ -710,12 +712,13 @@ SDValue MCS51TargetLowering::LowerCall(
   };
 
   if (CLI.RetTy && (CLI.RetTy->isIntegerTy(32) ||
-                    CLI.RetTy->isIntegerTy(64))) {
+                    CLI.RetTy->isIntegerTy(64) ||
+                    CLI.RetTy->isFloatTy())) {
     bool IsI64 = CLI.RetTy->isIntegerTy(64);
     unsigned NumParts = IsI64 ? 8 : 4;
     if (CLI.Ins.size() != NumParts)
       report_fatal_error(IsI64 ? "unexpected MCS-51 i64 return parts"
-                               : "unexpected MCS-51 i32 return parts");
+                               : "unexpected MCS-51 32-bit return parts");
     static constexpr Register I32ReturnRegs[] = {MCS51::R4, MCS51::R5,
                                                   MCS51::R6, MCS51::R7};
     static constexpr Register I64ReturnRegs[] = {
@@ -754,7 +757,9 @@ bool MCS51TargetLowering::CanLowerReturn(
   return Outs.empty() ||
          (Outs.size() == 1 &&
           (Outs.front().VT == MVT::i8 || Outs.front().VT == MVT::i16)) ||
-         (Outs.size() == 4 && Outs.front().ArgVT == MVT::i32 &&
+         (Outs.size() == 4 &&
+          (Outs.front().ArgVT == MVT::i32 ||
+           Outs.front().ArgVT == MVT::f32) &&
           llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
             return Arg.VT == MVT::i8;
           })) ||
@@ -776,7 +781,8 @@ SDValue MCS51TargetLowering::LowerReturn(
       report_fatal_error("MCS-51 interrupt handlers must return void");
     return DAG.getNode(MCS51ISD::RET_INTERRUPT, DL, MVT::Other, Chain);
   }
-  if (Outs.size() == 4 && Outs.front().ArgVT == MVT::i32) {
+  if (Outs.size() == 4 &&
+      (Outs.front().ArgVT == MVT::i32 || Outs.front().ArgVT == MVT::f32)) {
     bool AllConstant = llvm::all_of(OutVals, [](SDValue Value) {
       return isa<ConstantSDNode>(Value);
     });
