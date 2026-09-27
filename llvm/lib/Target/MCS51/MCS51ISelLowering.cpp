@@ -295,6 +295,19 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if ((Op.getOpcode() == ISD::SRA || Op.getOpcode() == ISD::SRL ||
        Op.getOpcode() == ISD::SHL) &&
       Op.getValueType() == MVT::i16) {
+    if (Op.getOpcode() == ISD::SHL && Op.getNode()->hasOneUse() &&
+        (Op.getOperand(0).getOpcode() == ISD::SIGN_EXTEND ||
+         Op.getOperand(0).getOpcode() == ISD::ZERO_EXTEND) &&
+        Op.getOperand(0).getOperand(0).getValueType() == MVT::i8) {
+      SDNode *User = Op.getNode()->use_begin()->getUser();
+      if (User->getOpcode() == ISD::TRUNCATE &&
+          User->getValueType(0) == MVT::i8 &&
+          User->getOperand(0) == Op)
+        return DAG.getNode(
+            ISD::ZERO_EXTEND, DL, MVT::i16,
+            DAG.getNode(MCS51ISD::SHL8, DL, MVT::i8,
+                        Op.getOperand(0).getOperand(0), Op.getOperand(1)));
+    }
     auto *Amount = dyn_cast<ConstantSDNode>(Op.getOperand(1));
     if (Op.getOpcode() != ISD::SRA && Amount &&
         Amount->getZExtValue() == 8) {
@@ -925,7 +938,8 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
       return DCI.DAG.getNode(MCS51ISD::SRL8, SDLoc(N), MVT::i8,
                              Shift.getOperand(0).getOperand(0),
                              Shift.getOperand(1));
-    if (Shift.getOpcode() == ISD::SHL &&
+    if ((Shift.getOpcode() == ISD::SHL ||
+         Shift.getOpcode() == MCS51ISD::SHL16) &&
         Shift.getValueType() == MVT::i16 &&
         (Shift.getOperand(0).getOpcode() == ISD::SIGN_EXTEND ||
          Shift.getOperand(0).getOpcode() == ISD::ZERO_EXTEND) &&
