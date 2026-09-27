@@ -102,7 +102,7 @@ no:
 ; CHECK-LABEL: choose:
 ; CHECK: mov a, r7
 ; CHECK: j{{n?z}}
-; CHECK: ljmp
+; CHECK: sjmp
 ; CHECK: mov a, #1
 ; CHECK: ret
 ; CHECK: mov a, #2
@@ -118,7 +118,7 @@ no:
 ; DIS-LABEL: <choose>:
 ; DIS: mov a, r7
 ; DIS: jz
-; DIS: ljmp
+; DIS: sjmp
 
 ; CHECK-LABEL: choose_const:
 ; CHECK: mov a, r7
