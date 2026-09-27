@@ -104,6 +104,14 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MachineBasicBlock::iterator I = MI.getIterator();
     const DebugLoc &DL = MI.getDebugLoc();
     Register RetVal = MI.getOperand(0).getReg();
+    if (RetVal != MCS51::A && I != MBB.begin()) {
+      MachineBasicBlock::iterator Prev = std::prev(I);
+      if (Prev->getOpcode() == MCS51::MOV_RN_A &&
+          Prev->getOperand(0).getReg() == RetVal) {
+        Prev->eraseFromParent();
+        RetVal = MCS51::A;
+      }
+    }
     if (RetVal != MCS51::A)
       BuildMI(MBB, I, DL, get(MCS51::MOV_A_RN))
           .addReg(RetVal, getKillRegState(MI.getOperand(0).isKill()));

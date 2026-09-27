@@ -38,12 +38,12 @@ u8 call_indirect_with_stack_arg(u8 (*fn)(u8, u8, u8, u8, u8), u8 a, u8 b,
 // CHECK: jmp @a+dptr
 
 // DIS-LABEL: <call_indirect>:
-// DIS: lcall 158
+// DIS: lcall {{[0-9]+}}
 // DIS: ret
 // DIS: mov a, 129
 // DIS: jmp @a+dptr
 // DIS-LABEL: <call_indirect_with_arg>:
-// DIS: lcall 202
+// DIS: lcall {{[0-9]+}}
 // DIS: ret
 // DIS: mov a, 129
 // DIS: jmp @a+dptr
