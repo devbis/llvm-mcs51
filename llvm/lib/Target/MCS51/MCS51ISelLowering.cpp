@@ -1200,12 +1200,34 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::ADDDPTR16ri) {
+    MachineFunction &MF = *MBB->getParent();
     Register Dst = MI.getOperand(0).getReg();
-    int64_t Amount = MI.getOperand(2).getImm();
+    Register Src = MI.getOperand(1).getReg();
+    uint16_t Amount = static_cast<uint16_t>(MI.getOperand(2).getImm());
+    if (Amount == 0) {
+      MF.getRegInfo().replaceRegWith(Dst, Src);
+      MI.eraseFromParent();
+      return MBB;
+    }
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .add(MI.getOperand(1));
-    for (int64_t I = 0; I < Amount; ++I)
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+        .addReg(Src);
+    if (Amount <= 11) {
+      for (unsigned I = 0; I < Amount; ++I)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+    } else {
+      uint8_t Low = static_cast<uint8_t>(Amount);
+      uint8_t High = static_cast<uint8_t>(Amount >> 8);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+          .addImm(Low);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IMM), MCS51::A)
+          .addImm(High);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+    }
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
     MI.eraseFromParent();
