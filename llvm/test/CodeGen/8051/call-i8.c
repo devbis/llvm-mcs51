@@ -130,8 +130,8 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: pop 240
 // CHECK: ret
 
-// RELOC: R_8051_16 callee 0x0
-// RELOC: R_8051_16 callee_word 0x0
-// RELOC: R_8051_16 callee_word_arg 0x0
-// RELOC: R_8051_16 callee5 0x0
-// RELOC: R_8051_16 callee6_word 0x0
+// RELOC: R_8051_16_BE callee 0x0
+// RELOC: R_8051_16_BE callee_word 0x0
+// RELOC: R_8051_16_BE callee_word_arg 0x0
+// RELOC: R_8051_16_BE callee5 0x0
+// RELOC: R_8051_16_BE callee6_word 0x0

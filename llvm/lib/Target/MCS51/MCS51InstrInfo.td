@@ -536,7 +536,12 @@ def MCS51Direct8 : Operand<i8>,
 def MCS51Addr16 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm16OpValue";
-  let DecoderMethod = "DecodeImm16";
+}
+
+def MCS51Addr16BE : Operand<OtherVT> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm16BEOpValue";
+  let DecoderMethod = "DecodeImm16BE";
 }
 
 def MCS51Addr11 : Operand<OtherVT> {
@@ -549,7 +554,13 @@ def MCS51Imm16 : Operand<i16>,
                  ImmLeaf<i16, "return isUInt<16>(Imm) || isInt<16>(Imm);"> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getImm16OpValue";
-  let DecoderMethod = "DecodeImm16";
+}
+
+def MCS51Imm16BE : Operand<i16>,
+                   ImmLeaf<i16, "return isUInt<16>(Imm) || isInt<16>(Imm);"> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm16BEOpValue";
+  let DecoderMethod = "DecodeImm16BE";
 }
 
 def MCS51Imm16NotOne : Operand<i16>,
@@ -1178,7 +1189,7 @@ class MCS51Abs16Inst<bits<8> opcode, string mnemonic, Operand Address>
   let Inst{23-8} = addr;
 }
 
-def LJMP : MCS51Abs16Inst<0x02, "ljmp", MCS51Addr16> {
+def LJMP : MCS51Abs16Inst<0x02, "ljmp", MCS51Addr16BE> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
 
@@ -1203,7 +1214,7 @@ let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
 def ACALL : MCS51Abs11Inst<0b10001, "acall">;
 let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
     Uses = [SP], isCall = 1 in
-def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16> {
+def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
 }
 
@@ -1232,7 +1243,7 @@ def : Pat<(MCS51icall (i16 MCS51PTR:$target)), (ICALL MCS51PTR:$target)>;
 def MOV_DPTR_IMM : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51Imm16:$imm);
+  let InOperandList = (ins MCS51Imm16BE:$imm);
   let AsmString = "mov dptr, #$imm";
   let Size = 3;
   let hasSideEffects = 0;
@@ -1242,7 +1253,7 @@ def MOV_DPTR_IMM : Instruction {
   bits<24> Inst;
   let Inst{7-0} = 0x90;
   let Inst{23-8} = imm;
-  let Pattern = [(set MCS51PTR:$dst, MCS51Imm16:$imm)];
+  let Pattern = [(set MCS51PTR:$dst, MCS51Imm16BE:$imm)];
 }
 
 def : Pat<(i16 tglobaladdr:$addr), (MOV_DPTR_IMM tglobaladdr:$addr)>;
