@@ -9,6 +9,7 @@
 // RUN:       --implicit-check-not=eh-frame-hdr
 
 // DEFAULT: "-cc1" "-triple" "mcs51"
+// DEFAULT-SAME: "-ffreestanding"
 // DEFAULT-SAME: "-fno-signed-char"
 // SIGNED: "-cc1" "-triple" "mcs51"
 // LINK: {{ld.lld}}
@@ -19,6 +20,9 @@
 #endif
 #ifndef __CHAR_UNSIGNED__
 #error "plain char must be unsigned on MCS-51"
+#endif
+#if __STDC_HOSTED__ != 0
+#error "MCS-51 is a freestanding target by default"
 #endif
 
 _Static_assert(sizeof(void *) == 2, "near pointers are 16-bit");

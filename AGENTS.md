@@ -53,8 +53,8 @@ cmake --build ../llvm-8051-build \
 The CC2530 end-to-end test checks C compilation through Clang and LLD, followed
 by Intel HEX generation. Keep new MCS-51-specific tests inside this checkout,
 even when nearby test directories are symlinks to another LLVM checkout. The
-Clang driver treats MCS-51 links as static bare-metal links and does not add
-hosted startup files or default system libraries.
+Clang driver defaults MCS-51 compilation to freestanding mode and uses static
+bare-metal links without hosted startup files or default system libraries.
 
 For a standalone CC2530 image, use
 `llvm/lib/Target/MCS51/cc2530-build.sh source.c -o firmware.elf`. The script
