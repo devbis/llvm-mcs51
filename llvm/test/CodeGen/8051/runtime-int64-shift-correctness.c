@@ -2,6 +2,7 @@
 // RUN: %t
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "../../../lib/Target/MCS51/mcs51-runtime.c"
 
@@ -19,10 +20,21 @@ static int check(uint64_t Value, int Count) {
       ExpectedArithmeticRight |= UINT64_MAX << (64 - Count);
   }
 
-  if (__ashldi3(Value, Count) != ExpectedLeft ||
-      __lshrdi3(Value, Count) != ExpectedLogicalRight ||
-      (uint64_t)__ashrdi3((int64_t)Value, Count) != ExpectedArithmeticRight)
+  uint64_t ActualLeft = __ashldi3(Value, Count);
+  uint64_t ActualLogicalRight = __lshrdi3(Value, Count);
+  uint64_t ActualArithmeticRight = (uint64_t)__ashrdi3((int64_t)Value, Count);
+  if (ActualLeft != ExpectedLeft || ActualLogicalRight != ExpectedLogicalRight ||
+      ActualArithmeticRight != ExpectedArithmeticRight) {
+    fprintf(stderr, "shift mismatch: %016llx by %d: %016llx/%016llx, "
+                    "%016llx/%016llx, %016llx/%016llx\n",
+            (unsigned long long)Value, Count, (unsigned long long)ActualLeft,
+            (unsigned long long)ExpectedLeft,
+            (unsigned long long)ActualLogicalRight,
+            (unsigned long long)ExpectedLogicalRight,
+            (unsigned long long)ActualArithmeticRight,
+            (unsigned long long)ExpectedArithmeticRight);
     return 0;
+  }
   return 1;
 }
 
