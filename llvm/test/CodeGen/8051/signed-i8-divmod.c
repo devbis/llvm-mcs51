@@ -1,7 +1,13 @@
 // RUN: clang -target mcs51 -O2 -S %s -o - | FileCheck %s
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin -mllvm -verify-machineinstrs -c %s -o %t.user.o
-// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin -mllvm -verify-machineinstrs -c %S/../../../lib/Target/MCS51/mcs51-runtime.c -o %t.runtime.o
-// RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld -Wl,--no-check-sections %S/../../../lib/Target/MCS51/cc2530_startup.s %t.user.o %t.runtime.o -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
+// RUN:   -ffunction-sections -fdata-sections -mllvm -verify-machineinstrs \
+// RUN:   -c %S/../../../lib/Target/MCS51/mcs51-runtime.c -o %t.runtime.o
+// RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
+// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
+// RUN:   -Wl,--no-check-sections -Wl,--gc-sections \
+// RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s \
+// RUN:   %t.user.o %t.runtime.o -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 
 __attribute__((noinline)) signed char
