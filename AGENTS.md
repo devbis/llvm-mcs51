@@ -59,6 +59,9 @@ Building `mcs51-runtime` compiles the arithmetic runtime and CC2530 startup
 objects into Clang's resource directory. With those files present,
 `clang -target mcs51 -mcpu=cc2530 app.c -o firmware.elf` automatically links
 the runtime, startup, CC2530 linker script, and section garbage collection.
+CC2530 compilation enables function and data sections so link-time garbage
+collection can discard unused firmware functions and globals. Pass
+`-fno-function-sections` or `-fno-data-sections` to override either default.
 Use `llvm-objcopy --output-target=ihex firmware.elf firmware.hex` to emit Intel
 HEX. `-nostdlib` disables this automatic CC2530 profile.
 
