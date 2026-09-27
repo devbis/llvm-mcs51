@@ -67,6 +67,32 @@ unsigned char read_via_idata_cast(generic_const_byte_ptr Pointer) {
   return *(__idata const volatile unsigned char *)Pointer;
 }
 
+generic_const_byte_ptr generic_code_address(void) {
+  return (generic_const_byte_ptr)&code_byte;
+}
+
+generic_const_byte_ptr generic_xdata_address(void) {
+  return (generic_const_byte_ptr)&xdata_byte;
+}
+
+generic_const_byte_ptr generic_pdata_address(void) {
+  return (generic_const_byte_ptr)&pdata_byte;
+}
+
+generic_const_byte_ptr generic_idata_address(void) {
+  return (generic_const_byte_ptr)&idata_byte;
+}
+
+__attribute__((noinline)) unsigned char load_via_generic(
+    generic_const_byte_ptr Pointer) {
+  return *Pointer;
+}
+
+unsigned char read_generic_stack(void) {
+  volatile unsigned char Local = 0x5a;
+  return load_via_generic((generic_const_byte_ptr)&Local);
+}
+
 void store_generic_float(generic_float_ptr Pointer, float Value) {
   *Pointer = Value;
 }
@@ -108,21 +134,25 @@ int main(void) {
 // ASM-LABEL: load_generic_float:
 // ASM: lcall __mcs51_gptrgetf32
 // ASM-LABEL: read_generic_code:
-// ASM: mov a, #-128
-// ASM: lcall __mcs51_gptrget8
+// ASM: movc a, @a+dptr
 // ASM-LABEL: read_generic_xdata:
-// ASM: lcall __mcs51_gptrget8
+// ASM: movx a, @dptr
 // ASM-LABEL: read_generic_pdata:
-// ASM: mov a, #96
-// ASM: lcall __mcs51_gptrget8
+// ASM: movx a, @r
 // ASM-LABEL: read_generic_idata:
-// ASM: mov a, #64
-// ASM: lcall __mcs51_gptrget8
+// ASM: mov a, @r
 // ASM-LABEL: read_generic_idata_global:
-// ASM: mov a, #64
-// ASM: lcall __mcs51_gptrget8
+// ASM: mov a, @r
 // ASM-LABEL: read_via_idata_cast:
 // ASM: mov a, @r
+// ASM-LABEL: generic_code_address:
+// ASM: mov a, #-128
+// ASM-LABEL: generic_pdata_address:
+// ASM: mov a, #96
+// ASM-LABEL: generic_idata_address:
+// ASM: mov a, #64
+// ASM-LABEL: read_generic_stack:
+// ASM: mov a, #64
 // ASM-LABEL: store_generic_float:
 // ASM: lcall __mcs51_gptrputf32
 // LINK: Name: __mcs51_gptrget8
