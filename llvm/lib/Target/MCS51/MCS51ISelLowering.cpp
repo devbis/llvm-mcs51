@@ -886,7 +886,8 @@ SDValue MCS51TargetLowering::LowerReturn(
     Ops.append(OutVals.begin(), OutVals.end());
     return DAG.getNode(MCS51ISD::RET_I64, DL, MVT::Other, Ops);
   } else if (!OutVals.empty() &&
-             (DAG.getMachineFunction().getFunction().getReturnType()
+             (Outs.front().VT == MVT::i8 ||
+              DAG.getMachineFunction().getFunction().getReturnType()
                   ->isIntegerTy(1) ||
               DAG.getMachineFunction().getFunction().getReturnType()
                   ->isIntegerTy(8))) {
@@ -2820,8 +2821,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::TRUNC16TO8) {
+    Register Src = MI.getOperand(1).getReg();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82);
+        .addImm(0x82)
+        .addReg(Src, RegState::Implicit);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
     MI.eraseFromParent();

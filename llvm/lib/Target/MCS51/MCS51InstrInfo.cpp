@@ -27,9 +27,29 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     BuildMI(MBB, MI, DL, get(Opcode)).addReg(SrcReg, getKillRegState(KillSrc));
     return;
   }
+  if (DestReg == MCS51::DPTR &&
+      (SrcReg == MCS51::A || MCS51::MCS51GPR8RegClass.contains(SrcReg))) {
+    if (SrcReg != MCS51::A)
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+          .addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_DPL_A));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_IMM))
+        .addImm(0x83)
+        .addImm(0)
+        .addReg(MCS51::DPTR, RegState::ImplicitDefine);
+    return;
+  }
   if (SrcReg == MCS51::A && MCS51::MCS51GPR8RegClass.contains(DestReg)) {
     Opcode = MCS51::MOV_RN_A;
     BuildMI(MBB, MI, DL, get(Opcode), DestReg);
+    return;
+  }
+  if (SrcReg == MCS51::DPTR &&
+      MCS51::MCS51GPR8RegClass.contains(DestReg)) {
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_DIRECT), MCS51::A)
+        .addImm(0x82)
+        .addReg(MCS51::DPTR, RegState::Implicit);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
     return;
   }
   if (MCS51::MCS51GPR8RegClass.contains(DestReg) &&
@@ -115,7 +135,8 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     if (RetVal != MCS51::A)
       BuildMI(MBB, I, DL, get(MCS51::MOV_A_RN))
           .addReg(RetVal, getKillRegState(MI.getOperand(0).isKill()));
-    BuildMI(MBB, I, DL, get(MCS51::RET_NOA));
+    BuildMI(MBB, I, DL, get(MCS51::RET_NOA))
+        .addReg(MCS51::A, RegState::Implicit);
     MI.eraseFromParent();
     return true;
   }
