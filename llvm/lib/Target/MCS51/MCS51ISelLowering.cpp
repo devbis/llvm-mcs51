@@ -121,6 +121,14 @@ MCS51TargetLowering::getRegForInlineAsmConstraint(
     const TargetRegisterInfo *TRI, StringRef Constraint, MVT VT) const {
   if (Constraint.size() == 1) {
     switch (Constraint[0]) {
+    case 'a':
+      if (VT == MVT::i8)
+        return {0, &MCS51::MCS51ARegRegClass};
+      break;
+    case 'd':
+      if (VT == MVT::i16)
+        return {0, &MCS51::MCS51PTRRegClass};
+      break;
     case 'r':
       if (VT == MVT::i8)
         return {0, &MCS51::MCS51GPR8RegClass};
@@ -130,6 +138,15 @@ MCS51TargetLowering::getRegForInlineAsmConstraint(
     }
   }
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+TargetLowering::ConstraintType
+MCS51TargetLowering::getConstraintType(StringRef Constraint) const {
+  if (Constraint.size() == 1 &&
+      (Constraint[0] == 'a' || Constraint[0] == 'd' ||
+       Constraint[0] == 'r'))
+    return C_RegisterClass;
+  return TargetLowering::getConstraintType(Constraint);
 }
 
 TargetLowering::ShiftLegalizationStrategy
