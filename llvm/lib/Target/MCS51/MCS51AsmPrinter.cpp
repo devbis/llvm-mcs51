@@ -132,7 +132,8 @@ public:
 
     MCSymbol *Thunk = OutContext.getOrCreateSymbol(
         getMCS51BankThunkName(getSymbol(&F)->getName()));
-    OutStreamer->emitSymbolAttribute(Thunk, MCSA_Global);
+    OutStreamer->emitSymbolAttribute(
+        Thunk, F.isWeakForLinker() ? MCSA_Weak : MCSA_Global);
     OutStreamer->emitLabel(Thunk);
     emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x9f});
     if (AutoBank) {
