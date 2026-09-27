@@ -100,6 +100,10 @@ def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
 def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
+def SDT_MCS51Add16Imm : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
+                                              SDTCisVT<1, i16>,
+                                              SDTCisVT<2, i16>] >;
+def MCS51add16_imm : SDNode<"MCS51ISD::ADD16_IMM", SDT_MCS51Add16Imm>;
 def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
 def SDT_MCS51Mul8To16 : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                              SDTCisVT<1, i8>,
@@ -1588,6 +1592,19 @@ def XOR16rr : MCS51WordLogic<xor>;
 
 let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def ADD16rr : MCS51WordArithmetic;
+def ADD16ri : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src, MCS51Imm16:$imm);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst,
+                      (MCS51add16_imm MCS51PTR:$src, MCS51Imm16:$imm))];
+}
 let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
 

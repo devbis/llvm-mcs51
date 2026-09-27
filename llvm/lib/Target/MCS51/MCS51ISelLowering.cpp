@@ -217,8 +217,24 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                  : MCS51ISD::ADD_ZEXT8_16;
       return DAG.getNode(Opcode, DL, MVT::i16, Base, Byte);
     }
+    for (unsigned I = 0; I != 2; ++I) {
+      SDValue Constant = Op.getOperand(I);
+      SDValue Base = Op.getOperand(1 - I);
+      if (auto *C = dyn_cast<ConstantSDNode>(Constant)) {
+        // Leave stack and address-space arithmetic to the normal lowering.
+        if (containsFrameIndex(Base) ||
+            Base.getOpcode() == ISD::ADDRSPACECAST ||
+            Base.getOpcode() == ISD::GlobalAddress)
+          continue;
+        uint16_t Immediate = C->getZExtValue();
+        if (!Immediate)
+          return Base;
+        return DAG.getNode(MCS51ISD::ADD16_IMM, DL, MVT::i16, Base,
+                           DAG.getConstant(Immediate, DL, MVT::i16));
+      }
+    }
     return SDValue();
-}
+  }
 
   if (Op.getOpcode() == ISD::ANY_EXTEND && Op.getValueType() == MVT::i16 &&
       Op.getOperand(0).getValueType() == MVT::i8) {
@@ -1654,6 +1670,46 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             MCS51::A)
         .addImm(0x83);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::ADD16ri) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    uint16_t Immediate = MI.getOperand(2).getImm();
+    uint8_t Low = Immediate & 0xFF;
+    uint8_t High = Immediate >> 8;
+
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .addReg(Src);
+    if (Immediate <= 3) {
+      for (unsigned I = 0; I != Immediate; ++I)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+    } else if (!Low) {
+      if (High <= 3) {
+        for (unsigned I = 0; I != High; ++I)
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DIRECT)).addImm(0x83);
+      } else {
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+            .addImm(0x83);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+            .addImm(High);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+      }
+    } else {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x82);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+          .addImm(Low);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IMM), MCS51::A)
+          .addImm(High);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+    }
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
     MI.eraseFromParent();
