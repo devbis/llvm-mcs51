@@ -229,6 +229,8 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
         uint16_t Immediate = C->getZExtValue();
         if (!Immediate)
           return Base;
+        if (Immediate == 0xffff)
+          return DAG.getNode(MCS51ISD::SUB16_DEC, DL, MVT::i16, Base);
         return DAG.getNode(MCS51ISD::ADD16_IMM, DL, MVT::i16, Base,
                            DAG.getConstant(Immediate, DL, MVT::i16));
       }
@@ -934,6 +936,15 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() == ISD::SUB && N->getValueType(0) == MVT::i16) {
+    if (auto *C = dyn_cast<ConstantSDNode>(N->getOperand(1))) {
+      SDValue Base = N->getOperand(0);
+      if (C->getZExtValue() == 1 && !containsFrameIndex(Base) &&
+          Base.getOpcode() != ISD::ADDRSPACECAST &&
+          Base.getOpcode() != ISD::GlobalAddress)
+        return DCI.DAG.getNode(MCS51ISD::SUB16_DEC, SDLoc(N), MVT::i16, Base);
+    }
+  }
   if (N->getOpcode() == ISD::SHL && N->getValueType(0) == MVT::i16 &&
       N->hasOneUse() &&
       (N->getOperand(0).getOpcode() == ISD::SIGN_EXTEND ||

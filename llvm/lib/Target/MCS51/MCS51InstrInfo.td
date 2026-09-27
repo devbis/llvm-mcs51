@@ -104,6 +104,9 @@ def SDT_MCS51Add16Imm : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                               SDTCisVT<1, i16>,
                                               SDTCisVT<2, i16>] >;
 def MCS51add16_imm : SDNode<"MCS51ISD::ADD16_IMM", SDT_MCS51Add16Imm>;
+def SDT_MCS51Sub16Dec : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
+                                              SDTCisVT<1, i16>] >;
+def MCS51sub16_dec : SDNode<"MCS51ISD::SUB16_DEC", SDT_MCS51Sub16Dec>;
 def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
 def SDT_MCS51Mul8To16 : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                              SDTCisVT<1, i8>,
@@ -1604,6 +1607,19 @@ def ADD16ri : Instruction {
   let hasSideEffects = 1;
   let Pattern = [(set MCS51PTR:$dst,
                       (MCS51add16_imm MCS51PTR:$src, MCS51Imm16:$imm))];
+}
+def SUB16DEC : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51PTR:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+  let Constraints = "$dst = $src";
+  let Pattern = [(set MCS51PTR:$dst,
+                      (MCS51sub16_dec MCS51PTR:$src))];
 }
 let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
