@@ -575,6 +575,24 @@ float __divsf3(float LHS, float RHS) {
   return Result.Float;
 }
 
+/* The MCS-51 backend has no native 64-bit multiply. Multiply bytes and carry
+ * row by row so signed and unsigned callers share modulo-2^64 semantics. */
+uint64_t __muldi3(uint64_t LHS, uint64_t RHS) {
+  Word64Bytes Left = {.Value = LHS};
+  Word64Bytes Right = {.Value = RHS};
+  Word64Bytes Product = {.Value = 0};
+  for (unsigned I = 0; I != 8; ++I) {
+    uint16_t Carry = 0;
+    for (unsigned J = 0; J != 8 - I; ++J) {
+      uint16_t Partial = (uint16_t)Left.Bytes[I] * Right.Bytes[J];
+      uint16_t Sum = Partial + Product.Bytes[I + J] + Carry;
+      Product.Bytes[I + J] = (uint8_t)Sum;
+      Carry = Sum >> 8;
+    }
+  }
+  return Product.Value;
+}
+
 uint64_t __ashldi3(uint64_t Value, int Count) {
   Word64Bytes Result = {.Value = Value};
   if (Count >= 64)
