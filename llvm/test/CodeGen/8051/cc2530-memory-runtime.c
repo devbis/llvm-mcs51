@@ -3,23 +3,21 @@
 
 typedef unsigned short size_t;
 
-extern __xdata void *memcpy(__xdata void *destination,
-                            __xdata const void *source, size_t count);
-extern __xdata void *memmove(__xdata void *destination,
-                             __xdata const void *source, size_t count);
-extern __xdata void *memset(__xdata void *destination, int value,
-                            size_t count);
-extern int memcmp(__xdata const void *lhs, __xdata const void *rhs,
-                  size_t count);
-extern size_t strlen(__xdata const char *string);
+extern void *memcpy(void *destination, const void *source, size_t count);
+extern void *memmove(void *destination, const void *source, size_t count);
+extern void *memset(void *destination, int value, size_t count);
+extern int memcmp(const void *lhs, const void *rhs, size_t count);
+extern size_t strlen(const char *string);
+
+unsigned char source[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+unsigned char destination[8];
+char text[5] = {'8', '0', '5', '1', 0};
 
 int main(void) {
-  __xdata unsigned char *source = (__xdata unsigned char *)0x2000;
-  __xdata unsigned char *destination = (__xdata unsigned char *)0x2010;
   memcpy(destination, source, 8);
   memmove(destination + 1, destination, 7);
   memset(destination, 0, 1);
-  return memcmp(destination, source, 8) + strlen((__xdata const char *)0x2020);
+  return memcmp(destination, source, 8) + (int)strlen(text);
 }
 
 // CHECK-DAG: Name: memcpy
