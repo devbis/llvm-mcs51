@@ -172,9 +172,11 @@ the low 24 bits follow the classic MCS-51 encoding, with a 16-bit address and
 an 8-bit memory-space tag. LLVM's SelectionDAG cannot use a 24-bit pointer
 value directly, so `MCS51GenericPointerLowering` runs before instruction
 selection and replaces generic loads and stores with runtime calls. The
-runtime dispatches each byte access to CODE, XDATA, PDATA, or IDATA and
-supports scalar `i1`, `i8`, `i16`, `i32`, `i64`, and `float` accesses. Multi-byte
-values are transferred little-endian. The compiler transports the pointer in
+runtime dispatches dynamic pointers to CODE, XDATA, PDATA, or IDATA and
+supports scalar `i1`, `i8`, `i16`, `i32`, `i64`, and `float` accesses. When an
+access directly uses a cast from a known memory space, lowering keeps the
+native access instead of calling the dispatcher. Multi-byte values are
+transferred little-endian. The compiler transports the pointer in
 a padded 32-bit value and passes its four bytes to the helpers; this is not a
 three-byte function-argument ABI. Address-space casts to generic pointers add
 the classic tags (CODE `0x80`, DATA/IDATA `0x40`, PDATA `0x60`, XDATA `0x00`);
@@ -188,9 +190,11 @@ conversions and pointer arithmetic with runtime correctness checks for every
 source space. The current CodeGen coverage exercises tagged conversions for
 CODE, XDATA, PDATA, and IDATA, including casts back to IDATA; it does not yet
 execute those cases in an emulator or on hardware. AS0-to-generic conversion
-uses the default XDATA model and does not distinguish pointers to stack
-objects, and casts involving bit or SFR spaces are unsupported. Atomic and
-aggregate accesses and scalar types outside the list above are unsupported;
-the lowering diagnoses unsupported access types as a fatal backend error.
-Keep these limitations visible until the generic-pointer ABI and behavior are
-covered end-to-end with correctness and code-size tests.
+uses the default XDATA model for unknown pointers and recognizes pointers
+rooted in local allocas as IDATA; other pointer provenance (such as merged
+pointer values) still needs runtime validation. Casts involving bit or SFR
+spaces are unsupported. Atomic and aggregate accesses and scalar types outside
+the list above are unsupported; the lowering diagnoses unsupported access
+types as a fatal backend error. Keep these limitations visible until the
+generic-pointer ABI and behavior are covered end-to-end with correctness and
+code-size tests.

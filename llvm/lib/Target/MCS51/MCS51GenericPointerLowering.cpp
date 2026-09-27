@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCS51.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/Attributes.h"
@@ -31,6 +32,27 @@ public:
   bool runOnFunction(Function &F) override {
     bool Changed = false;
     for (Instruction &I : instructions(F)) {
+      Value *Pointer = nullptr;
+      if (auto *LI = dyn_cast<LoadInst>(&I)) {
+        if (LI->getPointerAddressSpace() == MCS51::Generic)
+          Pointer = LI->getPointerOperand();
+      } else if (auto *SI = dyn_cast<StoreInst>(&I)) {
+        if (SI->getPointerAddressSpace() == MCS51::Generic)
+          Pointer = SI->getPointerOperand();
+      }
+      auto *Cast = dyn_cast_or_null<AddrSpaceCastOperator>(Pointer);
+      if (!Cast || Cast->getDestAddressSpace() != MCS51::Generic ||
+          Cast->getSrcAddressSpace() == MCS51::Generic ||
+          !isGenericTagSupported(Cast->getSrcAddressSpace()))
+        continue;
+      if (auto *LI = dyn_cast<LoadInst>(&I))
+        LI->setOperand(0, Cast->getPointerOperand());
+      else
+        cast<StoreInst>(I).setOperand(1, Cast->getPointerOperand());
+      Changed = true;
+    }
+
+    for (Instruction &I : instructions(F)) {
       for (Use &Operand : I.operands()) {
         auto *Cast = dyn_cast<AddrSpaceCastOperator>(Operand.get());
         if (!Cast || (Cast->getSrcAddressSpace() != MCS51::Generic &&
@@ -47,9 +69,12 @@ public:
     SmallVector<Instruction *, 16> Worklist;
     for (Instruction &I : instructions(F)) {
       if (auto *Cast = dyn_cast<AddrSpaceCastInst>(&I)) {
-        if (Cast->getSrcAddressSpace() == MCS51::Generic ||
-            Cast->getDestAddressSpace() == MCS51::Generic)
+        if (Cast->use_empty()) {
           Worklist.push_back(Cast);
+        } else if (Cast->getSrcAddressSpace() == MCS51::Generic ||
+                   Cast->getDestAddressSpace() == MCS51::Generic) {
+          Worklist.push_back(Cast);
+        }
       } else if (auto *LI = dyn_cast<LoadInst>(&I)) {
         if (LI->getPointerAddressSpace() == MCS51::Generic)
           Worklist.push_back(LI);
@@ -61,7 +86,10 @@ public:
 
     for (Instruction *I : Worklist) {
       if (auto *Cast = dyn_cast<AddrSpaceCastInst>(I)) {
-        lowerAddressSpaceCast(*Cast);
+        if (Cast->use_empty())
+          Cast->eraseFromParent();
+        else
+          lowerAddressSpaceCast(*Cast);
         Changed = true;
       } else if (auto *LI = dyn_cast<LoadInst>(I)) {
         lowerLoad(*LI);
@@ -79,12 +107,49 @@ public:
   }
 
 private:
-  static uint8_t getGenericTag(unsigned AddressSpace) {
-    // Match the classic MCS-51 generic pointer encoding used by the runtime:
-    // CODE=0x80, DATA/IDATA=0x40, PDATA=0x60, XDATA=0x00. The default near
-    // pointer uses the target's default XDATA memory model.
+  static bool isGenericTagSupported(unsigned AddressSpace) {
     switch (AddressSpace) {
     case MCS51::Default:
+    case MCS51::Data:
+    case MCS51::IData:
+    case MCS51::PData:
+    case MCS51::XData:
+    case MCS51::Code:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  static bool pointsToStackObject(Value *Pointer) {
+    SmallPtrSet<Value *, 8> Seen;
+    while (Pointer && Seen.insert(Pointer).second) {
+      if (isa<AllocaInst>(Pointer))
+        return true;
+      if (auto *GEP = dyn_cast<GEPOperator>(Pointer)) {
+        Pointer = GEP->getPointerOperand();
+        continue;
+      }
+      if (auto *Cast = dyn_cast<BitCastOperator>(Pointer)) {
+        Pointer = Cast->getOperand(0);
+        continue;
+      }
+      if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Pointer)) {
+        Pointer = Cast->getPointerOperand();
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  static uint8_t getGenericTag(unsigned AddressSpace, Value *Pointer) {
+    // Match the classic MCS-51 generic pointer encoding used by the runtime:
+    // CODE=0x80, DATA/IDATA=0x40, PDATA=0x60, XDATA=0x00. The default near
+    // pointer uses XDATA, while addresses rooted in local allocas use IDATA.
+    switch (AddressSpace) {
+    case MCS51::Default:
+      return pointsToStackObject(Pointer) ? 0x40 : 0x00;
     case MCS51::XData:
       return 0x00;
     case MCS51::Data:
@@ -106,12 +171,25 @@ private:
     Module &M = *B.GetInsertBlock()->getModule();
     LLVMContext &C = M.getContext();
     Type *I16 = Type::getInt16Ty(C);
-    Value *Address = B.CreatePtrToInt(Pointer, I16, "gptr.cast.address");
+    Value *Address;
+    if (DstAS == MCS51::Generic && SrcAS == MCS51::Default &&
+        pointsToStackObject(Pointer)) {
+      // Preserve the frame-index-to-IDATA lowering so the backend can form
+      // the stack object's run-time address relative to SP.
+      Type *IDataPtrTy = PointerType::get(C, MCS51::IData);
+      Value *IDataPointer = B.CreateAddrSpaceCast(
+          Pointer, IDataPtrTy, "gptr.cast.idata.pointer");
+      Value *IDataAddress = B.CreatePtrToInt(
+          IDataPointer, Type::getInt8Ty(C), "gptr.cast.idata.address");
+      Address = B.CreateZExt(IDataAddress, I16, "gptr.cast.address");
+    } else {
+      Address = B.CreatePtrToInt(Pointer, I16, "gptr.cast.address");
+    }
     Value *Result;
     if (DstAS == MCS51::Generic) {
       Type *I32 = Type::getInt32Ty(C);
       Value *Bits = B.CreateZExt(Address, I32, "gptr.cast.bits");
-      uint8_t Tag = getGenericTag(SrcAS);
+      uint8_t Tag = getGenericTag(SrcAS, Pointer);
       if (Tag) {
         Value *TagBits = B.CreateShl(B.getInt32(Tag), 16, "gptr.cast.tag");
         Bits = B.CreateOr(Bits, TagBits, "gptr.cast.encoded");
