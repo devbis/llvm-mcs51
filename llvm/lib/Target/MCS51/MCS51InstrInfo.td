@@ -1256,7 +1256,7 @@ def LOADSTACKARG8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1314,6 +1314,8 @@ def PUSHPAD8 : Instruction {
   let Defs = [A, SP];
 }
 
+// These pseudos form SP-relative addresses with ADD, so their expansions
+// clobber the carry flag as well as A and R1.
 def SPILL_LOAD8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
@@ -1323,7 +1325,7 @@ def SPILL_LOAD8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1337,7 +1339,7 @@ def SPILL_STORE8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1350,7 +1352,7 @@ def SPILL_LOAD_INDIRECT8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1364,7 +1366,7 @@ def SPILL_STORE_INDIRECT8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1377,7 +1379,7 @@ def SPILL_LOAD16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1404,7 +1406,7 @@ def SPILL_STORE16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1423,6 +1425,7 @@ def SPILL_STORE_A8 : Instruction {
   let Uses = [R1, SP];
 }
 
+// Frame-address and frame-memory pseudos also calculate SP + offset with ADD.
 def FRAMEADDR_R1 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -1431,7 +1434,7 @@ def FRAMEADDR_R1 : Instruction {
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1443,7 +1446,21 @@ def FRAMEADDR8 : Instruction {
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
+  let Uses = [SP];
+}
+
+def FRAMEADDR8_INDEX : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51GPR8:$index);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1456,7 +1473,7 @@ def LOAD_FRAME8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1470,7 +1487,7 @@ def STORE_FRAME8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1483,7 +1500,7 @@ def LOAD_FRAME16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1497,7 +1514,7 @@ def STORE_FRAME16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [SP];
 }
 
@@ -1511,7 +1528,7 @@ def LOAD_FRAME8_INDEX : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [DPTR, SP];
 }
 
@@ -1525,7 +1542,7 @@ def STORE_FRAME8_INDEX : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1];
+  let Defs = [A, R1, C];
   let Uses = [DPTR, SP];
 }
 
