@@ -132,6 +132,28 @@ public:
                  const ArgList &Args)
       : Generic_ELF(D, Triple, Args) {}
 
+  llvm::opt::DerivedArgList *
+  TranslateArgs(const llvm::opt::DerivedArgList &Args, BoundArch BA,
+                Action::OffloadKind DeviceOffloadKind) const override {
+    if (DeviceOffloadKind != Action::OFK_None &&
+        DeviceOffloadKind != Action::OFK_Host)
+      return Generic_ELF::TranslateArgs(Args, BA, DeviceOffloadKind);
+
+    auto *DAL = new llvm::opt::DerivedArgList(Args.getBaseArgs());
+    for (auto *A : Args)
+      DAL->append(A);
+
+    const auto &Opts = getDriver().getOpts();
+    if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles))
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_nostartfiles));
+    if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs))
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_nodefaultlibs));
+    if (!Args.hasArg(options::OPT_static, options::OPT_shared,
+                     options::OPT_r))
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_static));
+    return DAL;
+  }
+
   const char *getDefaultLinker() const override { return "ld.lld"; }
 
 protected:
