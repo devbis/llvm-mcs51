@@ -13,6 +13,9 @@ entry:
 local_branch:
         sjmp    local_branch
 
+        .data
+        .2byte  code_symbol
+
         .globl byte_symbol
         .globl code_symbol
         .globl branch_symbol
@@ -25,7 +28,8 @@ local_branch:
 # ENC: sjmp local_branch{{.*}}encoding: {{\[}}0x80,A{{\]}}
 
 # RELOC: R_8051_8 byte_symbol
-# RELOC: R_8051_16 code_symbol
-# RELOC: R_8051_16 code_symbol
+# RELOC: R_8051_16_BE code_symbol
+# RELOC: R_8051_16_BE code_symbol
 # RELOC: R_8051_PCREL8 branch_symbol
 # RELOC: R_8051_PCREL8 branch_symbol
+# RELOC: R_8051_16 code_symbol

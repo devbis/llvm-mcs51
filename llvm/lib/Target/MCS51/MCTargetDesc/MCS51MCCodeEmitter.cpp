@@ -68,6 +68,27 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     report_fatal_error("unsupported MCS-51 address operand");
   }
 
+  uint32_t getImm16BEOpValue(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups,
+                             const MCSubtargetInfo &) const {
+    const MCOperand &Op = MI.getOperand(OpNo);
+    if (Op.isImm()) {
+      uint16_t Value = static_cast<uint16_t>(Op.getImm());
+      return static_cast<uint16_t>((Value << 8) | (Value >> 8));
+    }
+    int64_t Value = 0;
+    if (Op.isExpr() && Op.getExpr()->evaluateAsAbsolute(Value)) {
+      uint16_t Absolute = static_cast<uint16_t>(Value);
+      return static_cast<uint16_t>((Absolute << 8) | (Absolute >> 8));
+    }
+    if (Op.isExpr()) {
+      Fixups.push_back(
+          MCFixup::create(1, Op.getExpr(), MCS51::fixup_16_be));
+      return 0;
+    }
+    report_fatal_error("unsupported MCS-51 big-endian address operand");
+  }
+
   uint32_t getAddr11OpValue(const MCInst &MI, unsigned OpNo,
                             SmallVectorImpl<MCFixup> &Fixups,
                             const MCSubtargetInfo &) const {

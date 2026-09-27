@@ -42,6 +42,8 @@ public:
       return {"fixup_8", 0, 8, 0};
     if (Kind == MCS51::fixup_16)
       return {"fixup_16", 0, 16, 0};
+    if (Kind == MCS51::fixup_16_be)
+      return {"fixup_16_be", 0, 16, 0};
     if (Kind == MCS51::fixup_pcrel8)
       return {"fixup_pcrel8", 0, 8, 0};
     if (Kind == MCS51::fixup_11)
@@ -69,6 +71,12 @@ public:
       Asm->getWriter().recordRelocation(F, Fixup, Target, Value);
     if (mc::isRelocation(Fixup.getKind()))
       return;
+
+    if (Fixup.getKind() == MCS51::fixup_16_be) {
+      Data[0] |= static_cast<uint8_t>(Value >> 8);
+      Data[1] |= static_cast<uint8_t>(Value);
+      return;
+    }
 
     MCFixupKindInfo Info = getFixupKindInfo(Fixup.getKind());
     unsigned NumBits = Info.TargetSize + Info.TargetOffset;

@@ -1,0 +1,9 @@
+# RUN: llvm-mc -triple=mcs51 -disassemble %s | FileCheck %s
+
+0x02 0x12 0x34
+0x12 0x12 0x34
+0x90 0x12 0x34
+
+# CHECK: ljmp 4660
+# CHECK: lcall 4660
+# CHECK: mov dptr, #4660
