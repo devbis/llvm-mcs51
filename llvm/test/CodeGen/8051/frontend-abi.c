@@ -5,12 +5,14 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -### %s -o %t 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=LINK --implicit-check-not=crt1.o \
 // RUN:       --implicit-check-not=crti.o --implicit-check-not=-lgcc \
-// RUN:       --implicit-check-not=-lc --implicit-check-not=-dynamic-linker
+// RUN:       --implicit-check-not=-lc --implicit-check-not=-dynamic-linker \
+// RUN:       --implicit-check-not=eh-frame-hdr
 
 // DEFAULT: "-cc1" "-triple" "mcs51"
 // DEFAULT-SAME: "-fno-signed-char"
 // SIGNED: "-cc1" "-triple" "mcs51"
 // LINK: {{ld.lld}}
+// LINK-SAME: "-static"
 
 #ifndef __8051__
 #error "missing MCS-51 predefined macro"

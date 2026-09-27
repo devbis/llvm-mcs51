@@ -327,7 +327,8 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   ToolChain.addExtraOpts(CmdArgs);
 
-  CmdArgs.push_back("--eh-frame-hdr");
+  if (ToolChain.getTriple().getArch() != llvm::Triple::mcs51)
+    CmdArgs.push_back("--eh-frame-hdr");
 
   if (const char *LDMOption = getLDMOption(ToolChain.getTriple(), Args)) {
     CmdArgs.push_back("-m");
