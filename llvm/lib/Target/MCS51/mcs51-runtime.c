@@ -909,3 +909,54 @@ int32_t __modsi3(int32_t Numerator, int32_t Denominator) {
     Remainder = 0 - Remainder;
   return (int32_t)Remainder;
 }
+
+void *memcpy(void *Destination, const void *Source, uint16_t Count) {
+  uint8_t *D = (uint8_t *)Destination;
+  const uint8_t *S = (const uint8_t *)Source;
+  while (Count--)
+    *D++ = *S++;
+  return Destination;
+}
+
+void *memmove(void *Destination, const void *Source, uint16_t Count) {
+  uint8_t *D = (uint8_t *)Destination;
+  const uint8_t *S = (const uint8_t *)Source;
+  uintptr_t DestinationAddress = (uintptr_t)D;
+  uintptr_t SourceAddress = (uintptr_t)S;
+  if (!Count || DestinationAddress <= SourceAddress ||
+      DestinationAddress - SourceAddress >= Count)
+    return memcpy(Destination, Source, Count);
+
+  D += Count;
+  S += Count;
+  while (Count--)
+    *--D = *--S;
+  return Destination;
+}
+
+void *memset(void *Destination, int Value, uint16_t Count) {
+  uint8_t *D = (uint8_t *)Destination;
+  uint8_t Byte = (uint8_t)Value;
+  while (Count--)
+    *D++ = Byte;
+  return Destination;
+}
+
+int memcmp(const void *LHS, const void *RHS, uint16_t Count) {
+  const uint8_t *A = (const uint8_t *)LHS;
+  const uint8_t *B = (const uint8_t *)RHS;
+  while (Count--) {
+    if (*A != *B)
+      return (int)*A - (int)*B;
+    ++A;
+    ++B;
+  }
+  return 0;
+}
+
+uint16_t strlen(const char *String) {
+  const char *End = String;
+  while (*End)
+    ++End;
+  return (uint16_t)(End - String);
+}
