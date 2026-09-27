@@ -333,9 +333,18 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     return DAG.getNode(Opcode, DL, MVT::i16, Op.getOperand(0),
                        Op.getOperand(1));
   }
-  if (Op.getOpcode() == ISD::MUL && Op.getValueType() == MVT::i16)
+  if (Op.getOpcode() == ISD::MUL && Op.getValueType() == MVT::i16) {
+    SDValue LHS = Op.getOperand(0);
+    SDValue RHS = Op.getOperand(1);
+    if (LHS.getOpcode() == ISD::ZERO_EXTEND &&
+        LHS.getOperand(0).getValueType() == MVT::i8 &&
+        RHS.getOpcode() == ISD::ZERO_EXTEND &&
+        RHS.getOperand(0).getValueType() == MVT::i8)
+      return DAG.getNode(MCS51ISD::MUL8_TO_16, DL, MVT::i16,
+                         LHS.getOperand(0), RHS.getOperand(0));
     return DAG.getNode(MCS51ISD::MUL16, DL, MVT::i16, Op.getOperand(0),
                        Op.getOperand(1));
+  }
   if (Op.getOpcode() == ISD::SELECT && Op.getValueType() == MVT::i8)
     return DAG.getNode(MCS51ISD::SELECT8, DL, MVT::i8, Op.getOperand(0),
                        Op.getOperand(1), Op.getOperand(2));
@@ -1421,6 +1430,23 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ProductLo);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ProductHi);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::MUL8TO16rr) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register RHS = MI.getOperand(2).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_RN))
+        .addImm(0xF0)
+        .addReg(RHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
