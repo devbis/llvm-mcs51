@@ -16,6 +16,10 @@ unsigned short multiply_word(unsigned short lhs, unsigned short rhs) {
   return lhs * rhs;
 }
 
+unsigned short multiply_bytes(unsigned char lhs, unsigned char rhs) {
+  return lhs * rhs;
+}
+
 unsigned long multiply_long(unsigned long lhs, unsigned long rhs) {
   return lhs * rhs;
 }
@@ -71,6 +75,9 @@ unsigned char less_than_signed_long(long lhs, long rhs) {
 // CHECK: mul ab
 // CHECK: mul ab
 // CHECK: mul ab
+// CHECK: ret
+// CHECK-LABEL: multiply_bytes:
+// CHECK-COUNT-1: mul ab
 // CHECK: ret
 // CHECK-LABEL: multiply_long:
 // CHECK: mul ab
