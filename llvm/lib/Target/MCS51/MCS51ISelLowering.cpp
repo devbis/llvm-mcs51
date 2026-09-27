@@ -81,6 +81,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SUB, MVT::i32, Custom);
   setOperationAction(ISD::SETCC, MVT::i8, Custom);
   setOperationAction(ISD::SETCC, MVT::i16, Custom);
+  setOperationAction(ISD::SETCC, MVT::i32, Custom);
   setOperationAction(ISD::SELECT, MVT::i8, Custom);
   setOperationAction(ISD::SELECT, MVT::i16, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i8, Custom);
@@ -425,6 +426,59 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
       Op.getOperand(0).getValueType() == MVT::i8) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
     return LowerByteCompare(Op.getOperand(0), Op.getOperand(1), CC);
+  }
+  if (Op.getOpcode() == ISD::SETCC &&
+      Op.getOperand(0).getValueType() == MVT::i32) {
+    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(2))->get();
+    SDValue LoIndex = DAG.getConstant(0, DL, MVT::i16);
+    SDValue HiIndex = DAG.getConstant(1, DL, MVT::i16);
+    SDValue LHSLo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                Op.getOperand(0), LoIndex);
+    SDValue LHSHi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                Op.getOperand(0), HiIndex);
+    SDValue RHSLo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                Op.getOperand(1), LoIndex);
+    SDValue RHSHi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                Op.getOperand(1), HiIndex);
+    if (CC == ISD::SETEQ || CC == ISD::SETNE) {
+      SDValue EqualHi = LowerWordCompare(LHSHi, RHSHi, ISD::SETEQ, false);
+      SDValue EqualLo = LowerWordCompare(LHSLo, RHSLo, ISD::SETEQ, false);
+      SDValue Equal = DAG.getNode(ISD::AND, DL, MVT::i8, EqualHi, EqualLo);
+      return CC == ISD::SETEQ
+                 ? Equal
+                 : DAG.getNode(ISD::XOR, DL, MVT::i8, Equal,
+                               DAG.getConstant(1, DL, MVT::i8));
+    }
+    bool IsSigned = CC == ISD::SETLT || CC == ISD::SETLE ||
+                    CC == ISD::SETGT || CC == ISD::SETGE;
+    unsigned CompareKind;
+    switch (CC) {
+    case ISD::SETULT:
+    case ISD::SETLT:
+      CompareKind = IsSigned ? 1 : 0;
+      break;
+    case ISD::SETUGE:
+    case ISD::SETGE:
+      CompareKind = IsSigned ? 4 : 3;
+      break;
+    case ISD::SETUGT:
+    case ISD::SETGT:
+      std::swap(LHSLo, RHSLo);
+      std::swap(LHSHi, RHSHi);
+      CompareKind = IsSigned ? 1 : 0;
+      break;
+    case ISD::SETULE:
+    case ISD::SETLE:
+      std::swap(LHSLo, RHSLo);
+      std::swap(LHSHi, RHSHi);
+      CompareKind = IsSigned ? 4 : 3;
+      break;
+    default:
+      return SDValue();
+    }
+    SDValue Operands[] = {LHSLo, LHSHi, RHSLo, RHSHi,
+                          DAG.getConstant(CompareKind, DL, MVT::i8)};
+    return DAG.getNode(MCS51ISD::CMP32, DL, MVT::i8, Operands);
   }
   if (Op.getOpcode() == ISD::SETCC &&
       Op.getOperand(0).getValueType() == MVT::i16) {
@@ -1975,6 +2029,62 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::CMP32) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHSLo = MI.getOperand(1).getReg();
+    Register LHSHi = MI.getOperand(2).getReg();
+    Register RHSLo = MI.getOperand(3).getReg();
+    Register RHSHi = MI.getOperand(4).getReg();
+    int64_t CompareKind = MI.getOperand(5).getImm();
+    auto CopyDPTR = [&](Register Src) {
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Src);
+    };
+    auto CompareByte = [&](Register LHS, Register RHS, uint8_t SFR,
+                           bool ClearCarry) {
+      CopyDPTR(RHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(SFR);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
+      CopyDPTR(LHS);
+      if (ClearCarry)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(SFR);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    };
+
+    bool IsSigned = CompareKind == 1 || CompareKind == 4;
+    bool IsGreaterEqual = CompareKind == 3 || CompareKind == 4;
+    CompareByte(LHSLo, RHSLo, 0x82, true);
+    CompareByte(LHSLo, RHSLo, 0x83, false);
+    CompareByte(LHSHi, RHSHi, 0x82, false);
+    if (IsSigned) {
+      CopyDPTR(RHSHi);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(0x80);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
+      CopyDPTR(LHSHi);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(0x83);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+          .addImm(0x80);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    } else {
+      CompareByte(LHSHi, RHSHi, 0x83, false);
+    }
+    if (IsGreaterEqual)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst).addReg(MCS51::A);
     MI.eraseFromParent();
     return MBB;
   }
