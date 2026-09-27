@@ -579,7 +579,37 @@ uint64_t __ashldi3(uint64_t Value, int Count) {
   Word64Bytes Result = {.Value = Value};
   if (Count >= 64)
     return 0;
-  for (int I = 0; I < Count; ++I) {
+  if (Count <= 0)
+    return Result.Value;
+
+  unsigned BitShift = (unsigned)Count & 7;
+  if (Count & 32) {
+    Result.Bytes[7] = Result.Bytes[3];
+    Result.Bytes[6] = Result.Bytes[2];
+    Result.Bytes[5] = Result.Bytes[1];
+    Result.Bytes[4] = Result.Bytes[0];
+    Result.Bytes[3] = Result.Bytes[2] = Result.Bytes[1] = Result.Bytes[0] = 0;
+  }
+  if (Count & 16) {
+    Result.Bytes[7] = Result.Bytes[5];
+    Result.Bytes[6] = Result.Bytes[4];
+    Result.Bytes[5] = Result.Bytes[3];
+    Result.Bytes[4] = Result.Bytes[2];
+    Result.Bytes[3] = Result.Bytes[1];
+    Result.Bytes[2] = Result.Bytes[0];
+    Result.Bytes[1] = Result.Bytes[0] = 0;
+  }
+  if (Count & 8) {
+    Result.Bytes[7] = Result.Bytes[6];
+    Result.Bytes[6] = Result.Bytes[5];
+    Result.Bytes[5] = Result.Bytes[4];
+    Result.Bytes[4] = Result.Bytes[3];
+    Result.Bytes[3] = Result.Bytes[2];
+    Result.Bytes[2] = Result.Bytes[1];
+    Result.Bytes[1] = Result.Bytes[0];
+    Result.Bytes[0] = 0;
+  }
+  for (unsigned I = 0; I != BitShift; ++I) {
     uint8_t Carry = 0;
     for (unsigned Byte = 0; Byte != 8; ++Byte) {
       uint8_t NextCarry = Result.Bytes[Byte] >> 7;
@@ -594,7 +624,37 @@ uint64_t __lshrdi3(uint64_t Value, int Count) {
   Word64Bytes Result = {.Value = Value};
   if (Count >= 64)
     return 0;
-  for (int I = 0; I < Count; ++I) {
+  if (Count <= 0)
+    return Result.Value;
+
+  unsigned BitShift = (unsigned)Count & 7;
+  if (Count & 32) {
+    Result.Bytes[0] = Result.Bytes[4];
+    Result.Bytes[1] = Result.Bytes[5];
+    Result.Bytes[2] = Result.Bytes[6];
+    Result.Bytes[3] = Result.Bytes[7];
+    Result.Bytes[4] = Result.Bytes[5] = Result.Bytes[6] = Result.Bytes[7] = 0;
+  }
+  if (Count & 16) {
+    Result.Bytes[0] = Result.Bytes[2];
+    Result.Bytes[1] = Result.Bytes[3];
+    Result.Bytes[2] = Result.Bytes[4];
+    Result.Bytes[3] = Result.Bytes[5];
+    Result.Bytes[4] = Result.Bytes[6];
+    Result.Bytes[5] = Result.Bytes[7];
+    Result.Bytes[6] = Result.Bytes[7] = 0;
+  }
+  if (Count & 8) {
+    Result.Bytes[0] = Result.Bytes[1];
+    Result.Bytes[1] = Result.Bytes[2];
+    Result.Bytes[2] = Result.Bytes[3];
+    Result.Bytes[3] = Result.Bytes[4];
+    Result.Bytes[4] = Result.Bytes[5];
+    Result.Bytes[5] = Result.Bytes[6];
+    Result.Bytes[6] = Result.Bytes[7];
+    Result.Bytes[7] = 0;
+  }
+  for (unsigned I = 0; I != BitShift; ++I) {
     uint8_t Carry = 0;
     for (int Byte = 7; Byte >= 0; --Byte) {
       uint8_t NextCarry = Result.Bytes[Byte] & 1;
@@ -608,8 +668,39 @@ uint64_t __lshrdi3(uint64_t Value, int Count) {
 int64_t __ashrdi3(int64_t Value, int Count) {
   Word64Bytes Result = {.Value = (uint64_t)Value};
   if (Count >= 64)
-    Count = 64;
-  for (int I = 0; I < Count; ++I) {
+    return Value < 0 ? -1 : 0;
+  if (Count <= 0)
+    return (int64_t)Result.Value;
+
+  unsigned BitShift = (unsigned)Count & 7;
+  uint8_t Sign = Result.Bytes[7] & 0x80 ? 0xff : 0;
+  if (Count & 32) {
+    Result.Bytes[0] = Result.Bytes[4];
+    Result.Bytes[1] = Result.Bytes[5];
+    Result.Bytes[2] = Result.Bytes[6];
+    Result.Bytes[3] = Result.Bytes[7];
+    Result.Bytes[4] = Result.Bytes[5] = Result.Bytes[6] = Result.Bytes[7] = Sign;
+  }
+  if (Count & 16) {
+    Result.Bytes[0] = Result.Bytes[2];
+    Result.Bytes[1] = Result.Bytes[3];
+    Result.Bytes[2] = Result.Bytes[4];
+    Result.Bytes[3] = Result.Bytes[5];
+    Result.Bytes[4] = Result.Bytes[6];
+    Result.Bytes[5] = Result.Bytes[7];
+    Result.Bytes[6] = Result.Bytes[7] = Sign;
+  }
+  if (Count & 8) {
+    Result.Bytes[0] = Result.Bytes[1];
+    Result.Bytes[1] = Result.Bytes[2];
+    Result.Bytes[2] = Result.Bytes[3];
+    Result.Bytes[3] = Result.Bytes[4];
+    Result.Bytes[4] = Result.Bytes[5];
+    Result.Bytes[5] = Result.Bytes[6];
+    Result.Bytes[6] = Result.Bytes[7];
+    Result.Bytes[7] = Sign;
+  }
+  for (unsigned I = 0; I != BitShift; ++I) {
     uint8_t Carry = Result.Bytes[7] & 0x80;
     for (int Byte = 7; Byte >= 0; --Byte) {
       uint8_t NextCarry = (uint8_t)((Result.Bytes[Byte] & 1) << 7);
