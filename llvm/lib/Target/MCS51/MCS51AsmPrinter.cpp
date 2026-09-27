@@ -1,5 +1,6 @@
 #include "MCS51.h"
 #include "MCS51Banking.h"
+#include "MCTargetDesc/MCS51InstPrinter.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -39,6 +40,46 @@ public:
   static char ID;
 
   StringRef getPassName() const override { return "MCS-51 Assembly Printer"; }
+
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       const char *ExtraCode, raw_ostream &OS) override {
+    if (!AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS))
+      return false;
+    if (ExtraCode && ExtraCode[0])
+      return true;
+
+    const MachineOperand &MO = MI->getOperand(OpNo);
+    if (MO.isReg()) {
+      OS << MCS51InstPrinter::getRegisterName(MO.getReg());
+      return false;
+    }
+    if (MO.isImm()) {
+      OS << MO.getImm();
+      return false;
+    }
+    if (MO.isGlobal()) {
+      PrintSymbolOperand(MO, OS);
+      return false;
+    }
+    if (MO.isMBB()) {
+      OS << *MO.getMBB()->getSymbol();
+      return false;
+    }
+    return true;
+  }
+
+  bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                             const char *ExtraCode,
+                             raw_ostream &OS) override {
+    if (ExtraCode && ExtraCode[0])
+      return true;
+    const MachineOperand &MO = MI->getOperand(OpNo);
+    if (!MO.isReg() ||
+        (MO.getReg() != MCS51::R0 && MO.getReg() != MCS51::R1))
+      return true;
+    OS << '@' << MCS51InstPrinter::getRegisterName(MO.getReg());
+    return false;
+  }
 
   void emitFunctionEntryLabel() override {
     const Function &F = MF->getFunction();
