@@ -105,6 +105,20 @@ public:
   bool selectXDataMemory(SDNode *N);
   void Select(SDNode *N) override {
     SDLoc DL(N);
+    if (N->getOpcode() == ISD::ADDRSPACECAST) {
+      auto *Cast = cast<AddrSpaceCastSDNode>(N);
+      unsigned SrcAS = Cast->getSrcAddressSpace();
+      unsigned DstAS = Cast->getDestAddressSpace();
+      // Default pointers use the 16-bit XDATA bus for indirect accesses, so
+      // casts between generic and explicitly qualified XDATA pointers do not
+      // change the pointer representation.
+      if ((SrcAS == MCS51::Default && DstAS == MCS51::XData) ||
+          (SrcAS == MCS51::XData && DstAS == MCS51::Default)) {
+        ReplaceUses(SDValue(N, 0), N->getOperand(0));
+        CurDAG->RemoveDeadNode(N);
+        return;
+      }
+    }
     if (N->getOpcode() == ISD::FrameIndex &&
         N->getValueType(0) == MVT::i8) {
       int FI = cast<FrameIndexSDNode>(N)->getIndex();
