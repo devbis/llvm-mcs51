@@ -382,6 +382,7 @@ public:
   void erasePotentialSpillSections();
   void allocateHeaders(SmallVector<std::unique_ptr<PhdrEntry>, 0> &phdrs);
   void processSectionCommands();
+  void distributeMCS51AutoBankSections();
   void processSymbolAssignments();
   void declareSymbols();
 

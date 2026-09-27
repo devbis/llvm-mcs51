@@ -46,6 +46,7 @@ cmake --build ../llvm-8051-build \
   llvm/test/MC/MCS51 \
   lld/test/ELF/mcs51-relocations.s \
   lld/test/ELF/mcs51-11-bit-branch.s \
+  lld/test/ELF/mcs51-auto-bank.s \
   llvm/test/CodeGen/8051/cc2530-firmware.c \
   llvm/test/CodeGen/8051/division-runtime.c
 ```
@@ -105,8 +106,13 @@ direct calls. The trampoline saves FMAP, selects the callee bank, calls the
 function, and restores FMAP, including when the caller is itself banked.
 Taking the address of a banked function yields its common-area trampoline, so
 ordinary 16-bit function pointers can call banked functions indirectly; the
-trampoline saves and restores FMAP around the call. Automatic function
-placement across banks remains unsupported. CC2530 interrupt handlers use
+trampoline saves and restores FMAP around the call. Functions placed in unique
+`.mcs51.autobank.<name>` sections are distributed across the seven flash banks
+by LLD's size-balanced placement pass. Their calls and function pointers use
+common-area trampolines whose bank number is resolved after placement.
+Functions left in ordinary `.text.*` sections remain in the common bank, so
+automatic placement of arbitrary functions is still unsupported. CC2530
+interrupt handlers use
 `__attribute__((interrupt(N)))`, where `N` is 0 through 17. The backend saves
 the interrupted register-bank-0 state and SFR registers, then returns with
 `RETI`. It emits a three-byte `LJMP` vector stub; `cc2530.ld` places vector N

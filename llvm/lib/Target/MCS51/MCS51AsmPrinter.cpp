@@ -33,7 +33,9 @@ public:
                               uint64_t Offset) override {
     if (const auto *F = dyn_cast<Function>(CV)) {
       unsigned Bank = F->hasSection() ? getMCS51CodeBank(F->getSection()) : 0;
-      if (Bank) {
+      bool AutoBank =
+          F->hasSection() && isMCS51AutoBankSection(F->getSection());
+      if (Bank || AutoBank) {
         const MCExpr *Address = MCSymbolRefExpr::create(
             getBankThunkSymbol(*F), OutContext);
         if (Offset)
@@ -49,6 +51,7 @@ public:
   void emitFunctionBodyEnd() override {
     const Function &F = MF->getFunction();
     unsigned Bank = F.hasSection() ? getMCS51CodeBank(F.getSection()) : 0;
+    bool AutoBank = F.hasSection() && isMCS51AutoBankSection(F.getSection());
     if (F.hasFnAttribute("interrupt")) {
       if (Bank)
         report_fatal_error(
@@ -82,16 +85,17 @@ public:
       emitIndirectCallThunk();
     }
 
-    if (!Bank)
+    if (!Bank && !AutoBank)
       return;
 
     MCSection *SavedSection = OutStreamer->getCurrentSectionOnly();
     SmallString<48> ThunkSectionName;
     raw_svector_ostream(ThunkSectionName)
-        << ".text.bankthunks." << MF->getFunctionNumber();
-    MCSection *ThunkSection = OutContext.getELFSection(
-        ThunkSectionName, ELF::SHT_PROGBITS,
-        ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
+        << (AutoBank ? ".text.autobankthunks." : ".text.bankthunks.")
+        << MF->getFunctionNumber();
+    MCSection *ThunkSection =
+        OutContext.getELFSection(ThunkSectionName, ELF::SHT_PROGBITS,
+                                 ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
     OutStreamer->switchSection(ThunkSection);
 
     MCSymbol *Thunk = OutContext.getOrCreateSymbol(
@@ -99,7 +103,16 @@ public:
     OutStreamer->emitSymbolAttribute(Thunk, MCSA_Global);
     OutStreamer->emitLabel(Thunk);
     emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x9f});
-    emitBankThunkInstruction(MCS51::MOV_DIRECT_IMM, {0x9f, Bank});
+    if (AutoBank) {
+      MCInst SelectBank;
+      SelectBank.setOpcode(MCS51::MOV_DIRECT_IMM);
+      SelectBank.addOperand(MCOperand::createImm(0x9f));
+      SelectBank.addOperand(MCOperand::createExpr(
+          MCSymbolRefExpr::create(getSymbol(&F), OutContext)));
+      EmitToStreamer(*OutStreamer, SelectBank);
+    } else {
+      emitBankThunkInstruction(MCS51::MOV_DIRECT_IMM, {0x9f, Bank});
+    }
     MCInst Call;
     Call.setOpcode(MCS51::LCALL);
     Call.addOperand(MCOperand::createExpr(
@@ -160,6 +173,8 @@ public:
           unsigned TargetBank = Target->hasSection()
                                     ? getMCS51CodeBank(Target->getSection())
                                     : 0;
+          bool TargetAutoBank = Target->hasSection() &&
+                                isMCS51AutoBankSection(Target->getSection());
           unsigned CallerBank = MF->getFunction().hasSection()
                                     ? getMCS51CodeBank(
                                           MF->getFunction().getSection())
@@ -167,9 +182,9 @@ public:
           // A banked function's 16-bit code address is shared by every bank.
           // Use its common-area trampoline whenever the address escapes as a
           // value. Direct calls within the same bank still target the body.
-          if (TargetBank &&
-              (MI->getOpcode() != MCS51::LCALL ||
-               TargetBank != CallerBank))
+          if ((TargetBank &&
+               (MI->getOpcode() != MCS51::LCALL || TargetBank != CallerBank)) ||
+              TargetAutoBank)
             Symbol = getBankThunkSymbol(*Target);
         }
         const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, OutContext);

@@ -30,6 +30,11 @@ inline unsigned getMCS51CodeBank(StringRef Section) {
   return Bank;
 }
 
+/// Whether a function section requests link-time CC2530 bank assignment.
+inline bool isMCS51AutoBankSection(StringRef Section) {
+  return Section.starts_with(".mcs51.autobank.");
+}
+
 inline std::string getMCS51BankThunkName(StringRef FunctionName) {
   return (Twine("__mcs51_bankcall_") + FunctionName).str();
 }
