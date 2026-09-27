@@ -37,16 +37,16 @@ int main(void) {
 // DIS: lcall
 // DIS: lcall
 // DIS: lcall
-// DIS-LABEL: <read_direct_data>:
-// DIS: mov a, 48
-// DIS-LABEL: <read_indirect_data>:
-// DIS: mov r0, #49
-// DIS: mov a, @r0
 // DIS-LABEL: <main>:
 // DIS: mov 48, a
 // DIS: mov r0, #49
 // DIS: mov @r0, a
 // DIS: movx @dptr, a
+// DIS-LABEL: <read_indirect_data>:
+// DIS: mov r0, #49
+// DIS: mov a, @r0
+// DIS-LABEL: <read_direct_data>:
+// DIS: mov a, 48
 
 // IHEX: :01{{[0-9A-F][0-9A-F][0-9A-F][0-9A-F]}}0001
 // IHEX: :01{{[0-9A-F][0-9A-F][0-9A-F][0-9A-F]}}0002

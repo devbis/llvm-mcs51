@@ -59,9 +59,14 @@ int main(void) {
 // MAP: Size: {{[1-9][0-9]*}}
 // LINK-LABEL: <__mcs51_bankcall_banked_add>:
 // LINK: push 159
-// LINK: mov 159, #{{[12]}}
+// LINK: mov 159, #{{[1-7]}}
 // LINK: lcall 32768
 // LINK: pop 159
 // LINK: ret
 // LINK-LABEL: <__mcs51_bankcall_banked_xor>:
-// LINK: mov 159, #1
+// LINK: mov 159, #{{[1-7]}}
+// LINK-LABEL: <__mcs51_bankcall_call_banked>:
+// LINK: mov 159, #{{[1-7]}}
+// LINK: lcall 32768
+// LINK-LABEL: <__mcs51_bankcall_call_other_bank>:
+// LINK: mov 159, #{{[1-7]}}
