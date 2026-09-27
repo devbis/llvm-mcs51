@@ -1,10 +1,6 @@
-// RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
-// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
-// RUN:   -Wl,--no-check-sections \
-// RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s %s -o %t.elf
+// RUN: %S/../../../lib/Target/MCS51/cc2530-build.sh %s -o %t.elf
 // RUN: llvm-readobj --sections --symbols %t.elf | FileCheck %s --check-prefix=MAP
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=DIS
-// RUN: llvm-objcopy --output-target=ihex %t.elf %t.hex
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex
 
 volatile unsigned char counter;
