@@ -819,12 +819,9 @@ SDValue MCS51TargetLowering::LowerReturn(
     if (RetVal.getValueType() == MVT::i16)
       RetVal = DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, RetVal);
     if (isa<ConstantSDNode>(RetVal)) {
-      Register Temp = DAG.getMachineFunction().getRegInfo().createVirtualRegister(
-          &MCS51::MCS51GPR8RegClass);
-      Chain = DAG.getCopyToReg(Chain, DL, Temp, RetVal);
-      SDValue Copy = DAG.getCopyFromReg(Chain, DL, Temp, MVT::i8);
-      Chain = Copy.getValue(1);
-      RetVal = Copy;
+      uint8_t Value = cast<ConstantSDNode>(RetVal)->getZExtValue();
+      SDValue Imm = DAG.getConstant(Value, DL, MVT::i8);
+      return DAG.getNode(MCS51ISD::RET_A_IMM, DL, MVT::Other, Chain, Imm);
     }
     SDValue Ops[] = {Chain, RetVal};
     return DAG.getNode(MCS51ISD::RET_A, DL, MVT::Other, Ops);
@@ -915,6 +912,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  if (MI.getOpcode() == MCS51::RET_A_IMM) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+        .addImm(MI.getOperand(0).getImm());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA))
+        .addReg(MCS51::A, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::RET_ZEXT8 ||
       MI.getOpcode() == MCS51::RET_SEXT8) {
     Register Value = MI.getOperand(0).getReg();
