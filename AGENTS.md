@@ -165,3 +165,13 @@ library. Classic 8051 and CC2530 support must be verified
 feature by feature; do not describe the target as fully supported until the
 remaining ABI, instruction, memory-map, runtime, optimization, and
 firmware-image gaps are implemented and tested.
+
+Generic (`__generic`) pointers are not implemented yet. LLVM's SelectionDAG
+pointer lowering currently represents pointers with a `MVT`, whose integer
+pointer types are limited to the target's simple value types; declaring a
+24-bit pointer in the data layout alone produces an invalid EVT during
+CodeGen. A 32-bit padded pointer experiment also reached unsupported i32
+comparison legalization. Do not add a `p8:24` layout or advertise generic
+pointer support until the representation, three-byte ABI, address-space
+conversion, and dynamic dereference paths are implemented together and
+covered by codegen and firmware tests.
