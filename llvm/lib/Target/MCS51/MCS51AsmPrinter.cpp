@@ -86,8 +86,11 @@ public:
       return;
 
     MCSection *SavedSection = OutStreamer->getCurrentSectionOnly();
+    SmallString<48> ThunkSectionName;
+    raw_svector_ostream(ThunkSectionName)
+        << ".text.bankthunks." << MF->getFunctionNumber();
     MCSection *ThunkSection = OutContext.getELFSection(
-        ".text.bankthunks", ELF::SHT_PROGBITS,
+        ThunkSectionName, ELF::SHT_PROGBITS,
         ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
     OutStreamer->switchSection(ThunkSection);
 
