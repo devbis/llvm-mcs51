@@ -2,9 +2,15 @@
 
 // CHECK-LABEL: add_one:
 // CHECK: mov a, r7
-// CHECK: add a, #1
+// CHECK: inc a
 // CHECK: ret
 unsigned char add_one(unsigned char value) { return value + 1; }
+
+// CHECK-LABEL: subtract_one:
+// CHECK: mov a, r7
+// CHECK: dec a
+// CHECK: ret
+unsigned char subtract_one(unsigned char value) { return value - 1; }
 
 // CHECK-LABEL: add_values:
 // CHECK: mov a, r6

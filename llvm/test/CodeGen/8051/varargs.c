@@ -71,7 +71,9 @@ __attribute__((noinline)) float echo_float(float value) { return value; }
 float call_echo_float(void) { return echo_float(2.5f); }
 
 // ASM-LABEL: first_vararg:
-// ASM: add a, #-1
+// ASM: add a, #-2
+// ASM: dec a
+// ASM: dec a
 // ASM: add a, #-2
 // ASM-O2-LABEL: first_double_vararg:
 // ASM-O2: mov r4, a
@@ -93,12 +95,12 @@ float call_echo_float(void) { return echo_float(2.5f); }
 // ASM-O2: push 224
 // ASM-O2: lcall first_double_vararg
 // ASM-LABEL: second_vararg:
-// ASM: add a, #-1
 // ASM: add a, #-2
-// ASM: add a, #-1
+// ASM: dec a
+// ASM: dec a
 // ASM: add a, #-2
 // ASM-LABEL: first_long_vararg:
-// ASM: add a, #-1
 // ASM: add a, #-2
-// ASM: add a, #-1
+// ASM: dec a
+// ASM: dec a
 // ASM: add a, #-2

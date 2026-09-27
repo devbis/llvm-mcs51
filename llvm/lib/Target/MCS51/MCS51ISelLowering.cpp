@@ -2638,6 +2638,19 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   bool IsSubtraction = MI.getOpcode() == MCS51::SUB8rr ||
                        MI.getOpcode() == MCS51::SUB8ri;
 
+  int64_t Immediate = IsImmediate ? MI.getOperand(2).getImm() : 0;
+  bool IsIncrement = MI.getOpcode() == MCS51::ADD8ri && Immediate == 1;
+  bool IsDecrement = (MI.getOpcode() == MCS51::ADD8ri && Immediate == -1) ||
+                     (MI.getOpcode() == MCS51::SUB8ri && Immediate == 1);
+  if (IsIncrement || IsDecrement) {
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL,
+            TII.get(IsIncrement ? MCS51::INC_A : MCS51::DEC_A));
+    MBB->getParent()->getRegInfo().replaceRegWith(Dst, MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+
   BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
   if (IsSubtraction)
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
