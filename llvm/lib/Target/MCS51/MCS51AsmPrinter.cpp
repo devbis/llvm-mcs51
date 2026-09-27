@@ -108,6 +108,27 @@ public:
   }
 
   void emitInstruction(const MachineInstr *MI) override {
+    if (MI->getOpcode() == MCS51::SUB16DEC) {
+      auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
+        MCInst Inst;
+        Inst.setOpcode(Opcode);
+        for (const MCOperand &Operand : Operands)
+          Inst.addOperand(Operand);
+        EmitToStreamer(*OutStreamer, Inst);
+      };
+      MCSymbol *SkipHighDecrement =
+          OutContext.createTempSymbol("mcs51_sub16_skip_high", true);
+      Emit(MCS51::MOV_A_DIRECT,
+           {MCOperand::createReg(MCS51::A), MCOperand::createImm(0x82)});
+      Emit(MCS51::JNZ,
+           {MCOperand::createExpr(MCSymbolRefExpr::create(
+               SkipHighDecrement, OutContext))});
+      Emit(MCS51::DEC_DIRECT, {MCOperand::createImm(0x83)});
+      OutStreamer->emitLabel(SkipHighDecrement);
+      Emit(MCS51::DEC_DIRECT, {MCOperand::createImm(0x82)});
+      return;
+    }
+
     if (MI->getOpcode() == MCS51::ICALL) {
       emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x82});
       emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x83});

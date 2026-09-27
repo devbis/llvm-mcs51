@@ -20,27 +20,21 @@ unsigned short add_large16(unsigned short value) { return value + 60000; }
 // CHECK-NEXT: ret
 // CHECK-LABEL: subtract_one16:
 // CHECK: mov a, 130
-// CHECK-NEXT: add a, #255
-// CHECK-NEXT: mov 130, a
-// CHECK-NEXT: mov a, 131
-// CHECK-NEXT: addc a, #255
-// CHECK-NEXT: mov 131, a
+// CHECK-NEXT: jnz .Lmcs51_sub16_skip_high{{[0-9]+}}
+// CHECK: dec 131
+// CHECK: dec 130
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_negative_one16:
 // CHECK: mov a, 130
-// CHECK-NEXT: add a, #255
-// CHECK-NEXT: mov 130, a
-// CHECK-NEXT: mov a, 131
-// CHECK-NEXT: addc a, #255
-// CHECK-NEXT: mov 131, a
+// CHECK-NEXT: jnz .Lmcs51_sub16_skip_high{{[0-9]+}}
+// CHECK: dec 131
+// CHECK: dec 130
 // CHECK-NEXT: ret
 // CHECK-LABEL: subtract_one_signed16:
 // CHECK: mov a, 130
-// CHECK-NEXT: add a, #255
-// CHECK-NEXT: mov 130, a
-// CHECK-NEXT: mov a, 131
-// CHECK-NEXT: addc a, #255
-// CHECK-NEXT: mov 131, a
+// CHECK-NEXT: jnz .Lmcs51_sub16_skip_high{{[0-9]+}}
+// CHECK: dec 131
+// CHECK: dec 130
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_25616:
 // CHECK: inc 131
