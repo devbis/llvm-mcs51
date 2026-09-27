@@ -54,6 +54,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
+  setOperationAction(ISD::SRA, MVT::i8, Custom);
   setOperationAction(ISD::SRA, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i16, Custom);
   setOperationAction(ISD::SHL_PARTS, MVT::i16, Custom);
@@ -140,6 +141,20 @@ void MCS51TargetLowering::ReplaceNodeResults(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
+  if (Op.getOpcode() == ISD::SRA && Op.getValueType() == MVT::i8) {
+    SDValue Amount = Op.getOperand(1);
+    if (auto *C = dyn_cast<ConstantSDNode>(Amount)) {
+      uint64_t Shift = std::min<uint64_t>(C->getZExtValue(), 8);
+      return DAG.getNode(MCS51ISD::SRA8_IMM, DL, MVT::i8, Op.getOperand(0),
+                         DAG.getConstant(Shift, DL, MVT::i16));
+    }
+    SDValue Value = DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i16,
+                                Op.getOperand(0));
+    if (Amount.getValueType() != MVT::i16)
+      Amount = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Amount);
+    SDValue Shifted = DAG.getNode(ISD::SRA, DL, MVT::i16, Value, Amount);
+    return DAG.getNode(ISD::TRUNCATE, DL, MVT::i8, Shifted);
+  }
   if (Op.getOpcode() == ISD::VASTART)
     return LowerVASTART(Op, DAG);
   if (Op.getOpcode() == ISD::VAARG)
@@ -2610,17 +2625,23 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::SHL8ri || MI.getOpcode() == MCS51::SRL8ri) {
+  if (MI.getOpcode() == MCS51::SHL8ri || MI.getOpcode() == MCS51::SRL8ri ||
+      MI.getOpcode() == MCS51::SRA8ri) {
     unsigned Amount = MI.getOperand(2).getImm();
+    bool IsArithmetic = MI.getOpcode() == MCS51::SRA8ri;
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-    if (Amount >= 8) {
+    if (!IsArithmetic && Amount >= 8) {
       BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     } else {
       unsigned RotateOpcode = MI.getOpcode() == MCS51::SHL8ri
                                   ? MCS51::RLC_A
                                   : MCS51::RRC_A;
+      Amount = std::min(Amount, 8u);
       while (Amount--) {
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+        if (IsArithmetic)
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT)).addImm(0xE7);
+        else
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
         BuildMI(*MBB, MII, DL, TII.get(RotateOpcode));
       }
     }

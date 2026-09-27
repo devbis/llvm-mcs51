@@ -78,6 +78,30 @@ unsigned char shift_right_two(unsigned char value) {
   return (unsigned char)(value >> 2);
 }
 
+// CHECK-LABEL: arithmetic_shift_one:
+// CHECK: mov a, r7
+// CHECK-NEXT: mov c, 231
+// CHECK-NEXT: rrc a
+// CHECK-NEXT: ret
+signed char arithmetic_shift_one(signed char value) { return value >> 1; }
+
+// CHECK-LABEL: arithmetic_shift_two:
+// CHECK: mov a, r7
+// CHECK-NEXT: mov c, 231
+// CHECK-NEXT: rrc a
+// CHECK-NEXT: mov c, 231
+// CHECK-NEXT: rrc a
+// CHECK-NEXT: ret
+signed char arithmetic_shift_two(signed char value) { return value >> 2; }
+
+// CHECK-LABEL: arithmetic_shift_variable:
+// CHECK: mov c, 231
+// CHECK: djnz
+signed char arithmetic_shift_variable(signed char value,
+                                       unsigned char amount) {
+  return value >> amount;
+}
+
 // CHECK-LABEL: add_words:
 // CHECK: add a,
 // CHECK: addc a,
