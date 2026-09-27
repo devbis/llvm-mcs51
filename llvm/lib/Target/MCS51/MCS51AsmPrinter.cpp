@@ -11,10 +11,12 @@
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include <initializer_list>
@@ -191,11 +193,32 @@ public:
         TM.Options.FunctionSections) {
       for (const MachineOperand &MO : MI->operands())
         if (MO.isSymbol()) {
+          StringRef TargetName = MO.getSymbolName();
+          if (TargetName.starts_with("__mcs51_bankcall_")) {
+            MCInst Call;
+            Call.setOpcode(MCS51::LCALL);
+            Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+                GetExternalSymbolSymbol(TargetName), OutContext)));
+            EmitToStreamer(*OutStreamer, Call);
+            return;
+          }
+          const Function *Target = MF->getFunction().getParent()->getFunction(
+              TargetName);
+          if (Target && !Target->isDeclaration() &&
+              (getMCS51CodeBank(Target->getSection()) ||
+               isAutoBankFunction(*Target, TM.getTargetCPU(),
+                                  TM.Options.FunctionSections))) {
+            MCInst Call;
+            Call.setOpcode(MCS51::LCALL);
+            Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+                getBankThunkSymbol(*Target), OutContext)));
+            EmitToStreamer(*OutStreamer, Call);
+            return;
+          }
           MCInst Call;
           Call.setOpcode(MCS51::LCALL);
           Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
-              getExternalBankCallThunkSymbol(MF->getFunction(),
-                                             MO.getSymbolName()),
+              getExternalBankCallThunkSymbol(TargetName),
               OutContext)));
           EmitToStreamer(*OutStreamer, Call);
           return;
@@ -267,13 +290,8 @@ private:
     return OutContext.getOrCreateSymbol(Name);
   }
 
-  MCSymbol *getExternalBankCallThunkSymbol(const Function &F,
-                                           StringRef TargetName) {
-    SmallString<96> Name(".L");
-    Name.append(getSymbol(&F)->getName());
-    Name.append(".mcs51.bankcall.");
-    Name.append(TargetName);
-    return OutContext.getOrCreateSymbol(Name);
+  MCSymbol *getExternalBankCallThunkSymbol(StringRef TargetName) {
+    return OutContext.getOrCreateSymbol(getMCS51BankThunkName(TargetName));
   }
 
   void emitExternalBankCallThunks() {
@@ -283,10 +301,28 @@ private:
         if (MI.getOpcode() != MCS51::LCALL)
           continue;
         for (const MachineOperand &MO : MI.operands()) {
-          if (!MO.isSymbol())
+          StringRef TargetName;
+          const Function *Target = nullptr;
+          if (MO.isSymbol()) {
+            TargetName = MO.getSymbolName();
+            if (TargetName.starts_with("__mcs51_bankcall_"))
+              continue;
+            Target =
+                MF->getFunction().getParent()->getFunction(TargetName);
+          } else if (MO.isGlobal()) {
+            const GlobalValue *GV = MO.getGlobal();
+            TargetName = GV->getName();
+            Target = dyn_cast<Function>(GV);
+          } else {
             continue;
-          StringRef TargetName = MO.getSymbolName();
-          if (!is_contained(Targets, TargetName))
+          }
+          // Definitions emit their own strong trampoline (when banked) or
+          // can be called directly. Only declarations and unresolved symbols
+          // need a weak caller-side fallback.
+          if (Target && !Target->isDeclaration())
+            continue;
+          if (!ExternalBankCallThunks.contains(TargetName) &&
+              !is_contained(Targets, TargetName))
             Targets.push_back(TargetName);
         }
       }
@@ -302,8 +338,11 @@ private:
         ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
     OutStreamer->switchSection(ThunkSection);
     for (StringRef TargetName : Targets) {
+      ExternalBankCallThunks.insert(TargetName);
+      MCSymbol *Thunk = getExternalBankCallThunkSymbol(TargetName);
+      OutStreamer->emitSymbolAttribute(Thunk, MCSA_Weak);
       OutStreamer->emitLabel(
-          getExternalBankCallThunkSymbol(MF->getFunction(), TargetName));
+          Thunk);
       emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x9f});
       MCInst SelectBank;
       SelectBank.setOpcode(MCS51::MOV_DIRECT_IMM);
@@ -321,6 +360,8 @@ private:
     }
     OutStreamer->switchSection(SavedSection);
   }
+
+  StringSet<> ExternalBankCallThunks;
 
   void emitThunkInstruction(unsigned Opcode,
                             std::initializer_list<MCOperand> Operands) {

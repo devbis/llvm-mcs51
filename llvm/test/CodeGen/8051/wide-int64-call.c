@@ -26,12 +26,23 @@ unsigned long long forward64(unsigned long long value,
   return helper(value, selector);
 }
 
+__attribute__((noinline))
+unsigned long long forward64_again(unsigned long long value,
+                                   unsigned short selector) {
+  return helper(value, selector);
+}
+
 int main(void) { return (int)forward64(0x123456789abcdef0ull, 0x2345); }
 #endif
 
 // CHECK-LABEL: forward64:
 // CHECK: lcall __mcs51_bankcall_helper
 // CHECK: ret
+// CHECK: .weak __mcs51_bankcall_helper
+// CHECK-LABEL: forward64_again:
+// CHECK: lcall __mcs51_bankcall_helper
+// CHECK: ret
+// CHECK-NOT: .weak __mcs51_bankcall_helper
 
 // LINK-LABEL: <helper>:
 // LINK: ret
