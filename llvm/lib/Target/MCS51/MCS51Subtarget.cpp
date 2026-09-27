@@ -34,6 +34,10 @@ void MCS51Subtarget::initLibcallLoweringInfo(
       {RTLIB::SHL_I64, RTLIB::impl___ashldi3},
       {RTLIB::SRL_I64, RTLIB::impl___lshrdi3},
       {RTLIB::SRA_I64, RTLIB::impl___ashrdi3},
+      {RTLIB::ADD_F32, RTLIB::impl___addsf3},
+      {RTLIB::SUB_F32, RTLIB::impl___subsf3},
+      {RTLIB::MUL_F32, RTLIB::impl___mulsf3},
+      {RTLIB::DIV_F32, RTLIB::impl___divsf3},
   };
   for (const auto &LC : LibraryCalls)
     Info.setLibcallImpl(LC.Op, LC.Impl);
