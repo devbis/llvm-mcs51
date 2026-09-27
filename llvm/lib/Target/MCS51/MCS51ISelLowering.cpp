@@ -2186,6 +2186,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::INCDPTR16) {
     Register Dst = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    // DPTR may have been reused since Src was produced; reload the SSA value
+    // before applying the increment.
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .addReg(Src);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
