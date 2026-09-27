@@ -75,7 +75,9 @@ def SDT_MCS51Shift32Parts : SDTypeProfile<2, 3, [SDTCisVT<0, i16>,
                                                  SDTCisVT<3, i16>,
                                                  SDTCisVT<4, i16>] >;
 def MCS51cmpult16 : SDNode<"MCS51ISD::CMPULT16", SDT_MCS51CmpUlt16>;
+def MCS51cmpuge16 : SDNode<"MCS51ISD::CMPUGE16", SDT_MCS51CmpUlt16>;
 def MCS51cmpslt16 : SDNode<"MCS51ISD::CMPSLT16", SDT_MCS51CmpUlt16>;
+def MCS51cmpsge16 : SDNode<"MCS51ISD::CMPSGE16", SDT_MCS51CmpUlt16>;
 def MCS51cmpeq16 : SDNode<"MCS51ISD::CMPEQ16", SDT_MCS51CmpUlt16>;
 def SDT_MCS51AddExtendedByteImmediate : SDTypeProfile<1, 2, [
   SDTCisVT<0, i16>, SDTCisVT<1, i8>, SDTCisVT<2, i16>
@@ -96,7 +98,9 @@ def MCS51sub_zext8_16 : SDNode<"MCS51ISD::SUB_ZEXT8_16",
 def MCS51sub_sext8_16 : SDNode<"MCS51ISD::SUB_SEXT8_16",
                                SDT_MCS51AddExtendedByte>;
 def MCS51cmpult8 : SDNode<"MCS51ISD::CMPULT8", SDT_MCS51Cmp8>;
+def MCS51cmpuge8 : SDNode<"MCS51ISD::CMPUGE8", SDT_MCS51Cmp8>;
 def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
+def MCS51cmpsge8 : SDNode<"MCS51ISD::CMPSGE8", SDT_MCS51Cmp8>;
 def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
@@ -201,7 +205,7 @@ def CLR_A : MCS51Inst<0xE4, "clr a"> {
 }
 def CPL_A : MCS51Inst<0xF4, "cpl a">;
 def CLR_C : MCS51Inst<0xC3, "clr c"> { let Defs = [C]; }
-def CPL_C : MCS51Inst<0xB3, "cpl c">;
+def CPL_C : MCS51Inst<0xB3, "cpl c"> { let Defs = [C]; let Uses = [C]; }
 def SETB_C : MCS51Inst<0xD3, "setb c">;
 def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr"> {
   let isBranch = 1; let isIndirectBranch = 1;
@@ -1760,12 +1764,20 @@ def : Pat<(MCS51cmpult16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 0)>;
 def : Pat<(MCS51cmpslt16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 1)>;
+def : Pat<(MCS51cmpuge16 MCS51PTR:$lhs, MCS51PTR:$rhs),
+          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 3)>;
+def : Pat<(MCS51cmpsge16 MCS51PTR:$lhs, MCS51PTR:$rhs),
+          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 4)>;
 def : Pat<(MCS51cmpeq16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 2)>;
 def : Pat<(MCS51cmpult8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 0)>;
 def : Pat<(MCS51cmpslt8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 1)>;
+def : Pat<(MCS51cmpuge8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
+          (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 3)>;
+def : Pat<(MCS51cmpsge8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
+          (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 4)>;
 def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 2)>;
 

@@ -162,7 +162,8 @@ unsigned char less_than_words(unsigned short lhs, unsigned short rhs) {
 // CHECK-LABEL: less_equal_words:
 // CHECK: subb a,
 // CHECK: subb a,
-// CHECK: xrl a, #1
+// CHECK: cpl c
+// CHECK: rlc a
 // CHECK: ret
 unsigned char less_equal_words(unsigned short lhs, unsigned short rhs) {
   return lhs <= rhs;
@@ -179,7 +180,8 @@ unsigned char greater_words(unsigned short lhs, unsigned short rhs) {
 // CHECK-LABEL: greater_equal_words:
 // CHECK: subb a,
 // CHECK: subb a,
-// CHECK: xrl a, #1
+// CHECK: cpl c
+// CHECK: rlc a
 // CHECK: ret
 unsigned char greater_equal_words(unsigned short lhs, unsigned short rhs) {
   return lhs >= rhs;
@@ -196,6 +198,8 @@ unsigned char signed_less_words(short lhs, short rhs) { return lhs < rhs; }
 // CHECK-LABEL: signed_less_equal_words:
 // CHECK: xch a, 240
 // CHECK: xrl a,
+// CHECK: cpl c
+// CHECK: rlc a
 // CHECK: ret
 unsigned char signed_less_equal_words(short lhs, short rhs) {
   return lhs <= rhs;
@@ -213,6 +217,8 @@ unsigned char signed_greater_words(short lhs, short rhs) {
 // CHECK: xrl a,
 // CHECK: xch a, 240
 // CHECK: xrl a,
+// CHECK: cpl c
+// CHECK: rlc a
 // CHECK: ret
 unsigned char signed_greater_equal_words(short lhs, short rhs) {
   return lhs >= rhs;
