@@ -76,10 +76,23 @@ public:
     return Feature == "mcs51" || Feature == "8051";
   }
   std::string_view getClobbers() const override { return ""; }
-  ArrayRef<const char *> getGCCRegNames() const override { return {}; }
+  ArrayRef<const char *> getGCCRegNames() const override {
+    static const char *const Names[] = {"a", "b", "c", "dptr", "dpl",
+                                        "dph", "sp", "psw", "pc", "r0",
+                                        "r1", "r2", "r3", "r4", "r5",
+                                        "r6", "r7"};
+    return Names;
+  }
   ArrayRef<GCCRegAlias> getGCCRegAliases() const override { return {}; }
-  bool validateAsmConstraint(const char *&, ConstraintInfo &) const override {
-    return false;
+  bool validateAsmConstraint(const char *&Name,
+                             ConstraintInfo &Info) const override {
+    switch (*Name) {
+    case 'r': // Register-bank registers R0-R7, or DPTR for 16-bit operands.
+      Info.setAllowsRegister();
+      return true;
+    default:
+      return false;
+    }
   }
 };
 

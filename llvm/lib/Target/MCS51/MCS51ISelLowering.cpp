@@ -116,6 +116,22 @@ unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
   return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
 }
 
+std::pair<unsigned, const TargetRegisterClass *>
+MCS51TargetLowering::getRegForInlineAsmConstraint(
+    const TargetRegisterInfo *TRI, StringRef Constraint, MVT VT) const {
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    case 'r':
+      if (VT == MVT::i8)
+        return {0, &MCS51::MCS51GPR8RegClass};
+      if (VT == MVT::i16)
+        return {0, &MCS51::MCS51PTRRegClass};
+      break;
+    }
+  }
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
 TargetLowering::ShiftLegalizationStrategy
 MCS51TargetLowering::preferredShiftLegalizationStrategy(
     SelectionDAG &DAG, SDNode *N, unsigned ExpansionFactor) const {
