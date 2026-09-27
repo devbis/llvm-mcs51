@@ -105,27 +105,27 @@ uint32_t __fixunssfsi(float Value) {
   return (Magnitude & ValidMask) | (UINT32_MAX & SaturateMask);
 }
 
-static uint32_t uint32_to_float32_bits(uint32_t Magnitude, uint32_t Sign) {
+static uint32_t uint64_to_float32_bits(uint64_t Magnitude, uint32_t Sign) {
   if (!Magnitude)
     return 0;
 
   int Exponent = 23;
-  uint32_t Probe = Magnitude;
-  while (Probe >= UINT32_C(0x01000000)) {
+  uint64_t Probe = Magnitude;
+  while (Probe >= UINT64_C(0x01000000)) {
     Probe >>= 1;
     ++Exponent;
   }
-  while (Probe < UINT32_C(0x00800000)) {
+  while (Probe < UINT64_C(0x00800000)) {
     Probe <<= 1;
     --Exponent;
   }
 
-  uint32_t Significand;
+  uint64_t Significand;
   if (Exponent > 23) {
     unsigned Shift = Exponent - 23;
     Significand = Magnitude >> Shift;
-    uint32_t Discarded = Magnitude & ((UINT32_C(1) << Shift) - 1);
-    uint32_t Halfway = UINT32_C(1) << (Shift - 1);
+    uint64_t Discarded = Magnitude & ((UINT64_C(1) << Shift) - 1);
+    uint64_t Halfway = UINT64_C(1) << (Shift - 1);
     if (Discarded > Halfway ||
         (Discarded == Halfway && (Significand & 1)))
       ++Significand;
@@ -133,13 +133,13 @@ static uint32_t uint32_to_float32_bits(uint32_t Magnitude, uint32_t Sign) {
     Significand = Magnitude << (23 - Exponent);
   }
 
-  if (Significand == UINT32_C(0x01000000)) {
+  if (Significand == UINT64_C(0x01000000)) {
     Significand >>= 1;
     ++Exponent;
   }
 
   return (Sign << 31) | ((uint32_t)(Exponent + 127) << 23) |
-         (Significand & UINT32_C(0x007fffff));
+         ((uint32_t)Significand & UINT32_C(0x007fffff));
 }
 
 float __floatsisf(int32_t Value) {
@@ -147,12 +147,79 @@ float __floatsisf(int32_t Value) {
   uint32_t Sign = Bits >> 31;
   uint32_t SignMask = 0 - Sign;
   uint32_t Magnitude = (Bits ^ SignMask) + Sign;
-  Float32Bits Result = {.Bits = uint32_to_float32_bits(Magnitude, Sign)};
+  Float32Bits Result = {.Bits = uint64_to_float32_bits(Magnitude, Sign)};
   return Result.Float;
 }
 
 float __floatunsisf(uint32_t Value) {
-  Float32Bits Result = {.Bits = uint32_to_float32_bits(Value, 0)};
+  Float32Bits Result = {.Bits = uint64_to_float32_bits(Value, 0)};
+  return Result.Float;
+}
+
+int64_t __fixsfdi(float Value) {
+  const uint64_t SignificandMask = UINT64_C(0x007fffff);
+  const uint64_t HiddenBit = UINT64_C(0x00800000);
+  Float32Bits Bits = {.Float = Value};
+  uint32_t Sign = Bits.Bits >> 31;
+  uint64_t SignMask = 0 - (uint64_t)Sign;
+  uint32_t RawExponent = (Bits.Bits >> 23) & 0xff;
+  uint32_t Exponent = RawExponent - 127;
+  uint32_t Underflow = Exponent >> 31;
+  uint32_t Overflow = ((RawExponent - 190) >> 31) ^ 1;
+  uint32_t Valid = (Underflow ^ 1) & (Overflow ^ 1);
+  uint64_t Significand = (Bits.Bits & SignificandMask) | HiddenBit;
+  uint32_t ShiftLeft = ((Exponent - 23) >> 31) ^ 1;
+  uint64_t ShiftMask = 0 - (uint64_t)ShiftLeft;
+  uint32_t RightShift = (23 - Exponent) & 63;
+  uint32_t LeftShift = (Exponent - 23) & 63;
+  uint64_t RightMagnitude = Significand >> RightShift;
+  uint64_t LeftMagnitude = Significand << LeftShift;
+  uint64_t Magnitude = (RightMagnitude & ~ShiftMask) |
+                       (LeftMagnitude & ShiftMask);
+  uint64_t SignedMagnitude = (Magnitude ^ SignMask) + Sign;
+  uint64_t Saturated = UINT64_C(0x7fffffffffffffff) ^ SignMask;
+  uint64_t ValidMask = 0 - (uint64_t)Valid;
+  uint64_t OverflowMask = 0 - (uint64_t)Overflow;
+  return (int64_t)((SignedMagnitude & ValidMask) |
+                   (Saturated & OverflowMask));
+}
+
+uint64_t __fixunssfdi(float Value) {
+  const uint64_t SignificandMask = UINT64_C(0x007fffff);
+  const uint64_t HiddenBit = UINT64_C(0x00800000);
+  Float32Bits Bits = {.Float = Value};
+  uint32_t Sign = Bits.Bits >> 31;
+  uint32_t RawExponent = (Bits.Bits >> 23) & 0xff;
+  uint32_t Exponent = RawExponent - 127;
+  uint32_t Underflow = Exponent >> 31;
+  uint32_t Overflow = ((RawExponent - 191) >> 31) ^ 1;
+  uint32_t Valid = (Sign ^ 1) & (Underflow ^ 1) & (Overflow ^ 1);
+  uint32_t Saturate = (Sign ^ 1) & Overflow;
+  uint64_t Significand = (Bits.Bits & SignificandMask) | HiddenBit;
+  uint32_t ShiftLeft = ((Exponent - 23) >> 31) ^ 1;
+  uint64_t ShiftMask = 0 - (uint64_t)ShiftLeft;
+  uint32_t RightShift = (23 - Exponent) & 63;
+  uint32_t LeftShift = (Exponent - 23) & 63;
+  uint64_t RightMagnitude = Significand >> RightShift;
+  uint64_t LeftMagnitude = Significand << LeftShift;
+  uint64_t Magnitude = (RightMagnitude & ~ShiftMask) |
+                       (LeftMagnitude & ShiftMask);
+  uint64_t ValidMask = 0 - (uint64_t)Valid;
+  uint64_t SaturateMask = 0 - (uint64_t)Saturate;
+  return (Magnitude & ValidMask) | (UINT64_MAX & SaturateMask);
+}
+
+float __floatdisf(int64_t Value) {
+  uint64_t Bits = (uint64_t)Value;
+  uint32_t Sign = Bits >> 63;
+  uint64_t SignMask = 0 - (uint64_t)Sign;
+  uint64_t Magnitude = (Bits ^ SignMask) + Sign;
+  Float32Bits Result = {.Bits = uint64_to_float32_bits(Magnitude, Sign)};
+  return Result.Float;
+}
+
+float __floatundisf(uint64_t Value) {
+  Float32Bits Result = {.Bits = uint64_to_float32_bits(Value, 0)};
   return Result.Float;
 }
 
