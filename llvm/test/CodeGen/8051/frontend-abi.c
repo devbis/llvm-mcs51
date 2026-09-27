@@ -7,6 +7,11 @@
 // RUN:       --implicit-check-not=crti.o --implicit-check-not=-lgcc \
 // RUN:       --implicit-check-not=-lc --implicit-check-not=-dynamic-linker \
 // RUN:       --implicit-check-not=eh-frame-hdr
+// RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -### %s -o %t 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NOSTDLIB \
+// RUN:       --implicit-check-not=cc2530.ld \
+// RUN:       --implicit-check-not=cc2530_startup.o \
+// RUN:       --implicit-check-not=mcs51-runtime.o
 
 // DEFAULT: "-cc1" "-triple" "mcs51"
 // DEFAULT-SAME: "-ffreestanding"
@@ -14,6 +19,7 @@
 // SIGNED: "-cc1" "-triple" "mcs51"
 // LINK: {{ld.lld}}
 // LINK-SAME: "-static"
+// NOSTDLIB: {{ld.lld}}
 
 #ifndef __8051__
 #error "missing MCS-51 predefined macro"

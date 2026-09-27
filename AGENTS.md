@@ -28,7 +28,7 @@ Build the compiler and core code-generation tools with:
 ```sh
 cmake --build ../llvm-8051-build \
   --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj \
-  FileCheck lld -j 10
+  FileCheck lld mcs51-runtime -j 10
 ```
 
 ## Verification
@@ -39,7 +39,7 @@ directory, then run the focused MCS-51 tests. From the `llvm-8051` source root:
 ```sh
 cmake --build ../llvm-8051-build \
   --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj FileCheck lld \
-  -j 10
+  mcs51-runtime -j 10
 
 ../llvm-8051-build/bin/llvm-lit -q \
   llvm/test/CodeGen/8051 \
@@ -55,6 +55,12 @@ by Intel HEX generation. Keep new MCS-51-specific tests inside this checkout,
 even when nearby test directories are symlinks to another LLVM checkout. The
 Clang driver defaults MCS-51 compilation to freestanding mode and uses static
 bare-metal links without hosted startup files or default system libraries.
+Building `mcs51-runtime` compiles the arithmetic runtime and CC2530 startup
+objects into Clang's resource directory. With those files present,
+`clang -target mcs51 -mcpu=cc2530 app.c -o firmware.elf` automatically links
+the runtime, startup, CC2530 linker script, and section garbage collection.
+Use `llvm-objcopy --output-target=ihex firmware.elf firmware.hex` to emit Intel
+HEX. `-nostdlib` disables this automatic CC2530 profile.
 
 For a standalone CC2530 image, use
 `llvm/lib/Target/MCS51/cc2530-build.sh source.c -o firmware.elf`. The script

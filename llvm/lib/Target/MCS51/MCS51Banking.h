@@ -10,6 +10,7 @@
 #define LLVM_LIB_TARGET_MCS51_MCS51BANKING_H
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
 #include <string>
 
 namespace llvm {
@@ -30,7 +31,7 @@ inline unsigned getMCS51CodeBank(StringRef Section) {
 }
 
 inline std::string getMCS51BankThunkName(StringRef FunctionName) {
-  return ("__mcs51_bankcall_" + FunctionName).str();
+  return (Twine("__mcs51_bankcall_") + FunctionName).str();
 }
 
 } // namespace llvm
