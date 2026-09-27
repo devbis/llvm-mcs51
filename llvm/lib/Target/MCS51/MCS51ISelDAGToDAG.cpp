@@ -137,11 +137,9 @@ public:
           return;
         }
       }
-      // Default pointers use the 16-bit XDATA bus for indirect accesses, so
-      // casts between generic and explicitly qualified XDATA pointers do not
-      // change the pointer representation.
-      if ((SrcAS == MCS51::Default && DstAS == MCS51::XData) ||
-          (SrcAS == MCS51::XData && DstAS == MCS51::Default)) {
+      EVT SrcVT = N->getOperand(0).getValueType();
+      EVT DstVT = N->getValueType(0);
+      if (SrcVT == DstVT) {
         ReplaceUses(SDValue(N, 0), N->getOperand(0));
         CurDAG->RemoveDeadNode(N);
         return;
