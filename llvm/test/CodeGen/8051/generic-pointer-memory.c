@@ -14,6 +14,9 @@ __code volatile const unsigned char code_byte = 0x81;
 __xdata volatile const unsigned char xdata_byte = 0x42;
 __pdata volatile const unsigned char pdata_byte = 0x24;
 __idata volatile const unsigned char idata_byte = 0x18;
+__xdata volatile unsigned char xdata_target;
+__pdata volatile unsigned char pdata_target;
+__idata volatile unsigned char idata_target;
 
 unsigned char load_generic_byte(generic_byte_ptr Pointer) { return *Pointer; }
 
@@ -65,6 +68,22 @@ unsigned char read_generic_idata_global(void) {
 
 unsigned char read_via_idata_cast(generic_const_byte_ptr Pointer) {
   return *(__idata const volatile unsigned char *)Pointer;
+}
+
+void write_generic_xdata(void) {
+  *(generic_byte_ptr)&xdata_target = 0x51;
+}
+
+void write_generic_pdata(void) {
+  *(generic_byte_ptr)&pdata_target = 0x52;
+}
+
+void write_generic_idata(void) {
+  *(generic_byte_ptr)&idata_target = 0x53;
+}
+
+void write_generic_code(void) {
+  *(generic_byte_ptr)&code_byte = 0x54;
 }
 
 generic_const_byte_ptr generic_code_address(void) {
@@ -145,6 +164,14 @@ int main(void) {
 // ASM: mov a, @r
 // ASM-LABEL: read_via_idata_cast:
 // ASM: mov a, @r
+// ASM-LABEL: write_generic_xdata:
+// ASM: movx @dptr, a
+// ASM-LABEL: write_generic_pdata:
+// ASM: movx @r0, a
+// ASM-LABEL: write_generic_idata:
+// ASM: mov @r0, a
+// ASM-LABEL: write_generic_code:
+// ASM: lcall __mcs51_gptrput8
 // ASM-LABEL: generic_code_address:
 // ASM: mov a, #-128
 // ASM-LABEL: generic_pdata_address:

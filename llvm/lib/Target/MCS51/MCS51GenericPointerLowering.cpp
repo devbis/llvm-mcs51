@@ -45,6 +45,8 @@ public:
           Cast->getSrcAddressSpace() == MCS51::Generic ||
           !isGenericTagSupported(Cast->getSrcAddressSpace()))
         continue;
+      if (isa<StoreInst>(&I) && Cast->getSrcAddressSpace() == MCS51::Code)
+        continue;
       if (auto *LI = dyn_cast<LoadInst>(&I))
         LI->setOperand(0, Cast->getPointerOperand());
       else
