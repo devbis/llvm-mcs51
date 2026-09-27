@@ -110,6 +110,20 @@ public:
       unsigned SrcAS = Cast->getSrcAddressSpace();
       unsigned DstAS = Cast->getDestAddressSpace();
       if (SrcAS == MCS51::Default && DstAS == MCS51::IData) {
+        int FI;
+        SDValue Index;
+        if (getIndexedFrameAddress(Cast->getOperand(0), FI, Index)) {
+          if (Index.getValueType() != MVT::i8)
+            Index = CurDAG->getNode(ISD::TRUNCATE, DL, MVT::i8, Index);
+          SDValue Ops[] = {
+              CurDAG->getTargetFrameIndex(FI, MVT::i16),
+              CurDAG->getTargetConstant(0, DL, MVT::i8), Index};
+          SDNode *Res = CurDAG->getMachineNode(MCS51::FRAMEADDR8_INDEX, DL,
+                                               N->getVTList(), Ops);
+          ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+          CurDAG->RemoveDeadNode(N);
+          return;
+        }
         int FrameFI;
         int64_t Offset;
         if (getFrameAddress(Cast->getOperand(0), FrameFI, Offset)) {

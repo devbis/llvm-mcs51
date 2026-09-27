@@ -84,6 +84,16 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     return true;
   }
 
+  if (MI->getOpcode() == MCS51::FRAMEADDR8_INDEX) {
+    Register Index = MI->getOperand(FIOperandNum + 2).getReg();
+    Register Dst = MI->getOperand(0).getReg();
+    EmitAddressAtOffset(Offset);
+    BuildMI(MBB, I, DL, TII.get(MCS51::ADD_A_RN)).addReg(Index);
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
+    MI->eraseFromParent();
+    return true;
+  }
+
   if (MI->getOpcode() == MCS51::FRAMEADDR_R1) {
     EmitAddressAtOffset(Offset);
     MI->eraseFromParent();
