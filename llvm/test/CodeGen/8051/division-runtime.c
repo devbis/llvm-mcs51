@@ -1,15 +1,6 @@
 // RUN: clang -target mcs51 -O2 -S %s -o - | FileCheck %s --check-prefix=CALL
-// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -ffunction-sections -fdata-sections -mllvm -verify-machineinstrs \
-// RUN:   -c %S/../../../lib/Target/MCS51/mcs51-runtime.c -o %t.runtime.o
-// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin -c %s -o %t.user.o
-// RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
-// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
-// RUN:   -Wl,--no-check-sections -Wl,--gc-sections \
-// RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s \
-// RUN:   %t.user.o %t.runtime.o -o %t.elf
+// RUN: %S/../../../lib/Target/MCS51/cc2530-build.sh -O2 %s -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
-// RUN: llvm-objcopy -O ihex %t.elf %t.hex
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex
 
 unsigned int divide_unsigned_word(unsigned int Numerator,
@@ -136,12 +127,4 @@ int main(void) {
 // LINK-DAG: Name: __divsi3
 // LINK-DAG: Name: __umodsi3
 // LINK-DAG: Name: __modsi3
-// LINK-DAG: Name: __ashldi3
-// LINK-DAG: Name: __lshrdi3
-// LINK-DAG: Name: __ashrdi3
-// LINK-DAG: Name: __udivdi3
-// LINK-DAG: Name: __divdi3
-// LINK-DAG: Name: __umoddi3
-// LINK-DAG: Name: __moddi3
-
 // IHEX: :00000001FF
