@@ -15,6 +15,22 @@ using namespace clang::CodeGen;
 
 namespace {
 class MCS51ABIInfo final : public DefaultABIInfo {
+  bool canExpandAggregate(QualType Ty) const {
+    Ty = Ty.getCanonicalType();
+    if (Ty->isScalarType())
+      return true;
+    if (const auto *ArrayTy = getContext().getAsConstantArrayType(Ty))
+      return canExpandAggregate(ArrayTy->getElementType());
+
+    const auto *RecordTy = Ty->getAs<RecordType>();
+    if (!RecordTy || !RecordTy->getDecl()->isStruct())
+      return false;
+    for (const FieldDecl *Field : RecordTy->getDecl()->fields())
+      if (Field->isBitField() || !canExpandAggregate(Field->getType()))
+        return false;
+    return true;
+  }
+
   llvm::Type *getAggregateCoerceType(QualType Ty) const {
     uint64_t Size = getContext().getTypeSize(Ty);
     if (!Size || Size > 64)
@@ -43,6 +59,8 @@ public:
         return DefaultABIInfo::classifyArgumentType(Ty);
       if (llvm::Type *CoerceTy = getAggregateCoerceType(Ty))
         return ABIArgInfo::getDirect(CoerceTy);
+      if (canExpandAggregate(Ty))
+        return ABIArgInfo::getExpand();
     }
     return DefaultABIInfo::classifyArgumentType(Ty);
   }
