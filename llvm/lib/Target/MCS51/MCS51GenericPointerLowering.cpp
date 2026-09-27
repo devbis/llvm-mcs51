@@ -15,6 +15,7 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <string>
@@ -28,9 +29,28 @@ public:
   MCS51GenericPointerLowering() : FunctionPass(ID) {}
 
   bool runOnFunction(Function &F) override {
+    bool Changed = false;
+    for (Instruction &I : instructions(F)) {
+      for (Use &Operand : I.operands()) {
+        auto *Cast = dyn_cast<AddrSpaceCastOperator>(Operand.get());
+        if (!Cast || (Cast->getSrcAddressSpace() != MCS51::Generic &&
+                      Cast->getDestAddressSpace() != MCS51::Generic))
+          continue;
+        IRBuilder<> B(&I);
+        Operand.set(lowerAddressSpaceCast(
+            B, Cast->getPointerOperand(), Cast->getType(),
+            Cast->getSrcAddressSpace(), Cast->getDestAddressSpace()));
+        Changed = true;
+      }
+    }
+
     SmallVector<Instruction *, 16> Worklist;
     for (Instruction &I : instructions(F)) {
-      if (auto *LI = dyn_cast<LoadInst>(&I)) {
+      if (auto *Cast = dyn_cast<AddrSpaceCastInst>(&I)) {
+        if (Cast->getSrcAddressSpace() == MCS51::Generic ||
+            Cast->getDestAddressSpace() == MCS51::Generic)
+          Worklist.push_back(Cast);
+      } else if (auto *LI = dyn_cast<LoadInst>(&I)) {
         if (LI->getPointerAddressSpace() == MCS51::Generic)
           Worklist.push_back(LI);
       } else if (auto *SI = dyn_cast<StoreInst>(&I)) {
@@ -39,9 +59,11 @@ public:
       }
     }
 
-    bool Changed = false;
     for (Instruction *I : Worklist) {
-      if (auto *LI = dyn_cast<LoadInst>(I)) {
+      if (auto *Cast = dyn_cast<AddrSpaceCastInst>(I)) {
+        lowerAddressSpaceCast(*Cast);
+        Changed = true;
+      } else if (auto *LI = dyn_cast<LoadInst>(I)) {
         lowerLoad(*LI);
         Changed = true;
       } else {
@@ -57,6 +79,69 @@ public:
   }
 
 private:
+  static uint8_t getGenericTag(unsigned AddressSpace) {
+    // Match the classic MCS-51 generic pointer encoding used by the runtime:
+    // CODE=0x80, DATA/IDATA=0x40, PDATA=0x60, XDATA=0x00. The default near
+    // pointer uses the target's default XDATA memory model.
+    switch (AddressSpace) {
+    case MCS51::Default:
+    case MCS51::XData:
+      return 0x00;
+    case MCS51::Data:
+    case MCS51::IData:
+      return 0x40;
+    case MCS51::PData:
+      return 0x60;
+    case MCS51::Code:
+      return 0x80;
+    default:
+      report_fatal_error(
+          "unsupported MCS-51 address space in generic pointer cast");
+    }
+  }
+
+  static Value *lowerAddressSpaceCast(IRBuilder<> &B, Value *Pointer,
+                                      Type *DestTy, unsigned SrcAS,
+                                      unsigned DstAS) {
+    Module &M = *B.GetInsertBlock()->getModule();
+    LLVMContext &C = M.getContext();
+    Type *I16 = Type::getInt16Ty(C);
+    Value *Address = B.CreatePtrToInt(Pointer, I16, "gptr.cast.address");
+    Value *Result;
+    if (DstAS == MCS51::Generic) {
+      Type *I32 = Type::getInt32Ty(C);
+      Value *Bits = B.CreateZExt(Address, I32, "gptr.cast.bits");
+      uint8_t Tag = getGenericTag(SrcAS);
+      if (Tag) {
+        Value *TagBits = B.CreateShl(B.getInt32(Tag), 16, "gptr.cast.tag");
+        Bits = B.CreateOr(Bits, TagBits, "gptr.cast.encoded");
+      }
+      Result = B.CreateIntToPtr(Bits, DestTy, "gptr.cast");
+    } else {
+      const DataLayout &DL = M.getDataLayout();
+      unsigned PointerBits = DL.getPointerSizeInBits(DstAS);
+      Type *IntTy = IntegerType::get(C, PointerBits);
+      Value *Truncated = PointerBits == 16
+                             ? Address
+                             : B.CreateTrunc(Address, IntTy,
+                                             "gptr.cast.trunc");
+      Result = B.CreateIntToPtr(Truncated, DestTy, "gptr.cast");
+    }
+    Result->setName("gptr.cast");
+    return Result;
+  }
+
+  static void lowerAddressSpaceCast(AddrSpaceCastInst &Cast) {
+    IRBuilder<> B(&Cast);
+    Value *Result = lowerAddressSpaceCast(
+        B, Cast.getOperand(0), Cast.getType(), Cast.getSrcAddressSpace(),
+        Cast.getDestAddressSpace());
+    if (auto *I = dyn_cast<Instruction>(Result))
+      I->setDebugLoc(Cast.getDebugLoc());
+    Cast.replaceAllUsesWith(Result);
+    Cast.eraseFromParent();
+  }
+
   static SmallVector<Value *, 4> getPointerParts(IRBuilder<> &B,
                                                  Value *Pointer) {
     LLVMContext &C = B.getContext();

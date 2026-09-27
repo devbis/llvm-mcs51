@@ -181,8 +181,10 @@ public:
     }
     if (N->getOpcode() == ISD::GlobalAddress &&
         N->getValueType(0) == MVT::i8 &&
-        cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
-            MCS51::PData) {
+        (cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
+             MCS51::PData ||
+         cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
+             MCS51::IData)) {
       auto *GA = cast<GlobalAddressSDNode>(N);
       SDValue Addr = CurDAG->getTargetGlobalAddress(
           GA->getGlobal(), DL, MVT::i8, GA->getOffset(),
