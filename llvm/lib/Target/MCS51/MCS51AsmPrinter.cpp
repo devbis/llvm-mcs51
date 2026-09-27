@@ -16,11 +16,20 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
 #include <initializer_list>
 
 using namespace llvm;
 
 namespace {
+static bool isAutoBankFunction(const Function &F, StringRef CPU,
+                               bool FunctionSections) {
+  if (F.hasSection())
+    return isMCS51AutoBankSection(F.getSection());
+  return CPU.equals_insensitive("cc2530") && FunctionSections &&
+         F.getName() != "main" && !F.hasFnAttribute("interrupt");
+}
+
 class MCS51AsmPrinter final : public AsmPrinter {
 public:
   MCS51AsmPrinter(TargetMachine &TM, std::unique_ptr<MCStreamer> Streamer)
@@ -33,8 +42,8 @@ public:
                               uint64_t Offset) override {
     if (const auto *F = dyn_cast<Function>(CV)) {
       unsigned Bank = F->hasSection() ? getMCS51CodeBank(F->getSection()) : 0;
-      bool AutoBank =
-          F->hasSection() && isMCS51AutoBankSection(F->getSection());
+      bool AutoBank = isAutoBankFunction(*F, TM.getTargetCPU(),
+                                         TM.Options.FunctionSections);
       if (Bank || AutoBank) {
         const MCExpr *Address = MCSymbolRefExpr::create(
             getBankThunkSymbol(*F), OutContext);
@@ -51,9 +60,10 @@ public:
   void emitFunctionBodyEnd() override {
     const Function &F = MF->getFunction();
     unsigned Bank = F.hasSection() ? getMCS51CodeBank(F.getSection()) : 0;
-    bool AutoBank = F.hasSection() && isMCS51AutoBankSection(F.getSection());
+    bool AutoBank = isAutoBankFunction(F, TM.getTargetCPU(),
+                                       TM.Options.FunctionSections);
     if (F.hasFnAttribute("interrupt")) {
-      if (Bank)
+      if (Bank || AutoBank)
         report_fatal_error(
             "MCS-51 interrupt handlers must reside in common flash");
       StringRef Vector = F.getFnAttribute("interrupt").getValueAsString();
@@ -84,6 +94,10 @@ public:
       OutStreamer->emitLabel(getIndirectCallThunkSymbol(F));
       emitIndirectCallThunk();
     }
+
+    if (TM.getTargetCPU().equals_insensitive("cc2530") &&
+        TM.Options.FunctionSections)
+      emitExternalBankCallThunks();
 
     if (!Bank && !AutoBank)
       return;
@@ -156,6 +170,22 @@ public:
       return;
     }
 
+    if (MI->getOpcode() == MCS51::LCALL &&
+        TM.getTargetCPU().equals_insensitive("cc2530") &&
+        TM.Options.FunctionSections) {
+      for (const MachineOperand &MO : MI->operands())
+        if (MO.isSymbol()) {
+          MCInst Call;
+          Call.setOpcode(MCS51::LCALL);
+          Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+              getExternalBankCallThunkSymbol(MF->getFunction(),
+                                             MO.getSymbolName()),
+              OutContext)));
+          EmitToStreamer(*OutStreamer, Call);
+          return;
+        }
+    }
+
     MCInst Inst;
     Inst.setOpcode(MI->getOpcode());
     for (const MachineOperand &MO : MI->operands()) {
@@ -173,8 +203,9 @@ public:
           unsigned TargetBank = Target->hasSection()
                                     ? getMCS51CodeBank(Target->getSection())
                                     : 0;
-          bool TargetAutoBank = Target->hasSection() &&
-                                isMCS51AutoBankSection(Target->getSection());
+          bool TargetAutoBank =
+              isAutoBankFunction(*Target, TM.getTargetCPU(),
+                                 TM.Options.FunctionSections);
           unsigned CallerBank = MF->getFunction().hasSection()
                                     ? getMCS51CodeBank(
                                           MF->getFunction().getSection())
@@ -218,6 +249,61 @@ private:
     Name.append(getSymbol(&F)->getName());
     Name.append(".mcs51.icall");
     return OutContext.getOrCreateSymbol(Name);
+  }
+
+  MCSymbol *getExternalBankCallThunkSymbol(const Function &F,
+                                           StringRef TargetName) {
+    SmallString<96> Name(".L");
+    Name.append(getSymbol(&F)->getName());
+    Name.append(".mcs51.bankcall.");
+    Name.append(TargetName);
+    return OutContext.getOrCreateSymbol(Name);
+  }
+
+  void emitExternalBankCallThunks() {
+    SmallVector<StringRef, 4> Targets;
+    for (const MachineBasicBlock &MBB : *MF)
+      for (const MachineInstr &MI : MBB) {
+        if (MI.getOpcode() != MCS51::LCALL)
+          continue;
+        for (const MachineOperand &MO : MI.operands()) {
+          if (!MO.isSymbol())
+            continue;
+          StringRef TargetName = MO.getSymbolName();
+          if (!is_contained(Targets, TargetName))
+            Targets.push_back(TargetName);
+        }
+      }
+    if (Targets.empty())
+      return;
+
+    MCSection *SavedSection = OutStreamer->getCurrentSectionOnly();
+    SmallString<48> ThunkSectionName;
+    raw_svector_ostream(ThunkSectionName)
+        << ".text.autobankthunks.external." << MF->getFunctionNumber();
+    MCSection *ThunkSection = OutContext.getELFSection(
+        ThunkSectionName, ELF::SHT_PROGBITS,
+        ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
+    OutStreamer->switchSection(ThunkSection);
+    for (StringRef TargetName : Targets) {
+      OutStreamer->emitLabel(
+          getExternalBankCallThunkSymbol(MF->getFunction(), TargetName));
+      emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x9f});
+      MCInst SelectBank;
+      SelectBank.setOpcode(MCS51::MOV_DIRECT_IMM);
+      SelectBank.addOperand(MCOperand::createImm(0x9f));
+      SelectBank.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+          GetExternalSymbolSymbol(TargetName), OutContext)));
+      EmitToStreamer(*OutStreamer, SelectBank);
+      MCInst Call;
+      Call.setOpcode(MCS51::LCALL);
+      Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+          GetExternalSymbolSymbol(TargetName), OutContext)));
+      EmitToStreamer(*OutStreamer, Call);
+      emitBankThunkInstruction(MCS51::POP_DIRECT, {0x9f});
+      emitBankThunkInstruction(MCS51::RET, {});
+    }
+    OutStreamer->switchSection(SavedSection);
   }
 
   void emitThunkInstruction(unsigned Opcode,

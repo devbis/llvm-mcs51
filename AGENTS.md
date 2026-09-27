@@ -109,9 +109,17 @@ ordinary 16-bit function pointers can call banked functions indirectly; the
 trampoline saves and restores FMAP around the call. Functions placed in unique
 `.mcs51.autobank.<name>` sections are distributed across the seven flash banks
 by LLD's size-balanced placement pass. Their calls and function pointers use
-common-area trampolines whose bank number is resolved after placement.
-Functions left in ordinary `.text.*` sections remain in the common bank, so
-automatic placement of arbitrary functions is still unsupported. CC2530
+common-area trampolines whose bank number is resolved after placement. With
+`-mcpu=cc2530` and function sections enabled (the CC2530 Clang profile's
+default), ordinary `.text.*` function sections are also distributed across
+the seven banks by LLD's size-balanced pass. `.text.main`, startup sections,
+and functions used as interrupt-vector targets stay in common flash. When the
+image contains interrupt-vector sections, LLD keeps all ordinary `.text.*`
+functions in common flash so vector targets remain directly reachable.
+Compiler-generated calls and function pointers use common-area bank-call
+trampolines; LLD redirects cross-bank direct calls and function-address
+relocations to those trampolines. Applications that need predictable manual
+placement can still use `.bankN.*` sections. CC2530
 interrupt handlers use
 `__attribute__((interrupt(N)))`, where `N` is 0 through 17. The backend saves
 the interrupted register-bank-0 state and SFR registers, then returns with
@@ -151,9 +159,9 @@ assembly and linked images for representative firmware to confirm both
 correctness and code size.
 
 Current work is incomplete. The CC2530 profile supports XDATA globals,
-initialized XDATA data, explicit DATA/IDATA globals, manually selected flash
-banks with direct and indirect-call trampolines, and CC2530 interrupt vectors.
-It does not yet provide automatic placement across banks or a complete runtime
+initialized XDATA data, explicit DATA/IDATA globals, manually selected and
+automatically balanced flash banks with direct and indirect-call trampolines,
+and CC2530 interrupt vectors. It does not yet provide a complete runtime
 library. Classic 8051 and CC2530 support must be verified
 feature by feature; do not describe the target as fully supported until the
 remaining ABI, instruction, memory-map, runtime, optimization, and

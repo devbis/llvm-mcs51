@@ -9,6 +9,7 @@
 #include "Target.h"
 #include "InputSection.h"
 #include "OutputSections.h"
+#include "SymbolTable.h"
 #include "Symbols.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Endian.h"
@@ -101,17 +102,30 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       targetBank =
           targetInput ? getMCS51CodeBank(targetInput->getOutputSection()) : 0;
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
-      // Codegen emits calls through these common-area stubs. Any other
-      // cross-bank relocation would use the shared 0x8000 VMA without setting
-      // FMAP, which silently calls whichever bank is currently selected.
-      if ((rel.type == R_8051_16 || rel.type == R_8051_11) && targetBank &&
-          targetBank != callerBank && !isBankThunk && !isAutoBankThunk)
-        Err(ctx) << "MCS-51 reference to banked function '"
-                 << rel.sym->getName()
-                 << "' must use its bank-call trampoline; declare the same "
-                    "banked section on the function declaration";
+      bool isLongCall = rel.type == R_8051_16 &&
+                        (sec.flags & SHF_EXECINSTR) && rel.offset > 0 &&
+                        sec.content()[rel.offset - 1] == 0x12;
+      bool isFunctionAddress = rel.type == R_8051_16 && !isLongCall;
+      bool needsThunk = targetBank &&
+                        (targetBank != callerBank || isFunctionAddress);
+      if (needsThunk && !isBankThunk && !isAutoBankThunk) {
+        // Some declarations in another translation unit do not carry a
+        // section attribute. Resolve those calls and function pointers here,
+        // after bank placement has made the target bank known.
+        std::string thunkName =
+            (Twine("__mcs51_bankcall_") + rel.sym->getName()).str();
+        auto *thunk =
+            dyn_cast_or_null<Defined>(ctx.symtab->find(thunkName));
+        if (thunk)
+          val = thunk->getVA(ctx, rel.addend);
+        else
+          Err(ctx) << "MCS-51 reference to banked function '"
+                   << rel.sym->getName()
+                   << "' from section '" << sec.name
+                   << "' has no bank-call trampoline";
+      }
     }
-    if (isAutoBankThunk && rel.type == R_8051_8 && targetBank) {
+    if (isAutoBankThunk && rel.type == R_8051_8) {
       // The auto-bank trampoline names its callee in this byte field. Resolve
       // the bank after the linker has assigned the function input section.
       *loc = targetBank;
