@@ -28,6 +28,7 @@ enum AddressSpace {
   Code = 5,
   Bit = 6,
   SFR = 7,
+  Generic = 8,
 };
 
 } // namespace MCS51
