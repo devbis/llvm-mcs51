@@ -1617,7 +1617,8 @@ def SUB16DEC : Instruction {
   let OutOperandList = (outs MCS51PTR:$dst);
   let InOperandList = (ins MCS51PTR:$src);
   let AsmString = "";
-  let Size = 0;
+  // AsmPrinter emits MOV A,82; JNZ skip; DEC 83; skip: DEC 82.
+  let Size = 8;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let hasSideEffects = 1;
