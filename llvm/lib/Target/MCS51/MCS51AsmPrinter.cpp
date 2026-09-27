@@ -38,6 +38,22 @@ public:
 
   StringRef getPassName() const override { return "MCS-51 Assembly Printer"; }
 
+  void emitFunctionEntryLabel() override {
+    const Function &F = MF->getFunction();
+    if (F.hasFnAttribute("interrupt") &&
+        TM.getTargetCPU().equals_insensitive("cc2530") &&
+        TM.Options.FunctionSections) {
+      SmallString<64> SectionName(".mcs51.common.");
+      SectionName.append(F.getName());
+      MCSection *Section = OutContext.getELFSection(
+          SectionName, ELF::SHT_PROGBITS,
+          ELF::SHF_ALLOC | ELF::SHF_EXECINSTR);
+      MF->setSection(Section);
+      OutStreamer->switchSection(Section);
+    }
+    AsmPrinter::emitFunctionEntryLabel();
+  }
+
   const MCExpr *lowerConstant(const Constant *CV, const Constant *BaseCV,
                               uint64_t Offset) override {
     if (const auto *F = dyn_cast<Function>(CV)) {

@@ -54,6 +54,7 @@ SECTIONS
   /* CC2530 vector slots occupy 0x0003 through 0x008d (18 vectors). */
   .text 0x0094 :
   {
+    *(.mcs51.common .mcs51.common.*)
     *(.text .text.*)
     *(.rodata .rodata.*)
   } > CODE
