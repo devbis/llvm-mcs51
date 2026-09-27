@@ -62,6 +62,7 @@ unsigned char signed_ge(long lhs, long rhs) { return lhs >= rhs; }
 // OPT-LABEL: unsigned_ne:
 // OPT: ret
 // OPT-LABEL: unsigned_lt:
+// OPT: subb a,
 // OPT: ret
 // OPT-LABEL: unsigned_le:
 // OPT: ret
@@ -70,6 +71,8 @@ unsigned char signed_ge(long lhs, long rhs) { return lhs >= rhs; }
 // OPT-LABEL: unsigned_ge:
 // OPT: ret
 // OPT-LABEL: signed_lt:
+// OPT: xrl a, #128
+// OPT: subb a,
 // OPT: ret
 // OPT-LABEL: signed_le:
 // OPT: ret

@@ -60,6 +60,12 @@ def SDT_MCS51CmpUlt16 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
 def SDT_MCS51Cmp8 : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
                                          SDTCisVT<1, i8>,
                                          SDTCisVT<2, i8>] >;
+def SDT_MCS51Cmp32 : SDTypeProfile<1, 5, [SDTCisVT<0, i8>,
+                                         SDTCisVT<1, i16>,
+                                         SDTCisVT<2, i16>,
+                                         SDTCisVT<3, i16>,
+                                         SDTCisVT<4, i16>,
+                                         SDTCisVT<5, i8>] >;
 def SDT_MCS51Add32 : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
                                          SDTCisVT<1, i16>,
                                          SDTCisVT<2, i16>,
@@ -102,6 +108,7 @@ def MCS51cmpuge8 : SDNode<"MCS51ISD::CMPUGE8", SDT_MCS51Cmp8>;
 def MCS51cmpslt8 : SDNode<"MCS51ISD::CMPSLT8", SDT_MCS51Cmp8>;
 def MCS51cmpsge8 : SDNode<"MCS51ISD::CMPSGE8", SDT_MCS51Cmp8>;
 def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
+def MCS51cmp32 : SDNode<"MCS51ISD::CMP32", SDT_MCS51Cmp32>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
 def SDT_MCS51Add16Imm : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
@@ -1861,6 +1868,19 @@ def CMP8 : Instruction {
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
 }
+def CMP32 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                           MCS51PTR:$rhslo, MCS51PTR:$rhshi,
+                           MCS51Imm8:$kind);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
 def : Pat<(MCS51cmpult16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 0)>;
 def : Pat<(MCS51cmpslt16 MCS51PTR:$lhs, MCS51PTR:$rhs),
@@ -1881,6 +1901,12 @@ def : Pat<(MCS51cmpsge8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 4)>;
 def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 2)>;
+def : Pat<(MCS51cmp32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                         MCS51PTR:$rhslo, MCS51PTR:$rhshi,
+                         MCS51Imm8:$kind),
+          (CMP32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                 MCS51PTR:$rhslo, MCS51PTR:$rhshi,
+                 MCS51Imm8:$kind)>;
 
 // Start with the compact relative jump. The pre-emit branch relaxation pass
 // promotes out-of-range branches to LJMP.
