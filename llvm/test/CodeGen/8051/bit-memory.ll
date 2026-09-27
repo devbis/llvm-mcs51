@@ -20,7 +20,7 @@ entry:
 ; CHECK: mov c, bit_flag
 ; CHECK-NEXT: clr a
 ; CHECK-NEXT: rlc a
-; CHECK-NEXT: mov r{{[0-7]}}, a
+; CHECK-NEXT: ret
 ; CHECK-LABEL: write_bit_flag:
 ; CHECK: mov c, 224
 ; CHECK-NEXT: mov bit_flag, c
