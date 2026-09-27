@@ -101,6 +101,10 @@ def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
 def MCS51mul16 : SDNode<"MCS51ISD::MUL16", SDT_MCS51Mul16>;
+def SDT_MCS51Mul8To16 : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
+                                             SDTCisVT<1, i8>,
+                                             SDTCisVT<2, i8>] >;
+def MCS51mul8to16 : SDNode<"MCS51ISD::MUL8_TO_16", SDT_MCS51Mul8To16>;
 def MCS51srl32_parts : SDNode<"MCS51ISD::SRL32_PARTS",
                               SDT_MCS51Shift32Parts>;
 def MCS51shl32_parts : SDNode<"MCS51ISD::SHL32_PARTS",
@@ -1599,6 +1603,20 @@ def MUL16rr : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
+}
+
+def MUL8TO16rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51PTR:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51PTR:$dst,
+                      (MCS51mul8to16 MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
 }
 
 def SRL32_PARTS : Instruction {
