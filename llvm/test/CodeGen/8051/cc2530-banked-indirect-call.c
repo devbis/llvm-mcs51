@@ -48,6 +48,9 @@ int main(void) { return banked_global_pointer_caller(0); }
 // CHECK: jmp @a+dptr
 // CHECK: .short __mcs51_bankcall_banked_add
 
+// LINK-LABEL: <__mcs51_bankcall_banked_add>:
+// LINK: mov 159, #2
+// LINK: lcall 32768
 // LINK-LABEL: <invoke_function_pointer>:
 // LINK: lcall
 // LINK: jmp @a+dptr
@@ -57,8 +60,5 @@ int main(void) { return banked_global_pointer_caller(0); }
 // LINK-LABEL: <banked_global_pointer_caller>:
 // LINK: lcall
 // LINK: jmp @a+dptr
-// LINK-LABEL: <__mcs51_bankcall_banked_add>:
-// LINK: mov 159, #2
-// LINK: lcall 32768
 
 // HEX: :00000001FF

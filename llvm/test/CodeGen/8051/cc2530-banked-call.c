@@ -46,14 +46,14 @@ int main(void) { return 0; }
 
 // MAP: Name: .bank2
 // MAP: Address: 0x8000
-// LINK-LABEL: <caller>:
-// LINK: lcall
 // LINK-LABEL: <__mcs51_bankcall_banked_add>:
 // LINK: push 159
 // LINK: mov 159, #2
 // LINK: lcall 32768
 // LINK: pop 159
 // LINK: ret
+// LINK-LABEL: <caller>:
+// LINK: lcall
 // LINK-LABEL: <banked_caller>:
 // LINK: lcall
 
