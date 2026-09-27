@@ -1441,6 +1441,45 @@ if( LLVM_INCLUDE_TOOLS )
   add_subdirectory(tools)
 endif()
 
+if("MCS51" IN_LIST LLVM_TARGETS_TO_BUILD AND TARGET clang AND TARGET llvm-ar)
+  set(MCS51_RESOURCE_DIR
+      "${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${LLVM_VERSION_MAJOR}/mcs51")
+  set(MCS51_RUNTIME_OBJECT "${MCS51_RESOURCE_DIR}/mcs51-runtime.o")
+  set(MCS51_RUNTIME_ARCHIVE "${MCS51_RESOURCE_DIR}/libmcs51builtins.a")
+  set(MCS51_STARTUP_OBJECT "${MCS51_RESOURCE_DIR}/cc2530_startup.o")
+  set(MCS51_LINKER_SCRIPT "${MCS51_RESOURCE_DIR}/cc2530.ld")
+
+  add_custom_command(
+    OUTPUT "${MCS51_RUNTIME_OBJECT}" "${MCS51_RUNTIME_ARCHIVE}"
+           "${MCS51_STARTUP_OBJECT}" "${MCS51_LINKER_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${MCS51_RESOURCE_DIR}"
+    COMMAND $<TARGET_FILE:clang> -target mcs51 -mcpu=cc2530 -O2
+            -ffreestanding -fno-builtin -ffunction-sections -fdata-sections
+            -c "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/mcs51-runtime.c"
+            -o "${MCS51_RUNTIME_OBJECT}"
+    COMMAND $<TARGET_FILE:llvm-ar> rcs "${MCS51_RUNTIME_ARCHIVE}"
+            "${MCS51_RUNTIME_OBJECT}"
+    COMMAND $<TARGET_FILE:clang> -target mcs51 -mcpu=cc2530 -c
+            "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/cc2530_startup.s"
+            -o "${MCS51_STARTUP_OBJECT}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/cc2530.ld"
+            "${MCS51_LINKER_SCRIPT}"
+    DEPENDS clang llvm-ar
+            "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/mcs51-runtime.c"
+            "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/cc2530_startup.s"
+            "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/cc2530.ld"
+    VERBATIM)
+  add_custom_target(mcs51-runtime DEPENDS "${MCS51_RUNTIME_OBJECT}"
+                    "${MCS51_RUNTIME_ARCHIVE}" "${MCS51_STARTUP_OBJECT}"
+                    "${MCS51_LINKER_SCRIPT}")
+
+  install(FILES "${MCS51_RUNTIME_OBJECT}" "${MCS51_RUNTIME_ARCHIVE}"
+                "${MCS51_STARTUP_OBJECT}" "${MCS51_LINKER_SCRIPT}"
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/clang/${LLVM_VERSION_MAJOR}/mcs51"
+          COMPONENT MCS51Runtime)
+endif()
+
 # We need to setup KillTheDoctor before setting up the runtimes build because
 # the runtimes build needs to add a KillTheDoctor dep for compiler-rt on
 # Windows.

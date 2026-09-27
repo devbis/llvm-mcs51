@@ -6,6 +6,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
