@@ -43,6 +43,11 @@
         cjne    r7, #1, branch_target
         djnz    0x20, branch_target
         djnz    r7, branch_target
+        mov     @r0, #0x55
+        mov     @r1, #0xaa
+        rr      a
+        rl      a
+        setb    c
 branch_target:
         ret
         reti
@@ -88,6 +93,11 @@ branch_target:
 # CHECK: cjne r7, #1{{.*}}encoding: [0xbf,0x01,{{.*}}]
 # CHECK: djnz 32{{.*}}encoding: [0xd5,0x20,{{.*}}]
 # CHECK: djnz r7{{.*}}encoding: [0xdf,{{.*}}]
+# CHECK: mov @r0, #85{{.*}}encoding: [0x76,0x55]
+# CHECK: mov @r1, #170{{.*}}encoding: [0x77,0xaa]
+# CHECK: rr a{{.*}}encoding: [0x03]
+# CHECK: rl a{{.*}}encoding: [0x23]
+# CHECK: setb c{{.*}}encoding: [0xd3]
 # CHECK: ret{{.*}}encoding: [0x22]
 # CHECK: reti{{.*}}encoding: [0x32]
 
@@ -103,3 +113,8 @@ branch_target:
 # DIS: cjne r7, #1,
 # DIS: djnz 32,
 # DIS: djnz r7,
+# DIS: mov @r0, #85
+# DIS: mov @r1, #170
+# DIS: rr a
+# DIS: rl a
+# DIS: setb c
