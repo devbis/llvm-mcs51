@@ -6,6 +6,138 @@ typedef union {
   uint8_t Bytes[8];
 } Word64Bytes;
 
+typedef union {
+  float Float;
+  uint32_t Bits;
+} Float32Bits;
+
+int __unordsf2(float LHS, float RHS) {
+  Float32Bits A = {.Float = LHS};
+  Float32Bits B = {.Float = RHS};
+  uint32_t AExponent = A.Bits & UINT32_C(0x7f800000);
+  uint32_t BExponent = B.Bits & UINT32_C(0x7f800000);
+  return (AExponent == UINT32_C(0x7f800000) &&
+          (A.Bits & UINT32_C(0x007fffff))) ||
+         (BExponent == UINT32_C(0x7f800000) &&
+          (B.Bits & UINT32_C(0x007fffff)));
+}
+
+static uint32_t shift_right_jam32(uint32_t Value, unsigned Count) {
+  if (!Count)
+    return Value;
+  if (Count < 32)
+    return (Value >> Count) | ((Value << (32 - Count)) != 0);
+  return Value != 0;
+}
+
+float __addsf3(float LHS, float RHS) {
+  const uint32_t SignMask = UINT32_C(0x80000000);
+  const uint32_t ExponentMask = UINT32_C(0x7f800000);
+  const uint32_t FractionMask = UINT32_C(0x007fffff);
+  const uint32_t HiddenBit = UINT32_C(0x00800000);
+  const uint32_t QuietBit = UINT32_C(0x00400000);
+  Float32Bits A = {.Float = LHS};
+  Float32Bits B = {.Float = RHS};
+  uint32_t AAbs = A.Bits & ~SignMask;
+  uint32_t BAbs = B.Bits & ~SignMask;
+
+  if ((AAbs & ExponentMask) == ExponentMask && (AAbs & FractionMask)) {
+    A.Bits |= QuietBit;
+    return A.Float;
+  }
+  if ((BAbs & ExponentMask) == ExponentMask && (BAbs & FractionMask)) {
+    B.Bits |= QuietBit;
+    return B.Float;
+  }
+  if (AAbs == ExponentMask || BAbs == ExponentMask) {
+    if (AAbs == ExponentMask && BAbs == ExponentMask &&
+        ((A.Bits ^ B.Bits) & SignMask)) {
+      Float32Bits NaN = {.Bits = UINT32_C(0x7fc00000)};
+      return NaN.Float;
+    }
+    return AAbs == ExponentMask ? A.Float : B.Float;
+  }
+  if (!AAbs)
+    return !BAbs ? (Float32Bits){.Bits = A.Bits & B.Bits}.Float : B.Float;
+  if (!BAbs)
+    return A.Float;
+
+  if (BAbs > AAbs) {
+    Float32Bits Temp = A;
+    A = B;
+    B = Temp;
+  }
+
+  int AExponent = (int)((A.Bits & ExponentMask) >> 23);
+  int BExponent = (int)((B.Bits & ExponentMask) >> 23);
+  uint32_t ASignificand = A.Bits & FractionMask;
+  uint32_t BSignificand = B.Bits & FractionMask;
+  if (!AExponent && ASignificand) {
+    AExponent = 1;
+    while (!(ASignificand & HiddenBit)) {
+      ASignificand <<= 1;
+      --AExponent;
+    }
+  }
+  if (!BExponent && BSignificand) {
+    BExponent = 1;
+    while (!(BSignificand & HiddenBit)) {
+      BSignificand <<= 1;
+      --BExponent;
+    }
+  }
+
+  uint32_t ResultSign = A.Bits & SignMask;
+  int Subtract = (A.Bits ^ B.Bits) & SignMask;
+  ASignificand = (ASignificand | HiddenBit) << 3;
+  BSignificand = (BSignificand | HiddenBit) << 3;
+  BSignificand = shift_right_jam32(BSignificand,
+                                   (unsigned)(AExponent - BExponent));
+
+  if (Subtract) {
+    ASignificand -= BSignificand;
+    if (!ASignificand) {
+      Float32Bits Zero = {.Bits = 0};
+      return Zero.Float;
+    }
+    while (ASignificand < (HiddenBit << 3)) {
+      ASignificand <<= 1;
+      --AExponent;
+    }
+  } else {
+    ASignificand += BSignificand;
+    if (ASignificand & (HiddenBit << 4)) {
+      ASignificand = shift_right_jam32(ASignificand, 1);
+      ++AExponent;
+    }
+  }
+
+  if (AExponent >= 255) {
+    Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+    return Infinity.Float;
+  }
+  if (AExponent <= 0) {
+    ASignificand = shift_right_jam32(ASignificand,
+                                     (unsigned)(1 - AExponent));
+    AExponent = 0;
+  }
+
+  uint32_t RoundGuardSticky = ASignificand & 7;
+  Float32Bits Result = {
+      .Bits = ResultSign | ((uint32_t)AExponent << 23) |
+              ((ASignificand >> 3) & FractionMask)};
+  if (RoundGuardSticky > 4 ||
+      (RoundGuardSticky == 4 && (Result.Bits & 1)))
+    ++Result.Bits;
+  return Result.Float;
+}
+
+float __subsf3(float LHS, float RHS) {
+  Float32Bits Operand = {.Float = RHS};
+  Operand.Bits ^= UINT32_C(0x80000000);
+  return __addsf3(LHS, Operand.Float);
+}
+
 uint64_t __ashldi3(uint64_t Value, int Count) {
   Word64Bytes Result = {.Value = Value};
   if (Count >= 64)
