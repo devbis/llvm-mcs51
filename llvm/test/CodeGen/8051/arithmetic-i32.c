@@ -1,5 +1,6 @@
 // RUN: clang -target mcs51 -S -O1 %s -o - | FileCheck %s
 // RUN: clang -target mcs51 -S -O0 %s -o - | FileCheck %s --check-prefix=O0
+// RUN: clang -target mcs51 -S -O0 -mllvm -verify-machineinstrs %s -o /dev/null
 // RUN: clang -target mcs51 -S -O1 -mllvm -verify-machineinstrs %s -o /dev/null
 // RUN: clang -target mcs51 -S -O1 %s -o %t.s
 // RUN: llvm-mc -triple=mcs51 -filetype=obj %t.s -o %t.o
