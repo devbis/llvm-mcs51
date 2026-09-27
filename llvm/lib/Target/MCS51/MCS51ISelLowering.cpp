@@ -246,6 +246,7 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   auto LowerByteCompare = [&](SDValue LHS, SDValue RHS,
                               ISD::CondCode CC) -> SDValue {
     bool Invert = false;
+    bool IsGreaterEqual = false;
     int64_t CompareKind = ISD::isSignedIntSetCC(CC) ? 1 : 0;
     switch (CC) {
     case ISD::SETEQ:
@@ -260,7 +261,7 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
       break;
     case ISD::SETUGE:
     case ISD::SETGE:
-      Invert = true;
+      IsGreaterEqual = true;
       break;
     case ISD::SETUGT:
     case ISD::SETGT:
@@ -269,15 +270,18 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     case ISD::SETULE:
     case ISD::SETLE:
       std::swap(LHS, RHS);
-      Invert = true;
+      IsGreaterEqual = true;
       break;
     default:
       return SDValue();
     }
     unsigned Opcode = CompareKind == 2
                           ? MCS51ISD::CMPEQ8
-                          : CompareKind == 1 ? MCS51ISD::CMPSLT8
-                                             : MCS51ISD::CMPULT8;
+                          : CompareKind == 1
+                                ? (IsGreaterEqual ? MCS51ISD::CMPSGE8
+                                                  : MCS51ISD::CMPSLT8)
+                                : (IsGreaterEqual ? MCS51ISD::CMPUGE8
+                                                  : MCS51ISD::CMPULT8);
     SDValue Result = DAG.getNode(Opcode, DL, MVT::i8, LHS, RHS);
     return Invert ? DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
                                 DAG.getConstant(1, DL, MVT::i8))
@@ -287,6 +291,7 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   auto LowerWordCompare = [&](SDValue LHS, SDValue RHS, ISD::CondCode CC,
                               bool IsSigned) -> SDValue {
     bool Invert = false;
+    bool IsGreaterEqual = false;
     switch (CC) {
     case ISD::SETEQ:
       return DAG.getNode(MCS51ISD::CMPEQ16, DL, MVT::i8, LHS, RHS);
@@ -298,7 +303,7 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
       break;
     case ISD::SETUGE:
     case ISD::SETGE:
-      Invert = true;
+      IsGreaterEqual = true;
       break;
     case ISD::SETUGT:
     case ISD::SETGT:
@@ -307,15 +312,18 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     case ISD::SETULE:
     case ISD::SETLE:
       std::swap(LHS, RHS);
-      Invert = true;
+      IsGreaterEqual = true;
       break;
     default:
       return SDValue();
     }
     unsigned Opcode = CC == ISD::SETNE
                           ? MCS51ISD::CMPEQ16
-                          : IsSigned ? MCS51ISD::CMPSLT16
-                                     : MCS51ISD::CMPULT16;
+                          : IsSigned
+                                ? (IsGreaterEqual ? MCS51ISD::CMPSGE16
+                                                  : MCS51ISD::CMPSLT16)
+                                : (IsGreaterEqual ? MCS51ISD::CMPUGE16
+                                                  : MCS51ISD::CMPULT16);
     SDValue Result = DAG.getNode(Opcode, DL, MVT::i8, LHS, RHS);
     return Invert ? DAG.getNode(ISD::XOR, DL, MVT::i8, Result,
                                 DAG.getConstant(1, DL, MVT::i8))
@@ -1781,7 +1789,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       return Tail;
     }
 
-    if (CompareKind == 1) {
+    bool IsSigned = CompareKind == 1 || CompareKind == 4;
+    bool IsGreaterEqual = CompareKind == 3 || CompareKind == 4;
+    if (IsSigned) {
       // Flipping both sign bits turns signed order into unsigned order.
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(RHS);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
@@ -1798,6 +1808,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHS);
     }
+    if (IsGreaterEqual)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
@@ -1884,7 +1896,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
           .addReg(NotEqualResult).addMBB(NotEqualBB);
       return Tail;
     }
-    bool IsSigned = CompareKind != 0;
+    bool IsSigned = CompareKind == 1 || CompareKind == 4;
+    bool IsGreaterEqual = CompareKind == 3 || CompareKind == 4;
     Register LHSLo = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     auto CopyDPTR = [&](Register Src) {
@@ -1921,6 +1934,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
           .addImm(0x83);
     }
+    if (IsGreaterEqual)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
     // CLR A preserves CY, and RLC moves the borrow into bit zero.
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
