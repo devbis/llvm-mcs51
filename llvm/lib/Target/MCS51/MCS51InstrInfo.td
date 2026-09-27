@@ -148,7 +148,9 @@ class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
 
 def NOP  : MCS51Inst<0x00, "nop"> { let hasSideEffects = 0; }
 def RR_A : MCS51Inst<0x03, "rr a">;
-def INC_A : MCS51Inst<0x04, "inc a">;
+def INC_A : MCS51Inst<0x04, "inc a"> {
+  let Defs = [A]; let Uses = [A];
+}
 def RRC_A : MCS51Inst<0x13, "rrc a"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
