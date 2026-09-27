@@ -132,8 +132,10 @@ public:
                  const ArgList &Args)
       : Generic_ELF(D, Triple, Args) {
     const Arg *CPUArg = Args.getLastArg(options::OPT_mcpu_EQ);
-    if (!CPUArg || !StringRef(CPUArg->getValue()).equals_insensitive("cc2530") ||
-        Args.hasArg(options::OPT_nostdlib))
+    if (!CPUArg || !StringRef(CPUArg->getValue()).equals_insensitive("cc2530"))
+      return;
+    CC2530CPU = true;
+    if (Args.hasArg(options::OPT_nostdlib))
       return;
 
     SmallString<256> ResourceDir(D.ResourceDir);
@@ -187,6 +189,14 @@ public:
     if (!Args.hasArg(options::OPT_static, options::OPT_shared,
                      options::OPT_r))
       DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_static));
+    if (CC2530CPU &&
+        !Args.hasArg(options::OPT_ffunction_sections,
+                     options::OPT_fno_function_sections))
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_ffunction_sections));
+    if (CC2530CPU &&
+        !Args.hasArg(options::OPT_fdata_sections,
+                     options::OPT_fno_data_sections))
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_fdata_sections));
     return DAL;
   }
 
@@ -215,6 +225,7 @@ protected:
   }
 
 private:
+  bool CC2530CPU = false;
   bool AutoCC2530 = false;
   bool AddRuntime = false;
   bool AddStartup = false;

@@ -12,6 +12,11 @@
 // RUN:       --implicit-check-not=cc2530.ld \
 // RUN:       --implicit-check-not=cc2530_startup.o \
 // RUN:       --implicit-check-not=mcs51-runtime.o
+// RUN: clang -target mcs51 -mcpu=cc2530 -fno-function-sections \
+// RUN:   -fno-data-sections -### -fsyntax-only %s 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=NOSECTIONS \
+// RUN:       --implicit-check-not="-ffunction-sections" \
+// RUN:       --implicit-check-not="-fdata-sections"
 
 // DEFAULT: "-cc1" "-triple" "mcs51"
 // DEFAULT-SAME: "-ffreestanding"
@@ -19,7 +24,10 @@
 // SIGNED: "-cc1" "-triple" "mcs51"
 // LINK: {{ld.lld}}
 // LINK-SAME: "-static"
+// NOSTDLIB: "-ffunction-sections"
+// NOSTDLIB-SAME: "-fdata-sections"
 // NOSTDLIB: {{ld.lld}}
+// NOSECTIONS: "-cc1"
 
 #ifndef __8051__
 #error "missing MCS-51 predefined macro"

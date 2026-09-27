@@ -1,11 +1,16 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 %s -o %t.elf
 // RUN: llvm-objcopy --output-target=ihex %t.elf %t.hex
-// RUN: llvm-readobj --sections --symbols %t.elf | FileCheck %s --check-prefix=MAP
+// RUN: llvm-readobj --sections --symbols %t.elf | FileCheck %s --check-prefix=MAP \
+// RUN:   --implicit-check-not=unused_initialized \
+// RUN:   --implicit-check-not=unused_firmware_function
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=DIS
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex
 
 volatile unsigned char counter;
 unsigned char initialized = 42;
+unsigned char unused_initialized = 77;
+
+int unused_firmware_function(int value) { return value * 13 + 7; }
 
 int main(void) {
   counter = initialized;
