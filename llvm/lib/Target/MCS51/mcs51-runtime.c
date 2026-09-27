@@ -52,6 +52,59 @@ int32_t __gesf2(float LHS, float RHS) {
 
 int32_t __gtsf2(float LHS, float RHS) { return __gesf2(LHS, RHS); }
 
+int32_t __fixsfsi(float Value) {
+  const uint32_t SignificandMask = UINT32_C(0x007fffff);
+  const uint32_t HiddenBit = UINT32_C(0x00800000);
+  Float32Bits Bits = {.Float = Value};
+  uint32_t Sign = Bits.Bits >> 31;
+  uint32_t SignMask = 0 - Sign;
+  uint32_t RawExponent = (Bits.Bits >> 23) & 0xff;
+  uint32_t Exponent = RawExponent - 127;
+  uint32_t Underflow = Exponent >> 31;
+  uint32_t Overflow = ((RawExponent - 158) >> 31) ^ 1;
+  uint32_t Valid = (Underflow ^ 1) & (Overflow ^ 1);
+  uint32_t Significand = (Bits.Bits & SignificandMask) | HiddenBit;
+  uint32_t ShiftLeft = ((Exponent - 23) >> 31) ^ 1;
+  uint32_t ShiftMask = 0 - ShiftLeft;
+  uint32_t RightShift = (23 - Exponent) & 31;
+  uint32_t LeftShift = (Exponent - 23) & 31;
+  uint32_t RightMagnitude = Significand >> RightShift;
+  uint32_t LeftMagnitude = Significand << LeftShift;
+  uint32_t Magnitude = (RightMagnitude & ~ShiftMask) |
+                       (LeftMagnitude & ShiftMask);
+  uint32_t SignedMagnitude = (Magnitude ^ SignMask) + Sign;
+  uint32_t Saturated = UINT32_C(0x7fffffff) ^ SignMask;
+  uint32_t ValidMask = 0 - Valid;
+  uint32_t OverflowMask = 0 - Overflow;
+  return (int32_t)((SignedMagnitude & ValidMask) |
+                   (Saturated & OverflowMask));
+}
+
+uint32_t __fixunssfsi(float Value) {
+  const uint32_t SignificandMask = UINT32_C(0x007fffff);
+  const uint32_t HiddenBit = UINT32_C(0x00800000);
+  Float32Bits Bits = {.Float = Value};
+  uint32_t Sign = Bits.Bits >> 31;
+  uint32_t RawExponent = (Bits.Bits >> 23) & 0xff;
+  uint32_t Exponent = RawExponent - 127;
+  uint32_t Underflow = Exponent >> 31;
+  uint32_t Overflow = ((RawExponent - 159) >> 31) ^ 1;
+  uint32_t Valid = (Sign ^ 1) & (Underflow ^ 1) & (Overflow ^ 1);
+  uint32_t Saturate = (Sign ^ 1) & Overflow;
+  uint32_t Significand = (Bits.Bits & SignificandMask) | HiddenBit;
+  uint32_t ShiftLeft = ((Exponent - 23) >> 31) ^ 1;
+  uint32_t ShiftMask = 0 - ShiftLeft;
+  uint32_t RightShift = (23 - Exponent) & 31;
+  uint32_t LeftShift = (Exponent - 23) & 31;
+  uint32_t RightMagnitude = Significand >> RightShift;
+  uint32_t LeftMagnitude = Significand << LeftShift;
+  uint32_t Magnitude = (RightMagnitude & ~ShiftMask) |
+                       (LeftMagnitude & ShiftMask);
+  uint32_t ValidMask = 0 - Valid;
+  uint32_t SaturateMask = 0 - Saturate;
+  return (Magnitude & ValidMask) | (UINT32_MAX & SaturateMask);
+}
+
 static uint32_t shift_right_jam32(uint32_t Value, unsigned Count) {
   if (!Count)
     return Value;
