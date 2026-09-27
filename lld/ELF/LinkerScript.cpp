@@ -900,25 +900,6 @@ void LinkerScript::distributeMCS51AutoBankSections() {
   if (ctx.arg.emachine != EM_8051)
     return;
 
-  bool hasInterruptVectors = false;
-  auto noteVector = [&](InputSectionBase *base) {
-    hasInterruptVectors |= base->name.starts_with(".mcs51.vector.");
-  };
-  for (InputSectionBase *base : ctx.inputSections)
-    noteVector(base);
-  for (SectionCommand *cmd : sectionCommands) {
-    auto *osd = dyn_cast<OutputDesc>(cmd);
-    if (!osd)
-      continue;
-    for (SectionCommand *subCmd : osd->osec.commands) {
-      auto *isd = dyn_cast<InputSectionDescription>(subCmd);
-      if (!isd)
-        continue;
-      for (InputSectionBase *section : isd->sectionBases)
-        noteVector(section);
-    }
-  }
-
   std::array<OutputSection *, 7> banks{};
   bool haveAllBanks = true;
   for (unsigned bank = 0; bank != banks.size(); ++bank) {
@@ -947,8 +928,7 @@ void LinkerScript::distributeMCS51AutoBankSections() {
                         !section->name.starts_with(".text.main.") &&
                         !section->name.starts_with(".text.startup") &&
                         !section->name.starts_with(".text.bankthunks.") &&
-                        !section->name.starts_with(".text.autobankthunks.") &&
-                        !hasInterruptVectors;
+                        !section->name.starts_with(".text.autobankthunks.");
         if (!ExplicitAutoBank && !AutoText)
           continue;
         if (!(section->flags & SHF_EXECINSTR)) {
