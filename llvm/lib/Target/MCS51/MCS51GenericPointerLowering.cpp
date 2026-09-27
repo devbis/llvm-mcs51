@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCS51.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
@@ -45,6 +46,9 @@ public:
           Cast->getSrcAddressSpace() == MCS51::Generic ||
           !isGenericTagSupported(Cast->getSrcAddressSpace()))
         continue;
+      if (Cast->getSrcAddressSpace() == MCS51::Default &&
+          hasMergedPointerProvenance(Cast->getPointerOperand()))
+        continue;
       if (isa<StoreInst>(&I) && Cast->getSrcAddressSpace() == MCS51::Code)
         continue;
       if (auto *LI = dyn_cast<LoadInst>(&I))
@@ -61,9 +65,11 @@ public:
                       Cast->getDestAddressSpace() != MCS51::Generic))
           continue;
         IRBuilder<> B(&I);
+        DenseMap<const PHINode *, PHINode *> GenericPointerPhis;
         Operand.set(lowerAddressSpaceCast(
             B, Cast->getPointerOperand(), Cast->getType(),
-            Cast->getSrcAddressSpace(), Cast->getDestAddressSpace()));
+            Cast->getSrcAddressSpace(), Cast->getDestAddressSpace(),
+            GenericPointerPhis));
         Changed = true;
       }
     }
@@ -145,6 +151,28 @@ private:
     return false;
   }
 
+  static bool hasMergedPointerProvenance(Value *Pointer) {
+    SmallPtrSet<Value *, 8> Seen;
+    while (Pointer && Seen.insert(Pointer).second) {
+      if (isa<SelectInst>(Pointer) || isa<PHINode>(Pointer))
+        return true;
+      if (auto *GEP = dyn_cast<GEPOperator>(Pointer)) {
+        Pointer = GEP->getPointerOperand();
+        continue;
+      }
+      if (auto *Cast = dyn_cast<BitCastOperator>(Pointer)) {
+        Pointer = Cast->getOperand(0);
+        continue;
+      }
+      if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Pointer)) {
+        Pointer = Cast->getPointerOperand();
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+
   static uint8_t getGenericTag(unsigned AddressSpace, Value *Pointer) {
     // Match the classic MCS-51 generic pointer encoding used by the runtime:
     // CODE=0x80, DATA/IDATA=0x40, PDATA=0x60, XDATA=0x00. The default near
@@ -169,9 +197,44 @@ private:
 
   static Value *lowerAddressSpaceCast(IRBuilder<> &B, Value *Pointer,
                                       Type *DestTy, unsigned SrcAS,
-                                      unsigned DstAS) {
+                                      unsigned DstAS,
+                                      DenseMap<const PHINode *, PHINode *>
+                                          &GenericPointerPhis) {
     Module &M = *B.GetInsertBlock()->getModule();
     LLVMContext &C = M.getContext();
+    if (DstAS == MCS51::Generic) {
+      if (auto *Select = dyn_cast<SelectInst>(Pointer)) {
+        Value *TruePointer = lowerAddressSpaceCast(
+            B, Select->getTrueValue(), DestTy, SrcAS, DstAS,
+            GenericPointerPhis);
+        Value *FalsePointer = lowerAddressSpaceCast(
+            B, Select->getFalseValue(), DestTy, SrcAS, DstAS,
+            GenericPointerPhis);
+        return B.CreateSelect(Select->getCondition(), TruePointer,
+                              FalsePointer, "gptr.cast.select");
+      }
+      if (auto *PointerPhi = dyn_cast<PHINode>(Pointer)) {
+        auto Existing = GenericPointerPhis.find(PointerPhi);
+        if (Existing != GenericPointerPhis.end())
+          return Existing->second;
+
+        BasicBlock *BB = PointerPhi->getParent();
+        PHINode *GenericPhi = PHINode::Create(
+            DestTy, PointerPhi->getNumIncomingValues(), "gptr.cast.phi",
+            BB->getFirstNonPHIIt());
+        GenericPointerPhis[PointerPhi] = GenericPhi;
+        for (unsigned I = 0; I != PointerPhi->getNumIncomingValues(); ++I) {
+          BasicBlock *IncomingBB = PointerPhi->getIncomingBlock(I);
+          IRBuilder<> IncomingBuilder(IncomingBB->getTerminator());
+          Value *IncomingPointer = lowerAddressSpaceCast(
+              IncomingBuilder, PointerPhi->getIncomingValue(I), DestTy, SrcAS,
+              DstAS, GenericPointerPhis);
+          GenericPhi->addIncoming(IncomingPointer, IncomingBB);
+        }
+        return GenericPhi;
+      }
+    }
+
     Type *I16 = Type::getInt16Ty(C);
     Value *Address;
     if (DstAS == MCS51::Generic && SrcAS == MCS51::Default &&
@@ -213,9 +276,10 @@ private:
 
   static void lowerAddressSpaceCast(AddrSpaceCastInst &Cast) {
     IRBuilder<> B(&Cast);
+    DenseMap<const PHINode *, PHINode *> GenericPointerPhis;
     Value *Result = lowerAddressSpaceCast(
         B, Cast.getOperand(0), Cast.getType(), Cast.getSrcAddressSpace(),
-        Cast.getDestAddressSpace());
+        Cast.getDestAddressSpace(), GenericPointerPhis);
     if (auto *I = dyn_cast<Instruction>(Result))
       I->setDebugLoc(Cast.getDebugLoc());
     Cast.replaceAllUsesWith(Result);

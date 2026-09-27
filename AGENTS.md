@@ -191,8 +191,10 @@ source space. The current CodeGen coverage exercises tagged conversions for
 CODE, XDATA, PDATA, and IDATA, including casts back to IDATA; it does not yet
 execute those cases in an emulator or on hardware. AS0-to-generic conversion
 uses the default XDATA model for unknown pointers and recognizes pointers
-rooted in local allocas as IDATA; other pointer provenance (such as merged
-pointer values) still needs runtime validation. Casts involving bit or SFR
+rooted in local allocas as IDATA. Casts through `select` and `phi` values
+convert each incoming pointer separately, preserving its memory-space tag;
+CodeGen tests cover these merged-pointer cases. Other pointer provenance still
+needs runtime validation. Casts involving bit or SFR
 spaces are unsupported. Atomic and aggregate accesses and scalar types outside
 the list above are unsupported; the lowering diagnoses unsupported access
 types as a fatal backend error. Keep these limitations visible until the
