@@ -91,25 +91,31 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     uint8_t *loc = buf + rel.offset;
     uint64_t place = secAddr + rel.offset;
     uint64_t val = sec.getRelocTargetVA(ctx, rel, place);
-    if ((rel.type == R_8051_16 || rel.type == R_8051_11) && rel.sym &&
-        rel.sym->isFunc()) {
+    bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
+    bool isAutoBankThunk = sec.name.starts_with(".text.autobankthunks.");
+    unsigned targetBank = 0;
+    if (rel.sym && rel.sym->isFunc()) {
       auto *target = dyn_cast<Defined>(rel.sym);
-      auto *targetInput = target ? dyn_cast<InputSection>(target->section)
-                                 : nullptr;
-      unsigned targetBank = targetInput
-                                ? getMCS51CodeBank(
-                                      targetInput->getOutputSection())
-                                : 0;
+      auto *targetInput =
+          target ? dyn_cast<InputSection>(target->section) : nullptr;
+      targetBank =
+          targetInput ? getMCS51CodeBank(targetInput->getOutputSection()) : 0;
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
-      bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
       // Codegen emits calls through these common-area stubs. Any other
       // cross-bank relocation would use the shared 0x8000 VMA without setting
       // FMAP, which silently calls whichever bank is currently selected.
-      if (targetBank && targetBank != callerBank && !isBankThunk)
+      if ((rel.type == R_8051_16 || rel.type == R_8051_11) && targetBank &&
+          targetBank != callerBank && !isBankThunk && !isAutoBankThunk)
         Err(ctx) << "MCS-51 reference to banked function '"
                  << rel.sym->getName()
                  << "' must use its bank-call trampoline; declare the same "
                     "banked section on the function declaration";
+    }
+    if (isAutoBankThunk && rel.type == R_8051_8 && targetBank) {
+      // The auto-bank trampoline names its callee in this byte field. Resolve
+      // the bank after the linker has assigned the function input section.
+      *loc = targetBank;
+      continue;
     }
     if (rel.type == R_8051_11) {
       checkUInt(ctx, loc, val, 16, rel);

@@ -3563,6 +3563,8 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
     // "orphans", and they are assigned to output sections by the default rule.
     // Process that.
     ctx.script->addOrphanSections();
+    if (ctx.arg.emachine == EM_8051)
+      ctx.script->distributeMCS51AutoBankSections();
   }
 
   {

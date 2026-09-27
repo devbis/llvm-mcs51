@@ -29,6 +29,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -892,6 +893,75 @@ static OutputSection *findByName(ArrayRef<SectionCommand *> vec,
       if (osd->osec.name == name)
         return &osd->osec;
   return nullptr;
+}
+
+void LinkerScript::distributeMCS51AutoBankSections() {
+  if (ctx.arg.emachine != EM_8051)
+    return;
+
+  SmallVector<InputSectionBase *, 0> candidates;
+  for (SectionCommand *cmd : sectionCommands) {
+    auto *osd = dyn_cast<OutputDesc>(cmd);
+    if (!osd || !osd->osec.name.starts_with(".mcs51.autobank."))
+      continue;
+    for (SectionCommand *subCmd : osd->osec.commands) {
+      auto *isd = dyn_cast<InputSectionDescription>(subCmd);
+      if (!isd)
+        continue;
+      for (InputSectionBase *section : isd->sectionBases) {
+        if (!(section->flags & SHF_EXECINSTR)) {
+          Err(ctx) << "MCS-51 automatic bank section '" << section->name
+                   << "' is not executable";
+          continue;
+        }
+        candidates.push_back(section);
+      }
+    }
+  }
+  if (candidates.empty())
+    return;
+
+  std::array<OutputSection *, 7> banks{};
+  std::array<InputSectionDescription *, 7> bankDescriptions{};
+  std::array<uint64_t, 7> bankSizes{};
+  for (unsigned bank = 0; bank != banks.size(); ++bank) {
+    std::string name = (Twine(".bank") + Twine(bank + 1)).str();
+    banks[bank] = findByName(sectionCommands, name);
+    if (!banks[bank]) {
+      Err(ctx) << "MCS-51 automatic banking requires output section '" << name
+               << "'";
+      return;
+    }
+    for (SectionCommand *subCmd : banks[bank]->commands) {
+      if (auto *isd = dyn_cast<InputSectionDescription>(subCmd)) {
+        bankDescriptions[bank] = isd;
+        for (InputSectionBase *section : isd->sectionBases)
+          bankSizes[bank] += section->getSize();
+      }
+    }
+    if (!bankDescriptions[bank]) {
+      bankDescriptions[bank] = make<InputSectionDescription>(StringRef{});
+      banks[bank]->commands.push_back(bankDescriptions[bank]);
+    }
+  }
+
+  llvm::sort(candidates, [](InputSectionBase *lhs, InputSectionBase *rhs) {
+    if (lhs->getSize() != rhs->getSize())
+      return lhs->getSize() > rhs->getSize();
+    return lhs->name < rhs->name;
+  });
+
+  for (InputSectionBase *candidate : candidates) {
+    unsigned bank = llvm::min_element(bankSizes) - bankSizes.begin();
+    bankDescriptions[bank]->sectionBases.push_back(candidate);
+    candidate->parent = banks[bank];
+    bankSizes[bank] += candidate->getSize();
+  }
+
+  llvm::erase_if(sectionCommands, [](SectionCommand *cmd) {
+    auto *osd = dyn_cast<OutputDesc>(cmd);
+    return osd && osd->osec.name.starts_with(".mcs51.autobank.");
+  });
 }
 
 static OutputDesc *createSection(Ctx &ctx, InputSectionBase *isec,
