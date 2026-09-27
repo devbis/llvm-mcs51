@@ -43,7 +43,17 @@ int main(void) {
 // DIS-LABEL: <__mcs51_start>:
 // DIS: mov 129, #127
 // DIS: mov dptr, #0
-// DIS: movx @dptr, a
+// DIS-NEXT: mov r6, #0
+// DIS-NEXT: mov r7, #32
+// DIS-NEXT: clr a
+// DIS-NEXT: movx @dptr, a
+// DIS-NEXT: inc dptr
+// DIS-NEXT: inc r6
+// DIS-NEXT: cjne r6, #0,
+// DIS-NEXT: dec r7
+// DIS-NEXT: mov a, r6
+// DIS-NEXT: orl a, r7
+// DIS-NEXT: jnz
 // DIS: lcall
 // DIS: movc a, @a+dptr
 // DIS-LABEL: <main>:
