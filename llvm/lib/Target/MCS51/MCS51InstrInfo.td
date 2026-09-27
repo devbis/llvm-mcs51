@@ -1690,10 +1690,9 @@ def : Pat<(MCS51cmpslt8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
 def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 2)>;
 
-// The MCS-51 has no PC-relative unconditional branch with a long enough
-// range for arbitrary basic blocks. Use LJMP until branch relaxation can
-// select shorter forms safely.
-def : Pat<(br bb:$target), (LJMP MCS51Addr16:$target)>;
+// Start with the compact relative jump. The pre-emit branch relaxation pass
+// promotes out-of-range branches to LJMP.
+def : Pat<(br bb:$target), (SJMP MCS51Rel8:$target)>;
 
 // C promotes shift counts to int, which is i16 in the MCS-51 ABI. This
 // immediate-only operand keeps supported constant counts visible to ISel.
