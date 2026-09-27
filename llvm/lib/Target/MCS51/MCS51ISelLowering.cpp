@@ -59,6 +59,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
+  setOperationAction(ISD::ROTL, MVT::i8, Expand);
+  setOperationAction(ISD::ROTL, MVT::i16, Expand);
   setOperationAction(ISD::SRA, MVT::i8, Custom);
   setOperationAction(ISD::SRA, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i16, Custom);
