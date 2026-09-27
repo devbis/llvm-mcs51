@@ -166,12 +166,13 @@ feature by feature; do not describe the target as fully supported until the
 remaining ABI, instruction, memory-map, runtime, optimization, and
 firmware-image gaps are implemented and tested.
 
-Generic (`__generic`) pointers are not implemented yet. LLVM's SelectionDAG
-pointer lowering currently represents pointers with a `MVT`, whose integer
-pointer types are limited to the target's simple value types; declaring a
-24-bit pointer in the data layout alone produces an invalid EVT during
-CodeGen. A 32-bit padded pointer experiment also reached unsupported i32
-comparison legalization. Do not add a `p8:24` layout or advertise generic
-pointer support until the representation, three-byte ABI, address-space
-conversion, and dynamic dereference paths are implemented together and
-covered by codegen and firmware tests.
+Generic (`__generic`) pointers are not implemented yet. The frontend now
+recognizes `__generic` as experimental address space 8 and uses a padded
+32-bit pointer representation so LLVM can form its SelectionDAG value type.
+Identity values can pass through code generation, but the representation does
+not yet implement the 24-bit tag/address encoding, three-byte ABI,
+address-space conversions, or dynamic dereferences. LLVM's SelectionDAG
+pointer lowering uses MVTs, so declaring a 24-bit pointer in the data layout
+alone produces an invalid EVT during CodeGen. Do not advertise generic pointer
+support until the representation, ABI, conversions, and dynamic dereference
+paths are implemented together and covered by codegen and firmware tests.
