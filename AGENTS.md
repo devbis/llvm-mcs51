@@ -182,8 +182,9 @@ three-byte function-argument ABI. Address-space casts to generic pointers add
 the classic tags (CODE `0x80`, DATA/IDATA `0x40`, PDATA `0x60`, XDATA `0x00`);
 casts back discard the tag and truncate to the destination pointer width. The
 default near pointer uses XDATA's tag under this target's default memory model.
-A store through a CODE-tagged pointer loops forever because code memory is
-read-only.
+Generic pointer arithmetic wraps the address at 16 bits and preserves the
+tag. A store through a CODE-tagged pointer loops forever because code memory
+is read-only.
 
 This is not yet complete generic-pointer support. Validate address-space
 conversions and pointer arithmetic with runtime correctness checks for every
