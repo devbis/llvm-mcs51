@@ -1432,6 +1432,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register SrcHi = MI.getOperand(3).getReg();
     Register Amount = MI.getOperand(4).getReg();
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *Loop = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MF.insert(Tail->getIterator(), Loop);
@@ -1471,6 +1477,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(Tail);
 
+    while (!MBB->succ_empty())
+      MBB->removeSuccessor(MBB->succ_begin());
+    MBB->addSuccessor(Tail);
+    MBB->addSuccessor(Loop);
     BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::FRAMEADDR_R1))
         .addFrameIndex(ScratchFI)
         .addImm(IsLeft ? 0 : 3);
