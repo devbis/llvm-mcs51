@@ -98,7 +98,7 @@
 # ASM: mul ab{{.*}}encoding: [0xa4]
 # ASM: movx a, @dptr{{.*}}encoding: [0xe0]
 # ASM: mov a, #90{{.*}}encoding: [0x74,0x5a]
-# ASM: mov dptr, #4660{{.*}}encoding: [0x90,0x34,0x12]
+# ASM: mov dptr, #4660{{.*}}encoding: [0x90,0x12,0x34]
 # ASM: add a, #1{{.*}}encoding: [0x24,0x01]
 # ASM: addc a, #18{{.*}}encoding: [0x34,0x12]
 # ASM: subb a, #1{{.*}}encoding: [0x94,0x01]

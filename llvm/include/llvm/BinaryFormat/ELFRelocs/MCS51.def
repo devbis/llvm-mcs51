@@ -1,7 +1,9 @@
-// MCS-51 ELF relocation types.
+// MCS-51 ELF relocation types. R_8051_16 is a little-endian data relocation;
+// R_8051_16_BE is for high-byte-first code addresses in 8051 instructions.
 // These values define LLVM's initial relocation ABI for EM_8051.
 ELF_RELOC(R_8051_NONE, 0)
 ELF_RELOC(R_8051_8, 1)
 ELF_RELOC(R_8051_16, 2)
 ELF_RELOC(R_8051_PCREL8, 3)
 ELF_RELOC(R_8051_11, 4)
+ELF_RELOC(R_8051_16_BE, 5)

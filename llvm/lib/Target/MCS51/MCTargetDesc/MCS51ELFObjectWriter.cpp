@@ -29,6 +29,8 @@ protected:
     case MCS51::fixup_16:
     case FK_Data_2:
       return ELF::R_8051_16;
+    case MCS51::fixup_16_be:
+      return ELF::R_8051_16_BE;
     default:
       llvm_unreachable("unsupported MCS-51 relocation");
     }

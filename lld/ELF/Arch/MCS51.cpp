@@ -48,6 +48,7 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
     return R_NONE;
   case R_8051_8:
   case R_8051_16:
+  case R_8051_16_BE:
     return R_ABS;
   case R_8051_PCREL8:
     return R_PC;
@@ -70,6 +71,11 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_8051_16:
     checkUInt(ctx, loc, val, 16, rel);
     write16le(loc, val);
+    break;
+  case R_8051_16_BE:
+    checkUInt(ctx, loc, val, 16, rel);
+    loc[0] = static_cast<uint8_t>(val >> 8);
+    loc[1] = static_cast<uint8_t>(val);
     break;
   case R_8051_PCREL8:
     checkInt(ctx, loc, val, 8, rel);
@@ -106,7 +112,7 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
         Err(ctx) << "MCS-51 AJMP/ACALL cannot cross from bank "
                  << callerBank << " to bank " << targetBank << " for function '"
                  << rel.sym->getName() << "'";
-      bool isLongCall = rel.type == R_8051_16 &&
+      bool isLongCall = rel.type == R_8051_16_BE &&
                         (sec.flags & SHF_EXECINSTR) && rel.offset > 0 &&
                         sec.content()[rel.offset - 1] == 0x12;
       bool isFunctionAddress = rel.type == R_8051_16 && !isLongCall;

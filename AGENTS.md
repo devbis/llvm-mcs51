@@ -45,6 +45,7 @@ cmake --build ../llvm-8051-build \
   llvm/test/CodeGen/8051 \
   llvm/test/MC/MCS51 \
   lld/test/ELF/mcs51-relocations.s \
+  lld/test/ELF/mcs51-data-pointer-reloc.s \
   lld/test/ELF/mcs51-11-bit-branch.s \
   lld/test/ELF/mcs51-auto-bank.s \
   llvm/test/CodeGen/8051/cc2530-firmware.c \

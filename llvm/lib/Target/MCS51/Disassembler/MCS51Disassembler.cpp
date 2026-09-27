@@ -19,9 +19,9 @@ static DecodeStatus DecodeImm8(MCInst &Inst, unsigned Imm, uint64_t,
   return MCDisassembler::Success;
 }
 
-static DecodeStatus DecodeImm16(MCInst &Inst, unsigned Imm, uint64_t,
-                                const MCDisassembler *) {
-  Inst.addOperand(MCOperand::createImm(Imm));
+static DecodeStatus DecodeImm16BE(MCInst &Inst, unsigned Imm, uint64_t,
+                                  const MCDisassembler *) {
+  Inst.addOperand(MCOperand::createImm(((Imm & 0xff) << 8) | (Imm >> 8)));
   return MCDisassembler::Success;
 }
 
