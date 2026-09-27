@@ -109,6 +109,20 @@ public:
       auto *Cast = cast<AddrSpaceCastSDNode>(N);
       unsigned SrcAS = Cast->getSrcAddressSpace();
       unsigned DstAS = Cast->getDestAddressSpace();
+      if (SrcAS == MCS51::Default && DstAS == MCS51::IData) {
+        int FrameFI;
+        int64_t Offset;
+        if (getFrameAddress(Cast->getOperand(0), FrameFI, Offset)) {
+          SDValue Ops[] = {
+              CurDAG->getTargetFrameIndex(FrameFI, MVT::i16),
+              CurDAG->getTargetConstant(Offset, DL, MVT::i8)};
+          SDNode *Res = CurDAG->getMachineNode(MCS51::FRAMEADDR8, DL,
+                                               N->getVTList(), Ops);
+          ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+          CurDAG->RemoveDeadNode(N);
+          return;
+        }
+      }
       // Default pointers use the 16-bit XDATA bus for indirect accesses, so
       // casts between generic and explicitly qualified XDATA pointers do not
       // change the pointer representation.
