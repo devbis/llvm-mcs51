@@ -41,40 +41,66 @@ public:
 
         auto First = I;
         auto Second = std::next(First);
-        if (Second == MBB.end() || Second->getOpcode() != MCS51::INC_RN) {
+        if (Second == MBB.end()) {
           ++I;
           continue;
         }
         auto Third = std::next(Second);
-        if (Third == MBB.end() || Third->getOpcode() != MCS51::MOV_A_RN ||
-            First->getOperand(0).getReg() != Second->getOperand(1).getReg() ||
-            Second->getOperand(0).getReg() != Third->getOperand(0).getReg()) {
+        if (Third == MBB.end()) {
           ++I;
           continue;
         }
 
-        Register IncReg = Third->getOperand(0).getReg();
-        bool DeadAfterMove = Third->getOperand(0).isKill();
-        if (!DeadAfterMove && MBB.succ_empty()) {
-          DeadAfterMove = true;
-          for (auto J = std::next(Third); J != MBB.end(); ++J)
-            if (J->readsRegister(IncReg, TRI)) {
-              DeadAfterMove = false;
-              break;
-            }
+        auto IsDeadAfter = [&](MachineInstr &MI, Register Reg) {
+          if (MI.getOperand(0).isKill())
+            return true;
+          if (!MBB.succ_empty())
+            return false;
+          for (auto J = std::next(MI.getIterator()); J != MBB.end(); ++J)
+            if (J->readsRegister(Reg, TRI))
+              return false;
+          return true;
+        };
+
+        if ((Second->getOpcode() == MCS51::INC_RN ||
+             Second->getOpcode() == MCS51::DEC_RN) &&
+            Third->getOpcode() == MCS51::MOV_A_RN &&
+            First->getOperand(0).getReg() == Second->getOperand(1).getReg() &&
+            Second->getOperand(0).getReg() == Third->getOperand(0).getReg() &&
+            IsDeadAfter(*Third, Third->getOperand(0).getReg())) {
+          auto Next = std::next(Third);
+          unsigned AccumulatorOpcode = Second->getOpcode() == MCS51::INC_RN
+                                           ? MCS51::INC_A
+                                           : MCS51::DEC_A;
+          BuildMI(MBB, Second, Second->getDebugLoc(),
+                  TII->get(AccumulatorOpcode));
+          First->eraseFromParent();
+          Second->eraseFromParent();
+          Third->eraseFromParent();
+          I = Next;
+          Changed = true;
+          continue;
         }
-        if (!DeadAfterMove) {
+
+        if (Second->getOpcode() == MCS51::MOV_A_RN &&
+            (Third->getOpcode() == MCS51::INC_A ||
+             Third->getOpcode() == MCS51::DEC_A) &&
+            First->getOperand(0).getReg() == Second->getOperand(0).getReg() &&
+            IsDeadAfter(*Second, Second->getOperand(0).getReg())) {
+          First->eraseFromParent();
+          Second->eraseFromParent();
+          I = Third;
+          Changed = true;
+          continue;
+        }
+
+        if (Second->getOpcode() != MCS51::INC_RN &&
+            Second->getOpcode() != MCS51::DEC_RN) {
           ++I;
           continue;
         }
 
-        auto Next = std::next(Third);
-        BuildMI(MBB, Second, Second->getDebugLoc(), TII->get(MCS51::INC_A));
-        First->eraseFromParent();
-        Second->eraseFromParent();
-        Third->eraseFromParent();
-        I = Next;
-        Changed = true;
+        ++I;
       }
     }
     return Changed;

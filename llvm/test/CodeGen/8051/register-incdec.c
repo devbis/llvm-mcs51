@@ -6,8 +6,8 @@ unsigned char increment_middle(unsigned char lhs, unsigned char rhs) {
 }
 
 unsigned char decrement_middle(unsigned char lhs, unsigned char rhs) {
-  unsigned char value = lhs - 1;
-  return value + rhs;
+  unsigned char value = lhs + rhs;
+  return value - 1;
 }
 
 // CHECK-LABEL: increment_middle:
@@ -16,5 +16,6 @@ unsigned char decrement_middle(unsigned char lhs, unsigned char rhs) {
 // CHECK-NEXT: ret
 // CHECK-NOT: inc r
 // CHECK-LABEL: decrement_middle:
-// CHECK: dec a
+// CHECK: add a, r
+// CHECK-NEXT: dec a
 // CHECK-NEXT: ret
