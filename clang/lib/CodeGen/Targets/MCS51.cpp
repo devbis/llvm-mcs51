@@ -14,10 +14,51 @@ using namespace clang;
 using namespace clang::CodeGen;
 
 namespace {
+class MCS51ABIInfo final : public DefaultABIInfo {
+  llvm::Type *getAggregateCoerceType(QualType Ty) const {
+    uint64_t Size = getContext().getTypeSize(Ty);
+    if (!Size || Size > 64)
+      return nullptr;
+
+    unsigned Width = 8;
+    while (Width < Size)
+      Width *= 2;
+    return llvm::IntegerType::get(getVMContext(), Width);
+  }
+
+public:
+  explicit MCS51ABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+
+  ABIArgInfo classifyReturnType(QualType RetTy) const {
+    if (isAggregateTypeForABI(RetTy))
+      if (llvm::Type *CoerceTy = getAggregateCoerceType(RetTy))
+        return ABIArgInfo::getDirect(CoerceTy);
+    return DefaultABIInfo::classifyReturnType(RetTy);
+  }
+
+  ABIArgInfo classifyArgumentType(QualType Ty) const {
+    Ty = useFirstFieldIfTransparentUnion(Ty);
+    if (isAggregateTypeForABI(Ty)) {
+      if (Ty->getAs<RecordType>() && getRecordArgABI(Ty, getCXXABI()))
+        return DefaultABIInfo::classifyArgumentType(Ty);
+      if (llvm::Type *CoerceTy = getAggregateCoerceType(Ty))
+        return ABIArgInfo::getDirect(CoerceTy);
+    }
+    return DefaultABIInfo::classifyArgumentType(Ty);
+  }
+
+  void computeInfo(CGFunctionInfo &FI) const override {
+    if (!getCXXABI().classifyReturnType(FI))
+      FI.getReturnInfo() = classifyReturnType(FI.getReturnType());
+    for (auto &I : FI.arguments())
+      I.info = classifyArgumentType(I.type);
+  }
+};
+
 class MCS51TargetCodeGenInfo final : public TargetCodeGenInfo {
 public:
   explicit MCS51TargetCodeGenInfo(CodeGenTypes &CGT)
-      : TargetCodeGenInfo(std::make_unique<DefaultABIInfo>(CGT)) {}
+      : TargetCodeGenInfo(std::make_unique<MCS51ABIInfo>(CGT)) {}
 
   LangAS getGlobalVarAddressSpace(CodeGenModule &CGM,
                                   const VarDecl *D) const override {
