@@ -33,7 +33,7 @@ unsigned char banked_global_pointer_caller(unsigned char value) {
 int main(void) { return banked_global_pointer_caller(0); }
 
 // CHECK-LABEL: banked_add:
-// CHECK: .section .text.bankthunks,"ax"
+// CHECK: .section .text.bankthunks.{{[0-9]+}},"ax"
 // CHECK-LABEL: __mcs51_bankcall_banked_add:
 // CHECK: mov 159, #2
 // CHECK: lcall banked_add

@@ -27,7 +27,7 @@ int main(void) { return 0; }
 
 // CHECK: .section .bank2.text,"ax"
 // CHECK-LABEL: banked_add:
-// CHECK: .section .text.bankthunks,"ax"
+// CHECK: .section .text.bankthunks.{{[0-9]+}},"ax"
 // CHECK-LABEL: __mcs51_bankcall_banked_add:
 // CHECK: push 159
 // CHECK: mov 159, #2
