@@ -21,8 +21,8 @@ __mcs51_start:
   clr a
   movx @dptr, a
   inc dptr
-  dec r6
-  cjne r6, #255, .Lcheck_xdata_count
+  inc r6
+  cjne r6, #0, .Lcheck_xdata_count
   dec r7
 .Lcheck_xdata_count:
   mov a, r6
