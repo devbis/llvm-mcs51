@@ -25,5 +25,32 @@ int main(void) {
     return 4;
 
   char Text[] = {'8', '0', '5', '1', 0};
-  return strlen(Text) != 4;
+  if (strlen(Text) != 4)
+    return 5;
+
+  char StringBuffer[16] = "llvm";
+  char StringCopy[8];
+  if (strcpy(StringCopy, Text) != StringCopy || strcmp(StringCopy, Text))
+    return 6;
+  if (strcmp("8051", "8050") <= 0 || strcmp("8051", "8052") >= 0 ||
+      strcmp("llvm", "llvm") != 0)
+    return 7;
+  if (strncmp("8051", "8052", 3) != 0 || strncmp("8051", "8052", 4) >= 0 ||
+      strncmp("8051", "8051x", 8) >= 0 || strncmp("8051", "8051x", 4) != 0 ||
+      strncmp("8051", "8051", 0) != 0)
+    return 8;
+  if (strncpy(StringCopy, "mcu", 5) != StringCopy || StringCopy[0] != 'm' ||
+      StringCopy[1] != 'c' || StringCopy[2] != 'u' || StringCopy[3] != '\0' ||
+      StringCopy[4] != '\0')
+    return 9;
+  if (strncpy(StringCopy, "8051", 2) != StringCopy || StringCopy[0] != '8' ||
+      StringCopy[1] != '0' || StringCopy[2] != 'u')
+    return 10;
+  if (strcat(StringBuffer, "-8051") != StringBuffer ||
+      strcmp(StringBuffer, "llvm-8051"))
+    return 11;
+  if (strncat(StringBuffer, "-mcu", 3) != StringBuffer ||
+      strcmp(StringBuffer, "llvm-8051-mc"))
+    return 12;
+  return 0;
 }
