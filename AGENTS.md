@@ -166,18 +166,24 @@ feature by feature; do not describe the target as fully supported until the
 remaining ABI, instruction, memory-map, runtime, optimization, and
 firmware-image gaps are implemented and tested.
 
-Generic (`__generic`) pointers are not implemented yet. The frontend now
-recognizes `__generic` as experimental address space 8 and uses a padded
-32-bit pointer representation so LLVM can form its SelectionDAG value type.
-Identity values can pass through code generation, but the representation does
-not yet implement the 24-bit tag/address encoding, three-byte ABI,
-address-space conversions, or dynamic dereferences. LLVM's SelectionDAG
-pointer lowering uses MVTs, so declaring a 24-bit pointer in the data layout
-alone produces an invalid EVT during CodeGen. Do not advertise generic pointer
-support until the representation, ABI, conversions, and dynamic dereference
-paths are implemented together and covered by codegen and firmware tests. A
-generic pointer dereference currently fails during SelectionDAG type
-legalization: the `LOAD` address is an illegal `i32` operand, and LLVM's
-default integer operand expansion does not handle it. The backend must lower
-generic loads and stores before that fallback, including runtime dispatch to
-the pointer's encoded memory space.
+Generic (`__generic`) pointers have initial load/store support. The frontend
+uses experimental address space 8 and a padded 32-bit LLVM representation;
+the low 24 bits follow the classic MCS-51 encoding, with a 16-bit address and
+an 8-bit memory-space tag. LLVM's SelectionDAG cannot use a 24-bit pointer
+value directly, so `MCS51GenericPointerLowering` runs before instruction
+selection and replaces generic loads and stores with runtime calls. The
+runtime dispatches each byte access to CODE, XDATA, PDATA, or IDATA and
+supports scalar `i1`, `i8`, `i16`, `i32`, `i64`, and `float` accesses. Multi-byte
+values are transferred little-endian. The compiler transports the pointer in
+a padded 32-bit value and passes its four bytes to the helpers; this is not a
+three-byte function-argument ABI. A store through a CODE-tagged pointer loops
+forever because code memory is read-only.
+
+This is not yet complete generic-pointer support. Validate address-space
+conversions and pointer arithmetic for every source space, pointer values
+crossing function boundaries, volatile behavior, and actual runtime semantics
+on an emulator or device. Atomic/aggregate accesses and scalar types outside
+the list above are unsupported; the lowering currently diagnoses unsupported
+access types as a fatal backend error. Keep this limitation visible until the
+generic-pointer ABI and behavior are covered end-to-end with correctness and
+code-size tests.
