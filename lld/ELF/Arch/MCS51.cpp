@@ -102,6 +102,10 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       targetBank =
           targetInput ? getMCS51CodeBank(targetInput->getOutputSection()) : 0;
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
+      if (rel.type == R_8051_11 && targetBank != callerBank)
+        Err(ctx) << "MCS-51 AJMP/ACALL cannot cross from bank "
+                 << callerBank << " to bank " << targetBank << " for function '"
+                 << rel.sym->getName() << "'";
       bool isLongCall = rel.type == R_8051_16 &&
                         (sec.flags & SHF_EXECINSTR) && rel.offset > 0 &&
                         sec.content()[rel.offset - 1] == 0x12;
