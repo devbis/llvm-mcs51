@@ -128,6 +128,11 @@ at `0x03 + 8*N`, keeps reset at address zero, reserves the vector table, and
 rejects duplicate handlers for a vector. Interrupt handlers must reside in
 common flash and cannot be called directly.
 
+Trivial aggregate arguments and return values of up to 8 bytes are coerced to
+integer packets of 8, 16, 32, or 64 bits and use the scalar register/stack ABI.
+Larger aggregate arguments and returns still use Clang's indirect ABI and need
+separate MCS-51 stack-pointer support before they can be considered supported.
+
 ## Final target and completion criteria
 
 The final deliverable is a buildable LLVM branch that can compile, optimize,
