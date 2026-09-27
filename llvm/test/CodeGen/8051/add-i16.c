@@ -8,6 +8,7 @@ unsigned short subtract_one16(unsigned short value) { return value - 1; }
 unsigned short add_negative_one16(unsigned short value) { return value + 65535; }
 short subtract_one_signed16(short value) { return value - 1; }
 unsigned short add_25616(unsigned short value) { return value + 256; }
+unsigned short add_51216(unsigned short value) { return value + 512; }
 unsigned short add_large16(unsigned short value) { return value + 60000; }
 
 // CHECK-LABEL: add_one16:
@@ -42,12 +43,11 @@ unsigned short add_large16(unsigned short value) { return value + 60000; }
 // CHECK-NEXT: mov 131, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_25616:
-// CHECK: mov a, 130
-// CHECK-NEXT: add a, #0
-// CHECK-NEXT: mov 130, a
-// CHECK-NEXT: mov a, 131
-// CHECK-NEXT: addc a, #1
-// CHECK-NEXT: mov 131, a
+// CHECK: inc 131
+// CHECK-NEXT: ret
+// CHECK-LABEL: add_51216:
+// CHECK: inc 131
+// CHECK-NEXT: inc 131
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_large16:
 // CHECK: mov a, 130
