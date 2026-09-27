@@ -248,10 +248,10 @@ unsigned MCS51InstrInfo::insertBranch(
     *BytesAdded = 0;
   unsigned Count = 0;
   if (Cond.empty()) {
-    BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(TBB);
+    BuildMI(&MBB, DL, get(MCS51::SJMP)).addMBB(TBB);
     Count = 1;
     if (BytesAdded)
-      *BytesAdded = 3;
+      *BytesAdded = 2;
   } else {
     assert(!Cond.empty() && Cond[0].isImm() &&
            "unsupported MCS-51 branch condition");
@@ -269,10 +269,10 @@ unsigned MCS51InstrInfo::insertBranch(
     if (BytesAdded)
       *BytesAdded = get(Opcode).getSize();
     if (FBB) {
-      BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(FBB);
+      BuildMI(&MBB, DL, get(MCS51::SJMP)).addMBB(FBB);
       ++Count;
       if (BytesAdded)
-        *BytesAdded += 3;
+        *BytesAdded += 2;
     }
   }
   return Count;
