@@ -57,8 +57,9 @@ by Intel HEX generation. Keep new MCS-51-specific tests inside this checkout,
 even when nearby test directories are symlinks to another LLVM checkout. The
 Clang driver defaults MCS-51 compilation to freestanding mode and uses static
 bare-metal links without hosted startup files or default system libraries.
-Building `mcs51-runtime` compiles the arithmetic runtime and CC2530 startup
-objects into Clang's resource directory. With those files present,
+Building `mcs51-runtime` compiles the arithmetic runtime, basic memory and
+string routines, and CC2530 startup objects into Clang's resource directory.
+With those files present,
 `clang -target mcs51 -mcpu=cc2530 app.c -o firmware.elf` automatically links
 the runtime, startup, CC2530 linker script, and section garbage collection.
 CC2530 compilation enables function and data sections so link-time garbage

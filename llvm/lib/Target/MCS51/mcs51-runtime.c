@@ -984,6 +984,68 @@ uint16_t strlen(const char *String) {
   return (uint16_t)(End - String);
 }
 
+char *strcpy(char *Destination, const char *Source) {
+  char *Result = Destination;
+  char Byte;
+  do {
+    Byte = *Source++;
+    *Destination++ = Byte;
+  } while (Byte);
+  return Result;
+}
+
+char *strncpy(char *Destination, const char *Source, uint16_t Count) {
+  char *Result = Destination;
+  while (Count && *Source) {
+    *Destination++ = *Source++;
+    --Count;
+  }
+  while (Count) {
+    *Destination++ = '\0';
+    --Count;
+  }
+  return Result;
+}
+
+int strcmp(const char *LHS, const char *RHS) {
+  while (*LHS && *LHS == *RHS) {
+    ++LHS;
+    ++RHS;
+  }
+  return (int)(uint8_t)*LHS - (int)(uint8_t)*RHS;
+}
+
+int strncmp(const char *LHS, const char *RHS, uint16_t Count) {
+  while (Count && *LHS && *LHS == *RHS) {
+    ++LHS;
+    ++RHS;
+    --Count;
+  }
+  if (!Count)
+    return 0;
+  return (int)(uint8_t)*LHS - (int)(uint8_t)*RHS;
+}
+
+char *strcat(char *Destination, const char *Source) {
+  char *Result = Destination;
+  while (*Destination)
+    ++Destination;
+  strcpy(Destination, Source);
+  return Result;
+}
+
+char *strncat(char *Destination, const char *Source, uint16_t Count) {
+  char *Result = Destination;
+  while (*Destination)
+    ++Destination;
+  while (Count && *Source) {
+    *Destination++ = *Source++;
+    --Count;
+  }
+  *Destination = '\0';
+  return Result;
+}
+
 // Generic pointers follow the classic MCS-51 three-byte encoding in the low
 // 24 bits: address in bits 0-15 and a memory-space tag in bits 16-23. The
 // compiler currently transports this value in a padded i32.
