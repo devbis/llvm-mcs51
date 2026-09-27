@@ -13,6 +13,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
@@ -32,6 +33,16 @@ public:
 
   bool runOnFunction(Function &F) override {
     bool Changed = false;
+    SmallVector<GetElementPtrInst *, 8> GenericGEPs;
+    for (Instruction &I : instructions(F))
+      if (auto *GEP = dyn_cast<GetElementPtrInst>(&I))
+        if (GEP->getPointerAddressSpace() == MCS51::Generic)
+          GenericGEPs.push_back(GEP);
+    for (GetElementPtrInst *GEP : GenericGEPs) {
+      lowerGenericGEP(*GEP);
+      Changed = true;
+    }
+
     for (Instruction &I : instructions(F)) {
       Value *Pointer = nullptr;
       if (auto *LI = dyn_cast<LoadInst>(&I)) {
@@ -115,6 +126,54 @@ public:
   }
 
 private:
+  static void lowerGenericGEP(GetElementPtrInst &GEP) {
+    IRBuilder<> B(&GEP);
+    Module &M = *GEP.getModule();
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
+    Type *I16 = Type::getInt16Ty(C);
+    Type *I32 = Type::getInt32Ty(C);
+    Value *Offset = nullptr;
+
+    for (gep_type_iterator GTI = gep_type_begin(&GEP), E = gep_type_end(&GEP);
+         GTI != E; ++GTI) {
+      Value *Index = GTI.getOperand();
+      if (StructType *STy = GTI.getStructTypeOrNull()) {
+        auto *Field = cast<ConstantInt>(Index);
+        uint64_t FieldOffset =
+            DL.getStructLayout(STy)->getElementOffset(Field->getZExtValue());
+        Value *FieldOffsetValue = B.getInt16(FieldOffset);
+        Offset = Offset
+                     ? B.CreateAdd(Offset, FieldOffsetValue, "gptr.gep.offset")
+                     : FieldOffsetValue;
+        continue;
+      }
+
+      uint64_t Stride = GTI.getSequentialElementStride(DL);
+      Value *Index16 = B.CreateSExtOrTrunc(Index, I16, "gptr.gep.index");
+      Value *ScaledIndex = Index16;
+      if (Stride != 1)
+        ScaledIndex =
+            B.CreateMul(Index16, B.getInt16(Stride), "gptr.gep.scaled.index");
+      Offset = Offset ? B.CreateAdd(Offset, ScaledIndex, "gptr.gep.offset")
+                      : ScaledIndex;
+    }
+
+    Value *BaseBits =
+        B.CreatePtrToInt(GEP.getPointerOperand(), I32, "gptr.gep.base");
+    Value *BaseAddress = B.CreateTrunc(BaseBits, I16, "gptr.gep.address");
+    Value *Address = Offset
+                         ? B.CreateAdd(BaseAddress, Offset, "gptr.gep.address")
+                         : BaseAddress;
+    Value *TagAndPadding =
+        B.CreateAnd(BaseBits, B.getInt32(0xffff0000), "gptr.gep.tag");
+    Value *AddressBits = B.CreateZExt(Address, I32, "gptr.gep.address.bits");
+    Value *ResultBits = B.CreateOr(TagAndPadding, AddressBits, "gptr.gep.bits");
+    Value *Result = B.CreateIntToPtr(ResultBits, GEP.getType(), "gptr.gep");
+    GEP.replaceAllUsesWith(Result);
+    GEP.eraseFromParent();
+  }
+
   static bool isGenericTagSupported(unsigned AddressSpace) {
     switch (AddressSpace) {
     case MCS51::Default:
@@ -195,23 +254,22 @@ private:
     }
   }
 
-  static Value *lowerAddressSpaceCast(IRBuilder<> &B, Value *Pointer,
-                                      Type *DestTy, unsigned SrcAS,
-                                      unsigned DstAS,
-                                      DenseMap<const PHINode *, PHINode *>
-                                          &GenericPointerPhis) {
+  static Value *lowerAddressSpaceCast(
+      IRBuilder<> &B, Value *Pointer, Type *DestTy, unsigned SrcAS,
+      unsigned DstAS,
+      DenseMap<const PHINode *, PHINode *> &GenericPointerPhis) {
     Module &M = *B.GetInsertBlock()->getModule();
     LLVMContext &C = M.getContext();
     if (DstAS == MCS51::Generic) {
       if (auto *Select = dyn_cast<SelectInst>(Pointer)) {
-        Value *TruePointer = lowerAddressSpaceCast(
-            B, Select->getTrueValue(), DestTy, SrcAS, DstAS,
-            GenericPointerPhis);
-        Value *FalsePointer = lowerAddressSpaceCast(
-            B, Select->getFalseValue(), DestTy, SrcAS, DstAS,
-            GenericPointerPhis);
-        return B.CreateSelect(Select->getCondition(), TruePointer,
-                              FalsePointer, "gptr.cast.select");
+        Value *TruePointer =
+            lowerAddressSpaceCast(B, Select->getTrueValue(), DestTy, SrcAS,
+                                  DstAS, GenericPointerPhis);
+        Value *FalsePointer =
+            lowerAddressSpaceCast(B, Select->getFalseValue(), DestTy, SrcAS,
+                                  DstAS, GenericPointerPhis);
+        return B.CreateSelect(Select->getCondition(), TruePointer, FalsePointer,
+                              "gptr.cast.select");
       }
       if (auto *PointerPhi = dyn_cast<PHINode>(Pointer)) {
         auto Existing = GenericPointerPhis.find(PointerPhi);
@@ -219,9 +277,9 @@ private:
           return Existing->second;
 
         BasicBlock *BB = PointerPhi->getParent();
-        PHINode *GenericPhi = PHINode::Create(
-            DestTy, PointerPhi->getNumIncomingValues(), "gptr.cast.phi",
-            BB->getFirstNonPHIIt());
+        PHINode *GenericPhi =
+            PHINode::Create(DestTy, PointerPhi->getNumIncomingValues(),
+                            "gptr.cast.phi", BB->getFirstNonPHIIt());
         GenericPointerPhis[PointerPhi] = GenericPhi;
         for (unsigned I = 0; I != PointerPhi->getNumIncomingValues(); ++I) {
           BasicBlock *IncomingBB = PointerPhi->getIncomingBlock(I);
@@ -242,10 +300,10 @@ private:
       // Preserve the frame-index-to-IDATA lowering so the backend can form
       // the stack object's run-time address relative to SP.
       Type *IDataPtrTy = PointerType::get(C, MCS51::IData);
-      Value *IDataPointer = B.CreateAddrSpaceCast(
-          Pointer, IDataPtrTy, "gptr.cast.idata.pointer");
-      Value *IDataAddress = B.CreatePtrToInt(
-          IDataPointer, Type::getInt8Ty(C), "gptr.cast.idata.address");
+      Value *IDataPointer =
+          B.CreateAddrSpaceCast(Pointer, IDataPtrTy, "gptr.cast.idata.pointer");
+      Value *IDataAddress = B.CreatePtrToInt(IDataPointer, Type::getInt8Ty(C),
+                                             "gptr.cast.idata.address");
       Address = B.CreateZExt(IDataAddress, I16, "gptr.cast.address");
     } else {
       Address = B.CreatePtrToInt(Pointer, I16, "gptr.cast.address");
@@ -266,8 +324,7 @@ private:
       Type *IntTy = IntegerType::get(C, PointerBits);
       Value *Truncated = PointerBits == 16
                              ? Address
-                             : B.CreateTrunc(Address, IntTy,
-                                             "gptr.cast.trunc");
+                             : B.CreateTrunc(Address, IntTy, "gptr.cast.trunc");
       Result = B.CreateIntToPtr(Truncated, DestTy, "gptr.cast");
     }
     Result->setName("gptr.cast");
