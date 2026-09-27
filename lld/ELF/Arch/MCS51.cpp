@@ -9,6 +9,7 @@
 #include "Target.h"
 #include "InputSection.h"
 #include "OutputSections.h"
+#include "Symbols.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Endian.h"
 
@@ -19,6 +20,16 @@ using namespace lld;
 using namespace lld::elf;
 
 namespace {
+static unsigned getMCS51CodeBank(const OutputSection *section) {
+  if (!section || !section->name.starts_with(".bank"))
+    return 0;
+  StringRef name = section->name.drop_front(5);
+  unsigned bank = 0;
+  if (name.getAsInteger(10, bank) || bank < 1 || bank > 7)
+    return 0;
+  return bank;
+}
+
 class MCS51 final : public TargetInfo {
 public:
   MCS51(Ctx &ctx) : TargetInfo(ctx) { defaultImageBase = 0; }
@@ -80,6 +91,26 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     uint8_t *loc = buf + rel.offset;
     uint64_t place = secAddr + rel.offset;
     uint64_t val = sec.getRelocTargetVA(ctx, rel, place);
+    if ((rel.type == R_8051_16 || rel.type == R_8051_11) && rel.sym &&
+        rel.sym->isFunc()) {
+      auto *target = dyn_cast<Defined>(rel.sym);
+      auto *targetInput = target ? dyn_cast<InputSection>(target->section)
+                                 : nullptr;
+      unsigned targetBank = targetInput
+                                ? getMCS51CodeBank(
+                                      targetInput->getOutputSection())
+                                : 0;
+      unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
+      bool isBankThunk = sec.name == ".text.bankthunks";
+      // Codegen emits calls through these common-area stubs. Any other
+      // cross-bank relocation would use the shared 0x8000 VMA without setting
+      // FMAP, which silently calls whichever bank is currently selected.
+      if (targetBank && targetBank != callerBank && !isBankThunk)
+        Err(ctx) << "MCS-51 reference to banked function '"
+                 << rel.sym->getName()
+                 << "' must use its bank-call trampoline; declare the same "
+                    "banked section on the function declaration";
+    }
     if (rel.type == R_8051_11) {
       checkUInt(ctx, loc, val, 16, rel);
       if ((val & ~uint64_t(0x7ff)) != ((place + 2) & ~uint64_t(0x7ff)))
