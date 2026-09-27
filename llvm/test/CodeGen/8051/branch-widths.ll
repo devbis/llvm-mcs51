@@ -153,6 +153,39 @@ exit:
   ret void
 }
 
+define void @branch_equal_i64(i64 %lhs, i64 %rhs) {
+entry:
+  %cond = icmp eq i64 %lhs, %rhs
+  br i1 %cond, label %taken, label %exit
+taken:
+  call void @sink()
+  br label %exit
+exit:
+  ret void
+}
+
+define void @branch_signed_less_i64(i64 %lhs, i64 %rhs) {
+entry:
+  %cond = icmp slt i64 %lhs, %rhs
+  br i1 %cond, label %taken, label %exit
+taken:
+  call void @sink()
+  br label %exit
+exit:
+  ret void
+}
+
+define void @branch_unsigned_greater_equal_i64(i64 %lhs, i64 %rhs) {
+entry:
+  %cond = icmp uge i64 %lhs, %rhs
+  br i1 %cond, label %taken, label %exit
+taken:
+  call void @sink()
+  br label %exit
+exit:
+  ret void
+}
+
 ; CHECK-LABEL: equal_i16:
 ; CHECK: xrl a,
 ; CHECK: jnz
@@ -184,3 +217,6 @@ exit:
 ; CHECK-LABEL: branch_unsigned_less_i32:
 ; CHECK-LABEL: branch_unsigned_greater_i32:
 ; CHECK-LABEL: branch_unsigned_less_equal_i32:
+; CHECK-LABEL: branch_equal_i64:
+; CHECK-LABEL: branch_signed_less_i64:
+; CHECK-LABEL: branch_unsigned_greater_equal_i64:
