@@ -144,6 +144,8 @@ public:
       DAL->append(A);
 
     const auto &Opts = getDriver().getOpts();
+    if (!Args.hasArg(options::OPT_ffreestanding, options::OPT_fhosted))
+      DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_ffreestanding));
     if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles))
       DAL->AddFlagArg(nullptr, Opts.getOption(options::OPT_nostartfiles));
     if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nodefaultlibs))
