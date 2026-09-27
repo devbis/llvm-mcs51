@@ -175,4 +175,9 @@ address-space conversions, or dynamic dereferences. LLVM's SelectionDAG
 pointer lowering uses MVTs, so declaring a 24-bit pointer in the data layout
 alone produces an invalid EVT during CodeGen. Do not advertise generic pointer
 support until the representation, ABI, conversions, and dynamic dereference
-paths are implemented together and covered by codegen and firmware tests.
+paths are implemented together and covered by codegen and firmware tests. A
+generic pointer dereference currently fails during SelectionDAG type
+legalization: the `LOAD` address is an illegal `i32` operand, and LLVM's
+default integer operand expansion does not handle it. The backend must lower
+generic loads and stores before that fallback, including runtime dispatch to
+the pointer's encoded memory space.
