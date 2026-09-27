@@ -176,14 +176,21 @@ runtime dispatches each byte access to CODE, XDATA, PDATA, or IDATA and
 supports scalar `i1`, `i8`, `i16`, `i32`, `i64`, and `float` accesses. Multi-byte
 values are transferred little-endian. The compiler transports the pointer in
 a padded 32-bit value and passes its four bytes to the helpers; this is not a
-three-byte function-argument ABI. A store through a CODE-tagged pointer loops
-forever because code memory is read-only.
+three-byte function-argument ABI. Address-space casts to generic pointers add
+the classic tags (CODE `0x80`, DATA/IDATA `0x40`, PDATA `0x60`, XDATA `0x00`);
+casts back discard the tag and truncate to the destination pointer width. The
+default near pointer uses XDATA's tag under this target's default memory model.
+A store through a CODE-tagged pointer loops forever because code memory is
+read-only.
 
 This is not yet complete generic-pointer support. Validate address-space
-conversions and pointer arithmetic for every source space, pointer values
-crossing function boundaries, volatile behavior, and actual runtime semantics
-on an emulator or device. Atomic/aggregate accesses and scalar types outside
-the list above are unsupported; the lowering currently diagnoses unsupported
-access types as a fatal backend error. Keep this limitation visible until the
-generic-pointer ABI and behavior are covered end-to-end with correctness and
-code-size tests.
+conversions and pointer arithmetic with runtime correctness checks for every
+source space. The current CodeGen coverage exercises tagged conversions for
+CODE, XDATA, PDATA, and IDATA, including casts back to IDATA; it does not yet
+execute those cases in an emulator or on hardware. AS0-to-generic conversion
+uses the default XDATA model and does not distinguish pointers to stack
+objects, and casts involving bit or SFR spaces are unsupported. Atomic and
+aggregate accesses and scalar types outside the list above are unsupported;
+the lowering diagnoses unsupported access types as a fatal backend error.
+Keep these limitations visible until the generic-pointer ABI and behavior are
+covered end-to-end with correctness and code-size tests.
