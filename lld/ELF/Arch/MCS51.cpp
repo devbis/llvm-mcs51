@@ -101,7 +101,7 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
                                       targetInput->getOutputSection())
                                 : 0;
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
-      bool isBankThunk = sec.name == ".text.bankthunks";
+      bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
       // Codegen emits calls through these common-area stubs. Any other
       // cross-bank relocation would use the shared 0x8000 VMA without setting
       // FMAP, which silently calls whichever bank is currently selected.
