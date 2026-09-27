@@ -112,6 +112,14 @@ unsigned char logical_shift_variable(unsigned char value,
   return value >> amount;
 }
 
+// CHECK-LABEL: left_shift_variable:
+// CHECK: clr c
+// CHECK: rlc a
+// CHECK: djnz
+unsigned char left_shift_variable(unsigned char value, unsigned char amount) {
+  return value << amount;
+}
+
 // CHECK-LABEL: add_words:
 // CHECK: add a,
 // CHECK: addc a,
