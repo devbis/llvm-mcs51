@@ -177,7 +177,7 @@ class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
 }
 
 def NOP  : MCS51Inst<0x00, "nop"> { let hasSideEffects = 0; }
-def RR_A : MCS51Inst<0x03, "rr a">;
+def RR_A : MCS51Inst<0x03, "rr a"> { let Defs = [A]; let Uses = [A]; }
 def INC_A : MCS51Inst<0x04, "inc a"> {
   let Defs = [A]; let Uses = [A];
 }
@@ -188,7 +188,7 @@ def DEC_A : MCS51Inst<0x14, "dec a"> {
   let Defs = [A];
   let Uses = [A];
 }
-def RL_A : MCS51Inst<0x23, "rl a">;
+def RL_A : MCS51Inst<0x23, "rl a"> { let Defs = [A]; let Uses = [A]; }
 def RLC_A : MCS51Inst<0x33, "rlc a"> {
   let Defs = [A, C]; let Uses = [A, C];
 }
@@ -198,15 +198,17 @@ def MUL_AB : MCS51Inst<0xA4, "mul ab"> {
 }
 let Defs = [A, B, C], Uses = [A, B] in
 def DIV_AB : MCS51Inst<0x84, "div ab"> { let hasSideEffects = 0; }
-def SWAP_A : MCS51Inst<0xC4, "swap a">;
-def DA_A : MCS51Inst<0xD4, "da a">;
+def SWAP_A : MCS51Inst<0xC4, "swap a"> { let Defs = [A]; let Uses = [A]; }
+def DA_A : MCS51Inst<0xD4, "da a"> {
+  let Defs = [A, C]; let Uses = [A, C];
+}
 def CLR_A : MCS51Inst<0xE4, "clr a"> {
   let Defs = [A]; let hasSideEffects = 0;
 }
-def CPL_A : MCS51Inst<0xF4, "cpl a">;
+def CPL_A : MCS51Inst<0xF4, "cpl a"> { let Defs = [A]; let Uses = [A]; }
 def CLR_C : MCS51Inst<0xC3, "clr c"> { let Defs = [C]; }
 def CPL_C : MCS51Inst<0xB3, "cpl c"> { let Defs = [C]; let Uses = [C]; }
-def SETB_C : MCS51Inst<0xD3, "setb c">;
+def SETB_C : MCS51Inst<0xD3, "setb c"> { let Defs = [C]; }
 def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr"> {
   let isBranch = 1; let isIndirectBranch = 1;
   let isTerminator = 1; let isBarrier = 1;
@@ -417,30 +419,66 @@ def MOVX_R0A : MCS51Inst<0xF2, "movx @r0, a"> {
 def MOVX_R1A : MCS51Inst<0xF3, "movx @r1, a"> {
   let Uses = [A, R1]; let mayStore = 1;
 }
-def MOV_A_R0_IND : MCS51Inst<0xE6, "mov a, @r0">;
-def MOV_A_R1_IND : MCS51Inst<0xE7, "mov a, @r1">;
-def MOV_R0_IND_A : MCS51Inst<0xF6, "mov @r0, a">;
-def MOV_R1_IND_A : MCS51Inst<0xF7, "mov @r1, a">;
-def INC_R0_IND : MCS51Inst<0x06, "inc @r0">;
-def INC_R1_IND : MCS51Inst<0x07, "inc @r1">;
-def DEC_R0_IND : MCS51Inst<0x16, "dec @r0">;
-def DEC_R1_IND : MCS51Inst<0x17, "dec @r1">;
+def MOV_A_R0_IND : MCS51Inst<0xE6, "mov a, @r0"> {
+  let Defs = [A]; let Uses = [R0]; let mayLoad = 1;
+}
+def MOV_A_R1_IND : MCS51Inst<0xE7, "mov a, @r1"> {
+  let Defs = [A]; let Uses = [R1]; let mayLoad = 1;
+}
+def MOV_R0_IND_A : MCS51Inst<0xF6, "mov @r0, a"> {
+  let Uses = [A, R0]; let mayStore = 1;
+}
+def MOV_R1_IND_A : MCS51Inst<0xF7, "mov @r1, a"> {
+  let Uses = [A, R1]; let mayStore = 1;
+}
+def INC_R0_IND : MCS51Inst<0x06, "inc @r0"> {
+  let Uses = [R0]; let mayLoad = 1; let mayStore = 1;
+}
+def INC_R1_IND : MCS51Inst<0x07, "inc @r1"> {
+  let Uses = [R1]; let mayLoad = 1; let mayStore = 1;
+}
+def DEC_R0_IND : MCS51Inst<0x16, "dec @r0"> {
+  let Uses = [R0]; let mayLoad = 1; let mayStore = 1;
+}
+def DEC_R1_IND : MCS51Inst<0x17, "dec @r1"> {
+  let Uses = [R1]; let mayLoad = 1; let mayStore = 1;
+}
 def ADD_A_R0_IND : MCS51Inst<0x26, "add a, @r0"> {
-  let Defs = [A, C]; let Uses = [A];
+  let Defs = [A, C]; let Uses = [A, R0]; let mayLoad = 1;
 }
 def ADD_A_R1_IND : MCS51Inst<0x27, "add a, @r1"> {
-  let Defs = [A, C]; let Uses = [A];
+  let Defs = [A, C]; let Uses = [A, R1]; let mayLoad = 1;
 }
-def ADDC_A_R0_IND : MCS51Inst<0x36, "addc a, @r0">;
-def ADDC_A_R1_IND : MCS51Inst<0x37, "addc a, @r1">;
-def SUBB_A_R0_IND : MCS51Inst<0x96, "subb a, @r0">;
-def SUBB_A_R1_IND : MCS51Inst<0x97, "subb a, @r1">;
-def ANL_A_R0_IND : MCS51Inst<0x56, "anl a, @r0">;
-def ANL_A_R1_IND : MCS51Inst<0x57, "anl a, @r1">;
-def ORL_A_R0_IND : MCS51Inst<0x46, "orl a, @r0">;
-def ORL_A_R1_IND : MCS51Inst<0x47, "orl a, @r1">;
-def XRL_A_R0_IND : MCS51Inst<0x66, "xrl a, @r0">;
-def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1">;
+def ADDC_A_R0_IND : MCS51Inst<0x36, "addc a, @r0"> {
+  let Defs = [A, C]; let Uses = [A, C, R0]; let mayLoad = 1;
+}
+def ADDC_A_R1_IND : MCS51Inst<0x37, "addc a, @r1"> {
+  let Defs = [A, C]; let Uses = [A, C, R1]; let mayLoad = 1;
+}
+def SUBB_A_R0_IND : MCS51Inst<0x96, "subb a, @r0"> {
+  let Defs = [A, C]; let Uses = [A, C, R0]; let mayLoad = 1;
+}
+def SUBB_A_R1_IND : MCS51Inst<0x97, "subb a, @r1"> {
+  let Defs = [A, C]; let Uses = [A, C, R1]; let mayLoad = 1;
+}
+def ANL_A_R0_IND : MCS51Inst<0x56, "anl a, @r0"> {
+  let Defs = [A]; let Uses = [A, R0]; let mayLoad = 1;
+}
+def ANL_A_R1_IND : MCS51Inst<0x57, "anl a, @r1"> {
+  let Defs = [A]; let Uses = [A, R1]; let mayLoad = 1;
+}
+def ORL_A_R0_IND : MCS51Inst<0x46, "orl a, @r0"> {
+  let Defs = [A]; let Uses = [A, R0]; let mayLoad = 1;
+}
+def ORL_A_R1_IND : MCS51Inst<0x47, "orl a, @r1"> {
+  let Defs = [A]; let Uses = [A, R1]; let mayLoad = 1;
+}
+def XRL_A_R0_IND : MCS51Inst<0x66, "xrl a, @r0"> {
+  let Defs = [A]; let Uses = [A, R0]; let mayLoad = 1;
+}
+def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1"> {
+  let Defs = [A]; let Uses = [A, R1]; let mayLoad = 1;
+}
 def RET  : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
   let isTerminator = 1;
@@ -713,6 +751,7 @@ def CJNE_A_IMM : Instruction {
   let AsmString = "cjne a, #$imm, $target";
   let Size = 3;
   let Defs = [C];
+  let Uses = [A];
   let isBranch = 1;
   let isTerminator = 1;
   bits<8> imm; bits<8> target; bits<24> Inst;
@@ -725,26 +764,30 @@ def CJNE_A_DIRECT : Instruction {
   let AsmString = "cjne a, $addr, $target";
   let Size = 3;
   let Defs = [C];
+  let Uses = [A, DPTR, B];
+  let mayLoad = 1;
   let isBranch = 1;
   let isTerminator = 1;
   bits<8> addr; bits<8> target; bits<24> Inst;
   let Inst{7-0} = 0xB5; let Inst{15-8} = addr; let Inst{23-16} = target;
 }
-class MCS51CJNE_IND<bits<8> opcode, string reg> : Instruction {
+class MCS51CJNE_IND<bits<8> opcode, string reg, Register Ptr> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51Imm8:$imm, MCS51Rel8:$target);
   let AsmString = "cjne " # reg # ", #$imm, $target";
   let Size = 3;
   let Defs = [C];
+  let Uses = [Ptr];
+  let mayLoad = 1;
   let isBranch = 1;
   let isTerminator = 1;
   bits<8> imm; bits<8> target; bits<24> Inst;
   let Inst{7-0} = opcode;
   let Inst{15-8} = imm; let Inst{23-16} = target;
 }
-def CJNE_IND_R0 : MCS51CJNE_IND<0xB6, "@r0">;
-def CJNE_IND_R1 : MCS51CJNE_IND<0xB7, "@r1">;
+def CJNE_IND_R0 : MCS51CJNE_IND<0xB6, "@r0", R0>;
+def CJNE_IND_R1 : MCS51CJNE_IND<0xB7, "@r1", R1>;
 class MCS51CJNE_RN<bits<8> opcode> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -1971,13 +2014,15 @@ def MOV_DIRECT_DIRECT : Instruction {
   let Inst{23-16} = dst;
 }
 
-class MCS51IndirectImmInst<bits<8> opcode, string mnemonic> : Instruction {
+class MCS51IndirectImmInst<bits<8> opcode, string mnemonic,
+                           Register Ptr> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51Imm8:$imm);
   let AsmString = mnemonic # " #$imm";
   let Size = 2;
   let hasSideEffects = 1;
+  let Uses = [Ptr];
   let mayStore = 1;
   bits<8> imm;
   bits<16> Inst;
@@ -2088,8 +2133,8 @@ def POP_PSW : Instruction {
 }
 def INC_DIRECT : MCS51DirectInst<0x05, "inc">;
 def DEC_DIRECT : MCS51DirectInst<0x15, "dec">;
-def MOV_R0_IND_IMM : MCS51IndirectImmInst<0x76, "mov @r0,">;
-def MOV_R1_IND_IMM : MCS51IndirectImmInst<0x77, "mov @r1,">;
+def MOV_R0_IND_IMM : MCS51IndirectImmInst<0x76, "mov @r0,", R0>;
+def MOV_R1_IND_IMM : MCS51IndirectImmInst<0x77, "mov @r1,", R1>;
 
 class MCS51RnInst<bits<5> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
