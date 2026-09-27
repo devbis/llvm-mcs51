@@ -138,6 +138,242 @@ float __subsf3(float LHS, float RHS) {
   return __addsf3(LHS, Operand.Float);
 }
 
+static uint64_t round_shift_right_even64(uint64_t Value, unsigned Count) {
+  if (!Count)
+    return Value;
+  if (Count >= 64)
+    return 0;
+  uint64_t Quotient = Value >> Count;
+  uint64_t Remainder = Value - (Quotient << Count);
+  uint64_t Halfway = UINT64_C(1) << (Count - 1);
+  return Quotient +
+         (Remainder > Halfway ||
+          (Remainder == Halfway && (Quotient & 1)));
+}
+
+float __mulsf3(float LHS, float RHS) {
+  const uint32_t SignMask = UINT32_C(0x80000000);
+  const uint32_t ExponentMask = UINT32_C(0x7f800000);
+  const uint32_t FractionMask = UINT32_C(0x007fffff);
+  const uint32_t HiddenBit = UINT32_C(0x00800000);
+  const uint32_t QuietBit = UINT32_C(0x00400000);
+  Float32Bits A = {.Float = LHS};
+  Float32Bits B = {.Float = RHS};
+  uint32_t AAbs = A.Bits & ~SignMask;
+  uint32_t BAbs = B.Bits & ~SignMask;
+  uint32_t ResultSign = (A.Bits ^ B.Bits) & SignMask;
+
+  if ((AAbs & ExponentMask) == ExponentMask && (AAbs & FractionMask)) {
+    A.Bits |= QuietBit;
+    return A.Float;
+  }
+  if ((BAbs & ExponentMask) == ExponentMask && (BAbs & FractionMask)) {
+    B.Bits |= QuietBit;
+    return B.Float;
+  }
+  if (AAbs == ExponentMask || BAbs == ExponentMask) {
+    uint32_t Other = AAbs == ExponentMask ? BAbs : AAbs;
+    if (!Other) {
+      Float32Bits NaN = {.Bits = UINT32_C(0x7fc00000)};
+      return NaN.Float;
+    }
+    Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+    return Infinity.Float;
+  }
+  if (!AAbs || !BAbs) {
+    Float32Bits Zero = {.Bits = ResultSign};
+    return Zero.Float;
+  }
+
+  int AExponent = (int)((A.Bits & ExponentMask) >> 23);
+  int BExponent = (int)((B.Bits & ExponentMask) >> 23);
+  uint32_t ASignificand = A.Bits & FractionMask;
+  uint32_t BSignificand = B.Bits & FractionMask;
+  if (!AExponent) {
+    AExponent = -126;
+    while (!(ASignificand & HiddenBit)) {
+      ASignificand <<= 1;
+      --AExponent;
+    }
+  } else {
+    AExponent -= 127;
+    ASignificand |= HiddenBit;
+  }
+  if (!BExponent) {
+    BExponent = -126;
+    while (!(BSignificand & HiddenBit)) {
+      BSignificand <<= 1;
+      --BExponent;
+    }
+  } else {
+    BExponent -= 127;
+    BSignificand |= HiddenBit;
+  }
+
+  uint64_t Product = (uint64_t)ASignificand * BSignificand;
+  int HasTopBit = (Product & (UINT64_C(1) << 47)) != 0;
+  int ResultExponent = AExponent + BExponent + HasTopBit;
+  if (ResultExponent > 127) {
+    Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+    return Infinity.Float;
+  }
+
+  uint64_t RoundedSignificand;
+  if (ResultExponent >= -126) {
+    RoundedSignificand = round_shift_right_even64(Product,
+                                                 HasTopBit ? 24 : 23);
+    if (RoundedSignificand == (UINT64_C(1) << 24)) {
+      RoundedSignificand >>= 1;
+      ++ResultExponent;
+    }
+    if (ResultExponent > 127) {
+      Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+      return Infinity.Float;
+    }
+    Float32Bits Result = {
+        .Bits = ResultSign | ((uint32_t)(ResultExponent + 127) << 23) |
+                ((uint32_t)RoundedSignificand & FractionMask)};
+    return Result.Float;
+  }
+
+  int SubnormalShift = -(AExponent + BExponent + 103);
+  if (SubnormalShift >= 49)
+    RoundedSignificand = 0;
+  else
+    RoundedSignificand =
+        round_shift_right_even64(Product, (unsigned)SubnormalShift);
+  Float32Bits Result = {.Bits = ResultSign | (uint32_t)RoundedSignificand};
+  return Result.Float;
+}
+
+float __divsf3(float LHS, float RHS) {
+  const uint32_t SignMask = UINT32_C(0x80000000);
+  const uint32_t ExponentMask = UINT32_C(0x7f800000);
+  const uint32_t FractionMask = UINT32_C(0x007fffff);
+  const uint32_t HiddenBit = UINT32_C(0x00800000);
+  const uint32_t QuietBit = UINT32_C(0x00400000);
+  Float32Bits A = {.Float = LHS};
+  Float32Bits B = {.Float = RHS};
+  uint32_t AAbs = A.Bits & ~SignMask;
+  uint32_t BAbs = B.Bits & ~SignMask;
+  uint32_t ResultSign = (A.Bits ^ B.Bits) & SignMask;
+
+  if ((AAbs & ExponentMask) == ExponentMask && (AAbs & FractionMask)) {
+    A.Bits |= QuietBit;
+    return A.Float;
+  }
+  if ((BAbs & ExponentMask) == ExponentMask && (BAbs & FractionMask)) {
+    B.Bits |= QuietBit;
+    return B.Float;
+  }
+  if (AAbs == ExponentMask || BAbs == ExponentMask) {
+    if (AAbs == ExponentMask && BAbs == ExponentMask) {
+      Float32Bits NaN = {.Bits = UINT32_C(0x7fc00000)};
+      return NaN.Float;
+    }
+    if (BAbs == ExponentMask) {
+      Float32Bits Zero = {.Bits = ResultSign};
+      return Zero.Float;
+    }
+    Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+    return Infinity.Float;
+  }
+  if (!BAbs) {
+    if (!AAbs) {
+      Float32Bits NaN = {.Bits = UINT32_C(0x7fc00000)};
+      return NaN.Float;
+    }
+    Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+    return Infinity.Float;
+  }
+  if (!AAbs) {
+    Float32Bits Zero = {.Bits = ResultSign};
+    return Zero.Float;
+  }
+
+  int AExponent = (int)((A.Bits & ExponentMask) >> 23);
+  int BExponent = (int)((B.Bits & ExponentMask) >> 23);
+  uint32_t ASignificand = A.Bits & FractionMask;
+  uint32_t BSignificand = B.Bits & FractionMask;
+  if (!AExponent) {
+    AExponent = -126;
+    while (!(ASignificand & HiddenBit)) {
+      ASignificand <<= 1;
+      --AExponent;
+    }
+  } else {
+    AExponent -= 127;
+    ASignificand |= HiddenBit;
+  }
+  if (!BExponent) {
+    BExponent = -126;
+    while (!(BSignificand & HiddenBit)) {
+      BSignificand <<= 1;
+      --BExponent;
+    }
+  } else {
+    BExponent -= 127;
+    BSignificand |= HiddenBit;
+  }
+
+  int ResultExponent = AExponent - BExponent;
+  if (ASignificand < BSignificand) {
+    ASignificand <<= 1;
+    --ResultExponent;
+  }
+  uint32_t Remainder = ASignificand;
+  uint32_t ExtendedSignificand = 0;
+  for (unsigned I = 0; I != 27; ++I) {
+    ExtendedSignificand <<= 1;
+    if (Remainder >= BSignificand) {
+      Remainder -= BSignificand;
+      ExtendedSignificand |= 1;
+    }
+    Remainder <<= 1;
+  }
+  if (Remainder)
+    ExtendedSignificand |= 1;
+
+  if (ResultExponent > 127) {
+    Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+    return Infinity.Float;
+  }
+  if (ResultExponent < -126)
+    ExtendedSignificand =
+        shift_right_jam32(ExtendedSignificand,
+                          (unsigned)(-126 - ResultExponent));
+
+  uint32_t RoundGuardSticky = ExtendedSignificand & 7;
+  uint32_t RoundedSignificand = ExtendedSignificand >> 3;
+  if (RoundGuardSticky > 4 ||
+      (RoundGuardSticky == 4 && (RoundedSignificand & 1)))
+    ++RoundedSignificand;
+
+  uint32_t ResultExponentField;
+  if (ResultExponent < -126) {
+    if (RoundedSignificand >= HiddenBit) {
+      ResultExponentField = 1;
+      RoundedSignificand = 0;
+    } else {
+      ResultExponentField = 0;
+    }
+  } else {
+    if (RoundedSignificand == (HiddenBit << 1)) {
+      RoundedSignificand >>= 1;
+      ++ResultExponent;
+    }
+    if (ResultExponent > 127) {
+      Float32Bits Infinity = {.Bits = ExponentMask | ResultSign};
+      return Infinity.Float;
+    }
+    ResultExponentField = (uint32_t)(ResultExponent + 127);
+  }
+
+  Float32Bits Result = {.Bits = ResultSign | (ResultExponentField << 23) |
+                                (RoundedSignificand & FractionMask)};
+  return Result.Float;
+}
+
 uint64_t __ashldi3(uint64_t Value, int Count) {
   Word64Bytes Result = {.Value = Value};
   if (Count >= 64)
