@@ -1,4 +1,6 @@
 // RUN: clang -target mcs51 -O1 -S %s -o - | FileCheck %s
+// RUN: clang -target mcs51 -O1 -mllvm -verify-machineinstrs -S %s -o %t.s
+// RUN: llvm-mc -triple=mcs51 -filetype=obj %t.s -o /dev/null
 
 unsigned short add_one16(unsigned short value) { return value + 1; }
 unsigned short add_two16(unsigned short value) { return value + 2; }
