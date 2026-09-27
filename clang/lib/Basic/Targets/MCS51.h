@@ -87,6 +87,8 @@ public:
   bool validateAsmConstraint(const char *&Name,
                              ConstraintInfo &Info) const override {
     switch (*Name) {
+    case 'a': // Accumulator.
+    case 'd': // Data pointer (DPTR).
     case 'r': // Register-bank registers R0-R7, or DPTR for 16-bit operands.
       Info.setAllowsRegister();
       return true;
