@@ -51,6 +51,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::SUB);
+  setTargetDAGCombine(ISD::SRL);
   setTargetDAGCombine(ISD::TRUNCATE);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
@@ -883,6 +884,10 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() == ISD::SRL && N->getValueType(0) == MVT::i8 &&
+      !isa<ConstantSDNode>(N->getOperand(1)))
+    return DCI.DAG.getNode(MCS51ISD::SRL8, SDLoc(N), MVT::i8,
+                           N->getOperand(0), N->getOperand(1));
   if (N->getOpcode() == ISD::TRUNCATE &&
       N->getValueType(0) == MVT::i8) {
     SDValue Shift = N->getOperand(0);
@@ -891,6 +896,13 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
         Shift.getOperand(0).getOpcode() == ISD::SIGN_EXTEND &&
         Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8)
       return DCI.DAG.getNode(MCS51ISD::SRA8, SDLoc(N), MVT::i8,
+                             Shift.getOperand(0).getOperand(0),
+                             Shift.getOperand(1));
+    if (Shift.getOpcode() == ISD::SRL &&
+        Shift.getValueType() == MVT::i16 &&
+        Shift.getOperand(0).getOpcode() == ISD::ZERO_EXTEND &&
+        Shift.getOperand(0).getOperand(0).getValueType() == MVT::i8)
+      return DCI.DAG.getNode(MCS51ISD::SRL8, SDLoc(N), MVT::i8,
                              Shift.getOperand(0).getOperand(0),
                              Shift.getOperand(1));
     return SDValue();
@@ -2636,8 +2648,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::SRA8rr) {
+  if (MI.getOpcode() == MCS51::SRA8rr || MI.getOpcode() == MCS51::SRL8rr) {
     MachineFunction &MF = *MBB->getParent();
+    bool IsArithmetic = MI.getOpcode() == MCS51::SRA8rr;
     Register Dst = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();
     Register Amount = MI.getOperand(2).getReg();
@@ -2690,8 +2703,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
 
     BuildMI(*StartShift, StartShift->end(), DL, TII.get(MCS51::MOV_A_RN))
         .addReg(Src);
-    BuildMI(*ShiftLoop, ShiftLoop->end(), DL, TII.get(MCS51::MOV_C_BIT))
-        .addImm(0xE7);
+    if (IsArithmetic)
+      BuildMI(*ShiftLoop, ShiftLoop->end(), DL, TII.get(MCS51::MOV_C_BIT))
+          .addImm(0xE7);
+    else
+      BuildMI(*ShiftLoop, ShiftLoop->end(), DL, TII.get(MCS51::CLR_C));
     BuildMI(*ShiftLoop, ShiftLoop->end(), DL, TII.get(MCS51::RRC_A));
     BuildMI(*ShiftLoop, ShiftLoop->end(), DL, TII.get(MCS51::DJNZ_DIRECT))
         .addImm(0xF0)
@@ -2707,15 +2723,19 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addMBB(Tail)
         .addReg(MCS51::A, RegState::Implicit);
 
-    BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::MOV_A_RN))
-        .addReg(Src);
-    BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::MOV_C_BIT))
-        .addImm(0xE7)
-        .addReg(MCS51::A, RegState::Implicit);
-    BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::CLR_A));
-    BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::SUBB_A_IMM),
-            MCS51::A)
-        .addImm(0);
+    if (IsArithmetic) {
+      BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::MOV_A_RN))
+          .addReg(Src);
+      BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::MOV_C_BIT))
+          .addImm(0xE7)
+          .addReg(MCS51::A, RegState::Implicit);
+      BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::CLR_A));
+      BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::SUBB_A_IMM),
+              MCS51::A)
+          .addImm(0);
+    } else {
+      BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::CLR_A));
+    }
     BuildMI(*Saturate, Saturate->end(), DL, TII.get(MCS51::LJMP))
         .addMBB(Tail)
         .addReg(MCS51::A, RegState::Implicit);
