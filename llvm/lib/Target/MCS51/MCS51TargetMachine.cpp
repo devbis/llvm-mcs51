@@ -162,6 +162,11 @@ public:
     return false;
   }
 
+  bool addPreISel() override {
+    addPass(createMCS51GenericPointerLoweringPass());
+    return false;
+  }
+
   void addPreEmitPass() override {
     addPass(new MCS51PostRAPeephole());
     addPass(&BranchRelaxationPassID);
