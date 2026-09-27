@@ -1,7 +1,13 @@
 #include "MCS51TargetMachine.h"
 #include "MCS51MachineFunctionInfo.h"
+#include "MCS51InstrInfo.h"
 #include "MCS51.h"
+#include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -16,6 +22,67 @@
 using namespace llvm;
 
 namespace {
+class MCS51PostRAPeephole final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51PostRAPeephole() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    bool Changed = false;
+    for (MachineBasicBlock &MBB : MF) {
+      auto I = MBB.begin();
+      while (I != MBB.end()) {
+        if (I->getOpcode() != MCS51::MOV_RN_A) {
+          ++I;
+          continue;
+        }
+
+        auto First = I;
+        auto Second = std::next(First);
+        if (Second == MBB.end() || Second->getOpcode() != MCS51::INC_RN) {
+          ++I;
+          continue;
+        }
+        auto Third = std::next(Second);
+        if (Third == MBB.end() || Third->getOpcode() != MCS51::MOV_A_RN ||
+            First->getOperand(0).getReg() != Second->getOperand(1).getReg() ||
+            Second->getOperand(0).getReg() != Third->getOperand(0).getReg()) {
+          ++I;
+          continue;
+        }
+
+        Register IncReg = Third->getOperand(0).getReg();
+        bool DeadAfterMove = Third->getOperand(0).isKill();
+        if (!DeadAfterMove && MBB.succ_empty()) {
+          DeadAfterMove = true;
+          for (auto J = std::next(Third); J != MBB.end(); ++J)
+            if (J->readsRegister(IncReg, TRI)) {
+              DeadAfterMove = false;
+              break;
+            }
+        }
+        if (!DeadAfterMove) {
+          ++I;
+          continue;
+        }
+
+        auto Next = std::next(Third);
+        BuildMI(MBB, Second, Second->getDebugLoc(), TII->get(MCS51::INC_A));
+        First->eraseFromParent();
+        Second->eraseFromParent();
+        Third->eraseFromParent();
+        I = Next;
+        Changed = true;
+      }
+    }
+    return Changed;
+  }
+};
+
+char MCS51PostRAPeephole::ID = 0;
+
 class MCS51TargetObjectFile final : public TargetLoweringObjectFileELF {
 public:
   MCSection *SelectSectionForGlobal(const GlobalObject *GO, SectionKind Kind,
@@ -68,7 +135,10 @@ public:
     return false;
   }
 
-  void addPreEmitPass() override { addPass(&BranchRelaxationPassID); }
+  void addPreEmitPass() override {
+    addPass(new MCS51PostRAPeephole());
+    addPass(&BranchRelaxationPassID);
+  }
 };
 } // namespace
 

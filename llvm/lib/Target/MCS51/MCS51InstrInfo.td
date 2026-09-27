@@ -2105,8 +2105,14 @@ class MCS51ModifyRn<bits<5> opcode, string mnemonic> : Instruction {
   let Inst{7-3} = opcode;
   let Inst{2-0} = dst;
 }
-def INC_RN : MCS51ModifyRn<0b00001, "inc">;
-def DEC_RN : MCS51ModifyRn<0b00011, "dec">;
+def INC_RN : MCS51ModifyRn<0b00001, "inc"> {
+  let Pattern = [(set MCS51GPR8:$dst,
+                      (add MCS51GPR8:$src, (i8 1)))];
+}
+def DEC_RN : MCS51ModifyRn<0b00011, "dec"> {
+  let Pattern = [(set MCS51GPR8:$dst,
+                      (sub MCS51GPR8:$src, (i8 1)))];
+}
 def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
   let Pattern = [(set MCS51GPR8:$rn, MCS51Imm8:$imm)];
 }

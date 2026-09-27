@@ -2,8 +2,8 @@
 // RUN: clang -target mcs51 -O1 -mllvm -verify-machineinstrs -S %s -o /dev/null
 
 // CHECK-LABEL: add_one:
-// CHECK: mov a, r7
-// CHECK: inc a
+// CHECK: inc r7
+// CHECK-NEXT: mov a, r7
 // CHECK-NEXT: ret
 unsigned char add_one(unsigned char value) { return value + 1; }
 
