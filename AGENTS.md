@@ -113,9 +113,7 @@ common-area trampolines whose bank number is resolved after placement. With
 `-mcpu=cc2530` and function sections enabled (the CC2530 Clang profile's
 default), ordinary `.text.*` function sections are also distributed across
 the seven banks by LLD's size-balanced pass. `.text.main`, startup sections,
-and functions used as interrupt-vector targets stay in common flash. When the
-image contains interrupt-vector sections, LLD keeps all ordinary `.text.*`
-functions in common flash so vector targets remain directly reachable.
+and interrupt handlers stay in common flash.
 Compiler-generated calls and function pointers use common-area bank-call
 trampolines; LLD redirects cross-bank direct calls and function-address
 relocations to those trampolines. Applications that need predictable manual

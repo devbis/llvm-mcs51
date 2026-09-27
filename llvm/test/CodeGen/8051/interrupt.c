@@ -11,7 +11,8 @@ volatile unsigned char ticks;
 void __attribute__((interrupt(0))) timer0(void) { ++ticks; }
 void __attribute__((interrupt(6))) dma(void) { ticks = 3; }
 void __attribute__((interrupt(17))) rf(void) { ticks = 7; }
-int main(void) { return ticks; }
+__attribute__((noinline)) unsigned char background(void) { return ticks; }
+int main(void) { return background(); }
 
 // CHECK-LABEL: timer0:
 // CHECK: push
@@ -45,3 +46,8 @@ int main(void) { return ticks; }
 // DIS: ljmp
 // DIS: 0000008b <.mcs51_vector_17>:
 // DIS: ljmp
+// DIS-LABEL: <__mcs51_bankcall_background>:
+// DIS: mov 159, #{{[1-7]}}
+// DIS: lcall 32768
+// DIS-LABEL: <background>:
+// DIS: ret
