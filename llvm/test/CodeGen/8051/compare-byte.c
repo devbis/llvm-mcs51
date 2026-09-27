@@ -21,6 +21,10 @@ unsigned char unsigned_less_equal(unsigned char lhs, unsigned char rhs) {
   return lhs <= rhs;
 }
 
+unsigned char unsigned_greater_equal(unsigned char lhs, unsigned char rhs) {
+  return lhs >= rhs;
+}
+
 unsigned char signed_greater_equal(signed char lhs, signed char rhs) {
   return lhs >= rhs;
 }
@@ -41,14 +45,18 @@ unsigned char signed_greater_equal(signed char lhs, signed char rhs) {
 // CHECK: j{{n?z}}
 // CHECK-LABEL: unsigned_less_equal:
 // CHECK: subb a,
+// CHECK: cpl c
 // CHECK: rlc a
-// CHECK: xrl a, #1
+// CHECK-LABEL: unsigned_greater_equal:
+// CHECK: subb a,
+// CHECK: cpl c
+// CHECK: rlc a
 // CHECK-LABEL: signed_greater_equal:
 // CHECK: xrl a, #128
 // CHECK: xrl a, #128
 // CHECK: subb a, 240
+// CHECK: cpl c
 // CHECK: rlc a
-// CHECK: xrl a, #1
 
 // OPT-LABEL: unsigned_greater:
 // OPT: subb a,
@@ -65,11 +73,15 @@ unsigned char signed_greater_equal(signed char lhs, signed char rhs) {
 // OPT: j{{n?z}}
 // OPT-LABEL: unsigned_less_equal:
 // OPT: subb a,
+// OPT: cpl c
 // OPT: rlc a
-// OPT: xrl a, #1
+// OPT-LABEL: unsigned_greater_equal:
+// OPT: subb a,
+// OPT: cpl c
+// OPT: rlc a
 // OPT-LABEL: signed_greater_equal:
 // OPT: xrl a, #128
 // OPT: xrl a, #128
 // OPT: subb a, 240
+// OPT: cpl c
 // OPT: rlc a
-// OPT: xrl a, #1
