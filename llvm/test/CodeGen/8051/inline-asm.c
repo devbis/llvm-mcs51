@@ -11,6 +11,16 @@ unsigned char fixed_register(unsigned char Value) {
   return Fixed;
 }
 
+unsigned char accumulator_constraint(unsigned char Value) {
+  __asm__ volatile ("inc %0" : "+a"(Value));
+  return Value;
+}
+
+unsigned short dptr_constraint(unsigned short Value) {
+  __asm__ volatile ("inc %0" : "+d"(Value));
+  return Value;
+}
+
 void xdata_memory_operand(unsigned char *Pointer) {
   __asm__ volatile ("movx a, %0" : : "m"(*Pointer));
 }
@@ -21,5 +31,9 @@ void xdata_memory_operand(unsigned char *Pointer) {
 // CHECK-NEXT: ;NO_APP
 // CHECK-LABEL: fixed_register:
 // CHECK: inc r0
+// CHECK-LABEL: accumulator_constraint:
+// CHECK: inc a
+// CHECK-LABEL: dptr_constraint:
+// CHECK: inc dptr
 // CHECK-LABEL: xdata_memory_operand:
 // CHECK: movx a, @dptr
