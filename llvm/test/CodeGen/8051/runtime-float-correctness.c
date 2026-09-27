@@ -57,6 +57,32 @@ static int check(uint32_t LHSBits, uint32_t RHSBits) {
             LHSBits, RHSBits, Difference.Bits, DifferenceExpected.Bits);
     return 0;
   }
+  int32_t ExpectedCompare =
+      is_nan(LHSBits) || is_nan(RHSBits)
+          ? 1
+          : LHS.Float < RHS.Float ? -1 : LHS.Float > RHS.Float ? 1 : 0;
+  if (__lesf2(LHS.Float, RHS.Float) != ExpectedCompare ||
+      __ltsf2(LHS.Float, RHS.Float) != ExpectedCompare ||
+      __eqsf2(LHS.Float, RHS.Float) != ExpectedCompare ||
+      __nesf2(LHS.Float, RHS.Float) != ExpectedCompare) {
+    fprintf(stderr, "ordered compare mismatch: %08x, %08x\n", LHSBits,
+            RHSBits);
+    return 0;
+  }
+  int32_t ExpectedGreater =
+      is_nan(LHSBits) || is_nan(RHSBits) ? -1 : ExpectedCompare;
+  if (__gesf2(LHS.Float, RHS.Float) != ExpectedGreater ||
+      __gtsf2(LHS.Float, RHS.Float) != ExpectedGreater) {
+    fprintf(stderr, "greater compare mismatch: %08x, %08x\n", LHSBits,
+            RHSBits);
+    return 0;
+  }
+  if (__unordsf2(LHS.Float, RHS.Float) !=
+      (is_nan(LHSBits) || is_nan(RHSBits))) {
+    fprintf(stderr, "unordered compare mismatch: %08x, %08x\n", LHSBits,
+            RHSBits);
+    return 0;
+  }
   return 1;
 }
 

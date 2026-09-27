@@ -11,7 +11,7 @@ typedef union {
   uint32_t Bits;
 } Float32Bits;
 
-int __unordsf2(float LHS, float RHS) {
+int32_t __unordsf2(float LHS, float RHS) {
   Float32Bits A = {.Float = LHS};
   Float32Bits B = {.Float = RHS};
   uint32_t AExponent = A.Bits & UINT32_C(0x7f800000);
@@ -21,6 +21,36 @@ int __unordsf2(float LHS, float RHS) {
          (BExponent == UINT32_C(0x7f800000) &&
           (B.Bits & UINT32_C(0x007fffff)));
 }
+
+static __attribute__((noinline)) int8_t compare_float32_ordered(uint32_t A,
+                                                                uint32_t B) {
+  const uint32_t SignMask = UINT32_C(0x80000000);
+  uint32_t AKey = (A ^ (SignMask | (0 - (A >> 31)))) + (A >> 31);
+  uint32_t BKey = (B ^ (SignMask | (0 - (B >> 31)))) + (B >> 31);
+  return (int8_t)(AKey > BKey) - (int8_t)(AKey < BKey);
+}
+
+int32_t __lesf2(float LHS, float RHS) {
+  Float32Bits A = {.Float = LHS};
+  Float32Bits B = {.Float = RHS};
+  if (__unordsf2(LHS, RHS))
+    return 1;
+  return compare_float32_ordered(A.Bits, B.Bits);
+}
+
+int32_t __ltsf2(float LHS, float RHS) { return __lesf2(LHS, RHS); }
+int32_t __eqsf2(float LHS, float RHS) { return __lesf2(LHS, RHS); }
+int32_t __nesf2(float LHS, float RHS) { return __lesf2(LHS, RHS); }
+
+int32_t __gesf2(float LHS, float RHS) {
+  Float32Bits A = {.Float = LHS};
+  Float32Bits B = {.Float = RHS};
+  if (__unordsf2(LHS, RHS))
+    return -1;
+  return compare_float32_ordered(A.Bits, B.Bits);
+}
+
+int32_t __gtsf2(float LHS, float RHS) { return __gesf2(LHS, RHS); }
 
 static uint32_t shift_right_jam32(uint32_t Value, unsigned Count) {
   if (!Count)

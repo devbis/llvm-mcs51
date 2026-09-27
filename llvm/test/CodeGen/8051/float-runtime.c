@@ -27,6 +27,10 @@ __attribute__((noinline)) float divide_float(float lhs, float rhs) {
   return lhs / rhs;
 }
 
+__attribute__((noinline)) int float_less(float lhs, float rhs) {
+  return lhs < rhs;
+}
+
 volatile float Result;
 
 int main(void) {
@@ -34,6 +38,8 @@ int main(void) {
   Result = subtract_float(Result, 1.0f);
   Result = multiply_float(Result, 0.5f);
   Result = divide_float(Result, 2.0f);
+  if (float_less(Result, 0.0f))
+    Result = 0.0f;
   return 0;
 }
 
@@ -41,4 +47,5 @@ int main(void) {
 // LINK-DAG: Name: __subsf3
 // LINK-DAG: Name: __mulsf3
 // LINK-DAG: Name: __divsf3
+// LINK-DAG: Name: __ltsf2
 // LINK-DAG: Name: __unordsf2
