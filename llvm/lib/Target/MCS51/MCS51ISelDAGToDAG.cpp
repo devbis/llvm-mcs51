@@ -144,6 +144,25 @@ public:
         CurDAG->RemoveDeadNode(N);
         return;
       }
+      if (SrcVT == MVT::i8 && DstVT == MVT::i16) {
+        SDValue Zero = CurDAG->getTargetConstant(0, DL, MVT::i8);
+        SDValue High = SDValue(
+            CurDAG->getMachineNode(MCS51::MOV_RN_IMM, DL, MVT::i8, Zero), 0);
+        SDValue Ops[] = {N->getOperand(0), High};
+        SDNode *Res = CurDAG->getMachineNode(MCS51::BUILDPAIR16, DL,
+                                             N->getVTList(), Ops);
+        ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+        CurDAG->RemoveDeadNode(N);
+        return;
+      }
+      if (SrcVT == MVT::i16 && DstVT == MVT::i8) {
+        SDNode *Res = CurDAG->getMachineNode(MCS51::TRUNC16TO8, DL,
+                                             N->getVTList(),
+                                             N->getOperand(0));
+        ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+        CurDAG->RemoveDeadNode(N);
+        return;
+      }
     }
     if (N->getOpcode() == ISD::FrameIndex &&
         N->getValueType(0) == MVT::i8) {
