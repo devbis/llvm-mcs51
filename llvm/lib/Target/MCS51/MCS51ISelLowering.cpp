@@ -1709,6 +1709,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             .addImm(High);
         BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
       }
+    } else if (High <= 3 && Low <= 3) {
+      for (unsigned I = 0; I != High; ++I)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DIRECT)).addImm(0x83);
+      for (unsigned I = 0; I != Low; ++I)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
     } else {
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
           .addImm(0x82);
