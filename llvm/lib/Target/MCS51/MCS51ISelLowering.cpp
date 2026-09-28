@@ -2657,10 +2657,18 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREXABS8) {
     Register Src = MI.getOperand(1).getReg();
+    MachineInstr *Def = nullptr;
+    bool SrcAlreadyInA = valueRemainsInAccumulator(Src, Def);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
         .add(MI.getOperand(0));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    if (SrcAlreadyInA)
+      Def->eraseFromParent();
+    else
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+    MachineInstrBuilder Store = BuildMI(*MBB, MII, DL,
+                                         TII.get(MCS51::MOVX_DPTRA));
+    for (MachineMemOperand *MMO : MI.memoperands())
+      Store.addMemOperand(MMO);
     MI.eraseFromParent();
     return MBB;
   }
@@ -2768,8 +2776,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
         .add(MI.getOperand(0));
     Register Src = MI.getOperand(1).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    MachineInstr *Def = nullptr;
+    if (valueRemainsInAccumulator(Src, Def))
+      Def->eraseFromParent();
+    else
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+    MachineInstrBuilder Store = BuildMI(*MBB, MII, DL,
+                                         TII.get(MCS51::MOVX_DPTRA));
+    for (MachineMemOperand *MMO : MI.memoperands())
+      Store.addMemOperand(MMO);
     MI.eraseFromParent();
     return MBB;
   }
@@ -3464,13 +3479,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
 
   bool RHSIsLHS = !IsImmediate && MI.getOperand(2).getReg() == LHS;
-  if (LHSAlreadyInA && !RHSIsLHS && LHSCopy &&
-      MRI.hasOneNonDBGUse(LHS))
-    LHSCopy->eraseFromParent();
-  if (!LHSAlreadyInA)
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-  if (IsSubtraction)
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
   switch (MI.getOpcode()) {
   case MCS51::ADD8rr:
     AccOpcode = MCS51::ADD_A_RN;
@@ -3505,6 +3513,30 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   default:
     llvm_unreachable("unexpected MCS-51 ALU pseudo");
   }
+  if (!IsImmediate && !LHSAlreadyInA && !RHSIsLHS &&
+      MRI.hasOneNonDBGUse(LHS)) {
+    Register RHS = MI.getOperand(2).getReg();
+    MachineInstr *RHSDef = nullptr;
+    if (valueRemainsInAccumulator(RHS, RHSDef)) {
+      RHSDef->eraseFromParent();
+      if (IsSubtraction)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::XCH_A_RN), LHS).addReg(LHS);
+      if (IsSubtraction)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MII, DL, TII.get(AccOpcode)).addReg(LHS);
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+          .addReg(MCS51::A);
+      MI.eraseFromParent();
+      return MBB;
+    }
+  }
+  if (LHSAlreadyInA && !RHSIsLHS && LHSCopy &&
+      MRI.hasOneNonDBGUse(LHS))
+    LHSCopy->eraseFromParent();
+  if (!LHSAlreadyInA)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+  if (IsSubtraction)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
   if (IsImmediate) {
     BuildMI(*MBB, MII, DL, TII.get(AccOpcode), MCS51::A)
         .addImm(MI.getOperand(2).getImm());
