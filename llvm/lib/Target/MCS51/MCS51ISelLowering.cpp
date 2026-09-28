@@ -2111,6 +2111,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       report_fatal_error("unsupported MCS-51 immediate comparison");
     if (CompareKind == 2) {
       MachineBasicBlock *Tail = MBB->splitAt(MI);
+      if (Tail == MBB) {
+        Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+        MF.insert(std::next(MBB->getIterator()), Tail);
+        Tail->transferSuccessorsAndUpdatePHIs(MBB);
+        MBB->addSuccessor(Tail);
+      }
       Tail->removeLiveIn(MCS51::DPTR);
       MachineBasicBlock *EqualBB =
           MF.CreateMachineBasicBlock(MBB->getBasicBlock());
@@ -2209,6 +2215,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     int64_t CompareKind = MI.getOperand(3).getImm();
     if (CompareKind == 2) {
       MachineBasicBlock *Tail = MBB->splitAt(MI);
+      if (Tail == MBB) {
+        Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+        MF.insert(std::next(MBB->getIterator()), Tail);
+        Tail->transferSuccessorsAndUpdatePHIs(MBB);
+        MBB->addSuccessor(Tail);
+      }
       Tail->removeLiveIn(MCS51::DPTR);
       MachineBasicBlock *HighCompareBB =
           MF.CreateMachineBasicBlock(MBB->getBasicBlock());
