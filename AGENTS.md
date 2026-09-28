@@ -163,9 +163,11 @@ representation. Larger aggregate returns use the indirect ABI with their result
 object in IDATA; small fixed-size copies preserve CODE and IDATA address spaces
 when lowered inline. Dynamic `memcpy` operations over byte-addressable spaces
 are expanded into typed byte loops, including generic pointers and stack
-objects. Dynamic `memmove` and bit-addressed copies still need dedicated
-lowering. Non-trivial C++ records still need additional ABI coverage before
-they can be considered supported.
+objects. Dynamic `memmove` operations over byte-addressable spaces use
+overlap-aware forward and backward loops, including generic pointers and stack
+objects. Bit-addressed copies still need dedicated lowering. Non-trivial C++
+records still need additional ABI coverage before they can be considered
+supported.
 
 ## Final target and completion criteria
 
