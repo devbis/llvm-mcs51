@@ -28,6 +28,19 @@ static bool containsFrameIndex(SDValue Value) {
   return false;
 }
 
+static bool usesAddressSpaceAwareMemcpy(unsigned AddressSpace) {
+  switch (AddressSpace) {
+  case MCS51::Data:
+  case MCS51::IData:
+  case MCS51::PData:
+  case MCS51::Code:
+  case MCS51::SFR:
+    return true;
+  default:
+    return false;
+  }
+}
+
 SDValue MCS51SelectionDAGInfo::EmitTargetCodeForMemcpy(
     SelectionDAG &DAG, const SDLoc &DL, SDValue Chain, SDValue Dst,
     SDValue Src, SDValue Size, Align DstAlign, Align SrcAlign,
@@ -39,8 +52,8 @@ SDValue MCS51SelectionDAGInfo::EmitTargetCodeForMemcpy(
 
   uint64_t Count = ConstantSize->getZExtValue();
   bool NeedsAddressSpaceAwareCopy =
-      SrcPtrInfo.getAddrSpace() == MCS51::Code ||
-      DstPtrInfo.getAddrSpace() == MCS51::IData;
+      usesAddressSpaceAwareMemcpy(SrcPtrInfo.getAddrSpace()) ||
+      usesAddressSpaceAwareMemcpy(DstPtrInfo.getAddrSpace());
 
   // Clang represents an MCS-51 stack object as an alloca in AS0 and casts its
   // pointer to IDATA for ABI uses. LLVM's generic memcpy lowering casts that
@@ -48,18 +61,19 @@ SDValue MCS51SelectionDAGInfo::EmitTargetCodeForMemcpy(
   // operations, or the copy would incorrectly use MOVX instead of @Ri.
   if (Dst.getOpcode() == ISD::ADDRSPACECAST) {
     auto *Cast = cast<AddrSpaceCastSDNode>(Dst);
-    if (Cast->getSrcAddressSpace() == MCS51::IData) {
+    if (usesAddressSpaceAwareMemcpy(Cast->getSrcAddressSpace())) {
       NeedsAddressSpaceAwareCopy = true;
       Dst = Dst.getOperand(0);
-      DstPtrInfo = MachinePointerInfo(MCS51::IData);
+      DstPtrInfo = MachinePointerInfo(Cast->getSrcAddressSpace());
     }
   }
   if (Src.getOpcode() == ISD::ADDRSPACECAST) {
     auto *Cast = cast<AddrSpaceCastSDNode>(Src);
-    NeedsAddressSpaceAwareCopy |=
-        Cast->getSrcAddressSpace() == MCS51::Code;
-    Src = Src.getOperand(0);
-    SrcPtrInfo = MachinePointerInfo(Cast->getSrcAddressSpace());
+    if (usesAddressSpaceAwareMemcpy(Cast->getSrcAddressSpace())) {
+      NeedsAddressSpaceAwareCopy = true;
+      Src = Src.getOperand(0);
+      SrcPtrInfo = MachinePointerInfo(Cast->getSrcAddressSpace());
+    }
   }
   bool HasStackObject = containsFrameIndex(Dst) || containsFrameIndex(Src);
   if (!AlwaysInline && !NeedsAddressSpaceAwareCopy && !HasStackObject)
