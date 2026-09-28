@@ -1108,6 +1108,18 @@ def STOREXABS8_IMM : Instruction {
   let mayStore = 1;
   let Defs = [A, DPTR];
 }
+def STOREXABS16_IMM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm16:$addr, MCS51Imm16:$value);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+  let Defs = [A, DPTR];
+}
 
 def STOREXABS16 : Instruction {
   let Namespace = "MCS51";
