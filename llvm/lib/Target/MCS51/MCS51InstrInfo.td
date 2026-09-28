@@ -1945,10 +1945,14 @@ def : Pat<(MCS51cmpeq16 MCS51PTR:$lhs, MCS51PTR:$rhs),
           (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 2)>;
 def : Pat<(MCS51cmpult8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 0)>;
+def : Pat<(MCS51cmpult8 MCS51GPR8:$lhs, MCS51Imm8:$rhs),
+          (CMP8I MCS51GPR8:$lhs, MCS51Imm8:$rhs, 0)>;
 def : Pat<(MCS51cmpslt8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 1)>;
 def : Pat<(MCS51cmpuge8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 3)>;
+def : Pat<(MCS51cmpuge8 MCS51GPR8:$lhs, MCS51Imm8:$rhs),
+          (CMP8I MCS51GPR8:$lhs, MCS51Imm8:$rhs, 3)>;
 def : Pat<(MCS51cmpsge8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 4)>;
 def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
