@@ -1894,6 +1894,18 @@ def CMP8 : Instruction {
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
 }
+def CMP8I : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Imm8:$rhs,
+                           MCS51Imm8:$kind);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
 def CMP32 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
@@ -1927,6 +1939,8 @@ def : Pat<(MCS51cmpsge8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 4)>;
 def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 2)>;
+def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51Imm8:$rhs),
+          (CMP8I MCS51GPR8:$lhs, MCS51Imm8:$rhs, 2)>;
 def : Pat<(MCS51cmp32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
                          MCS51PTR:$rhslo, MCS51PTR:$rhshi,
                          MCS51Imm8:$kind),

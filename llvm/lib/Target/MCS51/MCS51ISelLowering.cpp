@@ -1832,12 +1832,16 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::CMP8) {
+  if (MI.getOpcode() == MCS51::CMP8 || MI.getOpcode() == MCS51::CMP8I) {
     MachineFunction &MF = *MBB->getParent();
     Register Dst = MI.getOperand(0).getReg();
     Register LHS = MI.getOperand(1).getReg();
-    Register RHS = MI.getOperand(2).getReg();
+    bool IsImmediate = MI.getOpcode() == MCS51::CMP8I;
+    Register RHSReg = IsImmediate ? Register() : MI.getOperand(2).getReg();
+    int64_t RHSImm = IsImmediate ? MI.getOperand(2).getImm() : 0;
     int64_t CompareKind = MI.getOperand(3).getImm();
+    if (IsImmediate && CompareKind != 2)
+      report_fatal_error("MCS-51 immediate comparison only supports equality");
     if (CompareKind == 2) {
       MachineBasicBlock *Tail = MBB->splitAt(MI);
       Tail->removeLiveIn(MCS51::DPTR);
@@ -1860,9 +1864,16 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       MI.eraseFromParent();
 
       BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN)).addReg(RHS);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(EqualBB);
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(NotEqualBB);
+      // JNZ tests A directly, so XOR with zero is unnecessary.
+      if (!(IsImmediate && RHSImm == 0)) {
+        if (IsImmediate)
+          BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+              .addImm(RHSImm);
+        else
+          BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN))
+              .addReg(RHSReg);
+      }
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(NotEqualBB);
       BuildMI(*EqualBB, EqualBB->end(), DL,
               TII.get(MCS51::MOV_A_IMM), MCS51::A).addImm(1);
       BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(TargetOpcode::COPY),
@@ -1873,8 +1884,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
               TII.get(MCS51::MOV_A_IMM), MCS51::A).addImm(0);
       BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(TargetOpcode::COPY),
               NotEqualResult).addReg(MCS51::A);
-      BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(MCS51::LJMP))
-          .addMBB(Tail);
       BuildMI(*Tail, Tail->getFirstNonPHI(), DL, TII.get(TargetOpcode::PHI),
               Dst)
           .addReg(EqualResult).addMBB(EqualBB)
@@ -1886,7 +1895,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     bool IsGreaterEqual = CompareKind == 3 || CompareKind == 4;
     if (IsSigned) {
       // Flipping both sign bits turns signed order into unsigned order.
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(RHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(RHSReg);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
           .addImm(0x80);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
@@ -1899,7 +1908,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     } else {
       BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_RN)).addReg(RHSReg);
     }
     if (IsGreaterEqual)
       BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
