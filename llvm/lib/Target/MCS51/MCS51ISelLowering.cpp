@@ -161,6 +161,9 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VACOPY, MVT::Other, Expand);
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
   setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Custom);
+  // The 8051 has no indirect branch instruction; avoid jump-table lowering.
+  setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::SUB);
   setTargetDAGCombine(ISD::SHL);
@@ -304,6 +307,17 @@ void MCS51TargetLowering::ReplaceNodeResults(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
+  if (Op.getOpcode() == ISD::SIGN_EXTEND_INREG &&
+      Op.getValueType() == MVT::i16) {
+    EVT FromVT = cast<VTSDNode>(Op.getOperand(1))->getVT();
+    if (FromVT == MVT::i16)
+      return Op.getOperand(0);
+    unsigned Shift = 16 - FromVT.getSizeInBits();
+    SDValue Amount = DAG.getConstant(Shift, DL, MVT::i16);
+    SDValue Shifted = DAG.getNode(ISD::SHL, DL, MVT::i16, Op.getOperand(0),
+                                  Amount);
+    return DAG.getNode(ISD::SRA, DL, MVT::i16, Shifted, Amount);
+  }
   if (Op.getOpcode() == ISD::SRA && Op.getValueType() == MVT::i8) {
     SDValue Amount = Op.getOperand(1);
     if (auto *C = dyn_cast<ConstantSDNode>(Amount)) {
