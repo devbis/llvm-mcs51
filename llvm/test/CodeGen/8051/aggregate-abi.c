@@ -1,5 +1,5 @@
 // RUN: clang -target mcs51 -O2 -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
-// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin %s -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin %s -Wl,--no-gc-sections -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 
 typedef struct {
@@ -59,14 +59,22 @@ __attribute__((noinline)) unsigned char call_return_large(void) {
   return Result.Bytes[0] + Result.Bytes[8];
 }
 
-int main(unsigned char Choice) {
-  if (Choice == 2)
-    return call_sum_expanded();
-  if (Choice == 3)
-    return call_return_large();
-  if (Choice)
-    return call_identity();
-  return call_copy_large();
+typedef union {
+  unsigned char Bytes[9];
+  unsigned int Words[5];
+} LargeUnion;
+
+__attribute__((noinline)) unsigned char sum_union(LargeUnion Value) {
+  return Value.Bytes[0] + Value.Bytes[8];
+}
+
+__attribute__((noinline)) unsigned char call_sum_union(void) {
+  LargeUnion Input = {.Bytes = {1, 2, 3, 4, 5, 6, 7, 8, 9}};
+  return sum_union(Input);
+}
+
+int main(void) {
+  return call_identity();
 }
 
 // CHECK-LABEL: identity:
@@ -87,8 +95,12 @@ int main(unsigned char Choice) {
 // CHECK: ret
 // CHECK-LABEL: call_return_large:
 // CHECK: lcall return_large
-
+// CHECK-LABEL: sum_union:
+// CHECK: ret
+// CHECK-LABEL: call_sum_union:
+// CHECK: lcall sum_union
 // LINK-DAG: Name: identity
 // LINK-DAG: Name: copy_large
 // LINK-DAG: Name: sum_expanded
 // LINK-DAG: Name: return_large
+// LINK-DAG: Name: sum_union

@@ -23,7 +23,8 @@ class MCS51ABIInfo final : public DefaultABIInfo {
       return canExpandAggregate(ArrayTy->getElementType());
 
     const auto *RecordTy = Ty->getAs<RecordType>();
-    if (!RecordTy || !RecordTy->getDecl()->isStruct())
+    if (!RecordTy || (!RecordTy->getDecl()->isStruct() &&
+                      !RecordTy->getDecl()->isUnion()))
       return false;
     for (const FieldDecl *Field : RecordTy->getDecl()->fields())
       if (Field->isBitField() || !canExpandAggregate(Field->getType()))
