@@ -344,11 +344,20 @@ private:
   }
 
   static SmallVector<Value *, 4> getPointerParts(IRBuilder<> &B,
-                                                 Value *Pointer) {
+                                                 Value *Pointer,
+                                                 uint16_t ByteOffset = 0) {
     LLVMContext &C = B.getContext();
     Type *I8 = Type::getInt8Ty(C);
     Type *I32 = Type::getInt32Ty(C);
     Value *Bits = B.CreatePtrToInt(Pointer, I32, "gptr.bits");
+    if (ByteOffset) {
+      Type *I16 = Type::getInt16Ty(C);
+      Value *Address = B.CreateTrunc(Bits, I16, "gptr.byte.address");
+      Address = B.CreateAdd(Address, B.getInt16(ByteOffset),
+                            "gptr.byte.address");
+      Value *Tag = B.CreateAnd(Bits, B.getInt32(0xffff0000), "gptr.byte.tag");
+      Bits = B.CreateOr(Tag, B.CreateZExt(Address, I32), "gptr.byte.bits");
+    }
     SmallVector<Value *, 4> Parts;
     for (unsigned Offset : {0u, 8u, 16u, 24u}) {
       Value *Part = Bits;
@@ -357,6 +366,157 @@ private:
       Parts.push_back(B.CreateTrunc(Part, I8, "gptr.part"));
     }
     return Parts;
+  }
+
+  static uint64_t getAggregateSize(const DataLayout &DL, Type *Ty) {
+    TypeSize Size = DL.getTypeAllocSize(Ty);
+    if (Size.isScalable())
+      report_fatal_error("scalable MCS-51 generic aggregate access");
+    return Size.getFixedValue();
+  }
+
+  static Type *getGenericAccessType(Type *Ty, const DataLayout &DL,
+                                    LLVMContext &C) {
+    if (Ty->isPointerTy())
+      return IntegerType::get(C, DL.getPointerSizeInBits(
+                                     cast<PointerType>(Ty)->getAddressSpace()));
+    return getMemoryType(Ty, C);
+  }
+
+  static Value *lowerAggregateLoadValue(IRBuilder<> &B, Module &M,
+                                        Value *Pointer, Type *Ty,
+                                        uint64_t Offset, bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
+    if (auto *STy = dyn_cast<StructType>(Ty)) {
+      Value *Result = UndefValue::get(Ty);
+      const StructLayout *Layout = DL.getStructLayout(STy);
+      for (unsigned I = 0; I < STy->getNumElements(); ++I) {
+        Type *FieldTy = STy->getElementType(I);
+        if (!getAggregateSize(DL, FieldTy))
+          continue;
+        Value *Field = lowerAggregateLoadValue(
+            B, M, Pointer, FieldTy, Offset + Layout->getElementOffset(I),
+            IsVolatile);
+        Result = B.CreateInsertValue(Result, Field, I, "gptr.aggregate.field");
+      }
+      return Result;
+    }
+    if (auto *ATy = dyn_cast<ArrayType>(Ty)) {
+      Value *Result = UndefValue::get(Ty);
+      Type *ElementTy = ATy->getElementType();
+      uint64_t Stride = getAggregateSize(DL, ElementTy);
+      for (uint64_t I = 0; I < ATy->getNumElements(); ++I) {
+        Value *Element = lowerAggregateLoadValue(
+            B, M, Pointer, ElementTy, Offset + I * Stride, IsVolatile);
+        Result = B.CreateInsertValue(Result, Element, I,
+                                     "gptr.aggregate.element");
+      }
+      return Result;
+    }
+
+    Type *AccessTy = getGenericAccessType(Ty, DL, C);
+    std::string Name =
+        (Twine("__mcs51_gptrget") + getSuffix(AccessTy)).str();
+    SmallVector<Value *, 4> Args =
+        getPointerParts(B, Pointer, static_cast<uint16_t>(Offset));
+    Type *CallTy = AccessTy->isIntegerTy(8) ? Type::getInt16Ty(C) : AccessTy;
+    CallInst *Call = createCall(B, M, Name, CallTy, Args);
+    if (IsVolatile)
+      Call->setConvergent();
+    else
+      Call->setOnlyReadsMemory();
+    Value *Result = Call;
+    if (CallTy != AccessTy)
+      Result = B.CreateTrunc(Result, AccessTy, "gptr.aggregate.narrow");
+    if (Ty->isPointerTy())
+      Result = B.CreateIntToPtr(Result, Ty, "gptr.aggregate.pointer");
+    else if (Ty->isIntegerTy(1))
+      Result = B.CreateTrunc(Result, Ty, "gptr.aggregate.bool");
+    return Result;
+  }
+
+  static void lowerAggregateStoreValue(IRBuilder<> &B, Module &M,
+                                       Value *Pointer, Value *ValueToStore,
+                                       Type *Ty, uint64_t Offset,
+                                       bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
+    if (auto *STy = dyn_cast<StructType>(Ty)) {
+      const StructLayout *Layout = DL.getStructLayout(STy);
+      for (unsigned I = 0; I < STy->getNumElements(); ++I) {
+        Type *FieldTy = STy->getElementType(I);
+        if (!getAggregateSize(DL, FieldTy))
+          continue;
+        Value *Field = B.CreateExtractValue(ValueToStore, I,
+                                            "gptr.aggregate.field");
+        lowerAggregateStoreValue(
+            B, M, Pointer, Field, FieldTy,
+            Offset + Layout->getElementOffset(I), IsVolatile);
+      }
+      return;
+    }
+    if (auto *ATy = dyn_cast<ArrayType>(Ty)) {
+      Type *ElementTy = ATy->getElementType();
+      uint64_t Stride = getAggregateSize(DL, ElementTy);
+      for (uint64_t I = 0; I < ATy->getNumElements(); ++I) {
+        Value *Element = B.CreateExtractValue(ValueToStore, I,
+                                              "gptr.aggregate.element");
+        lowerAggregateStoreValue(B, M, Pointer, Element, ElementTy,
+                                 Offset + I * Stride, IsVolatile);
+      }
+      return;
+    }
+
+    Type *AccessTy = getGenericAccessType(Ty, DL, C);
+    Value *Stored = ValueToStore;
+    Type *StorageTy = AccessTy;
+    if (Ty->isPointerTy())
+      Stored = B.CreatePtrToInt(Stored, AccessTy,
+                                "gptr.aggregate.pointer.bits");
+    else if (Ty->isIntegerTy(1))
+      Stored = B.CreateZExt(Stored, AccessTy, "gptr.aggregate.bool");
+    else if (Ty->isFloatTy()) {
+      StorageTy = Type::getInt32Ty(C);
+      Stored = B.CreateBitCast(Stored, StorageTy,
+                               "gptr.aggregate.float.bits");
+    }
+
+    SmallVector<Value *, 12> Args =
+        getPointerParts(B, Pointer, static_cast<uint16_t>(Offset));
+    unsigned NumBytes = DL.getTypeStoreSize(StorageTy).getFixedValue();
+    Type *I8Ty = Type::getInt8Ty(C);
+    for (unsigned I = 0; I < NumBytes; ++I) {
+      Value *Part = Stored;
+      if (I)
+        Part = B.CreateLShr(Stored, I * 8, "gptr.aggregate.value.shift");
+      Args.push_back(B.CreateTrunc(Part, I8Ty, "gptr.aggregate.value.byte"));
+    }
+    std::string Name =
+        (Twine("__mcs51_gptrput") + getSuffix(AccessTy)).str();
+    CallInst *Call = createCall(B, M, Name, Type::getVoidTy(C), Args);
+    if (IsVolatile)
+      Call->setConvergent();
+  }
+
+  static void lowerAggregateLoad(LoadInst &LI) {
+    IRBuilder<> B(&LI);
+    Value *Result = lowerAggregateLoadValue(
+        B, *LI.getModule(), LI.getPointerOperand(), LI.getType(), 0,
+        LI.isVolatile());
+    if (auto *I = dyn_cast<Instruction>(Result))
+      I->setDebugLoc(LI.getDebugLoc());
+    LI.replaceAllUsesWith(Result);
+    LI.eraseFromParent();
+  }
+
+  static void lowerAggregateStore(StoreInst &SI) {
+    IRBuilder<> B(&SI);
+    lowerAggregateStoreValue(B, *SI.getModule(), SI.getPointerOperand(),
+                             SI.getValueOperand(),
+                             SI.getValueOperand()->getType(), 0,
+                             SI.isVolatile());
+    SI.eraseFromParent();
   }
 
   static Type *getMemoryType(Type *Ty, LLVMContext &C) {
@@ -390,6 +550,10 @@ private:
   }
 
   static void lowerLoad(LoadInst &LI) {
+    if (LI.getType()->isAggregateType()) {
+      lowerAggregateLoad(LI);
+      return;
+    }
     IRBuilder<> B(&LI);
     Module &M = *LI.getModule();
     LLVMContext &C = M.getContext();
@@ -404,7 +568,7 @@ private:
     if (LI.isVolatile())
       Call->setConvergent();
     else
-      Call->addFnAttr(Attribute::ReadOnly);
+      Call->setOnlyReadsMemory();
     Call->setDebugLoc(LI.getDebugLoc());
     Value *Result = Call;
     if (CallTy != LI.getType())
@@ -414,6 +578,10 @@ private:
   }
 
   static void lowerStore(StoreInst &SI) {
+    if (SI.getValueOperand()->getType()->isAggregateType()) {
+      lowerAggregateStore(SI);
+      return;
+    }
     IRBuilder<> B(&SI);
     Module &M = *SI.getModule();
     LLVMContext &C = M.getContext();
