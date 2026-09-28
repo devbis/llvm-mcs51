@@ -18,6 +18,7 @@ __code volatile const unsigned short code_word = 0x1234;
 
 unsigned char read_data(void) { return data_value; }
 void write_data(unsigned char value) { data_value = value; }
+void write_data_constant(void) { data_value = 0x42; }
 
 unsigned char read_idata(void) { return idata_value; }
 void write_idata(unsigned char value) { idata_value = value; }
@@ -61,6 +62,7 @@ void write_pdata_pointer(__pdata volatile unsigned char *pointer,
 }
 unsigned char read_port0(void) { return SFR(0x80); }
 void write_port0(unsigned char value) { SFR(0x80) = value; }
+void write_port0_constant(void) { SFR(0x80) = 0x42; }
 unsigned char read_ea(void) { return SBIT(0xaf); }
 void set_ea(void) { SBIT(0xaf) = 1; }
 
@@ -80,6 +82,8 @@ int main(void) {
 // CHECK: mov a, data_value
 // CHECK-LABEL: write_data:
 // CHECK: mov data_value, a
+// CHECK-LABEL: write_data_constant:
+// CHECK: mov data_value, #66
 // CHECK-LABEL: read_idata:
 // CHECK: mov a, @r0
 // CHECK-LABEL: write_idata:
@@ -126,6 +130,8 @@ int main(void) {
 // CHECK: mov a, -128
 // CHECK-LABEL: write_port0:
 // CHECK: mov -128, a
+// CHECK-LABEL: write_port0_constant:
+// CHECK: mov -128, #66
 // CHECK-LABEL: read_ea:
 // CHECK: mov c, -81
 // CHECK-LABEL: set_ea:
