@@ -383,38 +383,19 @@ private:
     return getMemoryType(Ty, C);
   }
 
-  static Value *lowerAggregateLoadValue(IRBuilder<> &B, Module &M,
-                                        Value *Pointer, Type *Ty,
-                                        uint64_t Offset, bool IsVolatile) {
+  static unsigned getLargestByteChunk(uint64_t Remaining) {
+    for (unsigned Size : {8u, 4u, 2u, 1u})
+      if (Remaining >= Size)
+        return Size;
+    llvm_unreachable("empty MCS-51 aggregate byte chunk");
+  }
+
+  static Value *lowerGenericScalarLoadValue(IRBuilder<> &B, Module &M,
+                                            Value *Pointer, Type *Ty,
+                                            uint64_t Offset,
+                                            bool IsVolatile) {
     LLVMContext &C = M.getContext();
     const DataLayout &DL = M.getDataLayout();
-    if (auto *STy = dyn_cast<StructType>(Ty)) {
-      Value *Result = UndefValue::get(Ty);
-      const StructLayout *Layout = DL.getStructLayout(STy);
-      for (unsigned I = 0; I < STy->getNumElements(); ++I) {
-        Type *FieldTy = STy->getElementType(I);
-        if (!getAggregateSize(DL, FieldTy))
-          continue;
-        Value *Field = lowerAggregateLoadValue(
-            B, M, Pointer, FieldTy, Offset + Layout->getElementOffset(I),
-            IsVolatile);
-        Result = B.CreateInsertValue(Result, Field, I, "gptr.aggregate.field");
-      }
-      return Result;
-    }
-    if (auto *ATy = dyn_cast<ArrayType>(Ty)) {
-      Value *Result = UndefValue::get(Ty);
-      Type *ElementTy = ATy->getElementType();
-      uint64_t Stride = getAggregateSize(DL, ElementTy);
-      for (uint64_t I = 0; I < ATy->getNumElements(); ++I) {
-        Value *Element = lowerAggregateLoadValue(
-            B, M, Pointer, ElementTy, Offset + I * Stride, IsVolatile);
-        Result = B.CreateInsertValue(Result, Element, I,
-                                     "gptr.aggregate.element");
-      }
-      return Result;
-    }
-
     Type *AccessTy = getGenericAccessType(Ty, DL, C);
     std::string Name =
         (Twine("__mcs51_gptrget") + getSuffix(AccessTy)).str();
@@ -436,38 +417,12 @@ private:
     return Result;
   }
 
-  static void lowerAggregateStoreValue(IRBuilder<> &B, Module &M,
-                                       Value *Pointer, Value *ValueToStore,
-                                       Type *Ty, uint64_t Offset,
-                                       bool IsVolatile) {
+  static void lowerGenericScalarStoreValue(IRBuilder<> &B, Module &M,
+                                           Value *Pointer, Value *ValueToStore,
+                                           Type *Ty, uint64_t Offset,
+                                           bool IsVolatile) {
     LLVMContext &C = M.getContext();
     const DataLayout &DL = M.getDataLayout();
-    if (auto *STy = dyn_cast<StructType>(Ty)) {
-      const StructLayout *Layout = DL.getStructLayout(STy);
-      for (unsigned I = 0; I < STy->getNumElements(); ++I) {
-        Type *FieldTy = STy->getElementType(I);
-        if (!getAggregateSize(DL, FieldTy))
-          continue;
-        Value *Field = B.CreateExtractValue(ValueToStore, I,
-                                            "gptr.aggregate.field");
-        lowerAggregateStoreValue(
-            B, M, Pointer, Field, FieldTy,
-            Offset + Layout->getElementOffset(I), IsVolatile);
-      }
-      return;
-    }
-    if (auto *ATy = dyn_cast<ArrayType>(Ty)) {
-      Type *ElementTy = ATy->getElementType();
-      uint64_t Stride = getAggregateSize(DL, ElementTy);
-      for (uint64_t I = 0; I < ATy->getNumElements(); ++I) {
-        Value *Element = B.CreateExtractValue(ValueToStore, I,
-                                              "gptr.aggregate.element");
-        lowerAggregateStoreValue(B, M, Pointer, Element, ElementTy,
-                                 Offset + I * Stride, IsVolatile);
-      }
-      return;
-    }
-
     Type *AccessTy = getGenericAccessType(Ty, DL, C);
     Value *Stored = ValueToStore;
     Type *StorageTy = AccessTy;
@@ -497,6 +452,123 @@ private:
     CallInst *Call = createCall(B, M, Name, Type::getVoidTy(C), Args);
     if (IsVolatile)
       Call->setConvergent();
+  }
+
+  static Value *lowerAggregateLoadValue(IRBuilder<> &B, Module &M,
+                                        Value *Pointer, Type *Ty,
+                                        uint64_t Offset, bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
+    if (auto *STy = dyn_cast<StructType>(Ty)) {
+      Value *Result = UndefValue::get(Ty);
+      const StructLayout *Layout = DL.getStructLayout(STy);
+      for (unsigned I = 0; I < STy->getNumElements(); ++I) {
+        Type *FieldTy = STy->getElementType(I);
+        if (!getAggregateSize(DL, FieldTy))
+          continue;
+        Value *Field = lowerAggregateLoadValue(
+            B, M, Pointer, FieldTy, Offset + Layout->getElementOffset(I),
+            IsVolatile);
+        Result = B.CreateInsertValue(Result, Field, I, "gptr.aggregate.field");
+      }
+      return Result;
+    }
+    if (auto *ATy = dyn_cast<ArrayType>(Ty)) {
+      Value *Result = UndefValue::get(Ty);
+      Type *ElementTy = ATy->getElementType();
+      if (ElementTy->isIntegerTy(8)) {
+        uint64_t I = 0;
+        while (I < ATy->getNumElements()) {
+          unsigned ChunkBytes =
+              getLargestByteChunk(ATy->getNumElements() - I);
+          Type *ChunkTy = IntegerType::get(C, ChunkBytes * 8);
+          Value *Chunk = lowerGenericScalarLoadValue(
+              B, M, Pointer, ChunkTy, Offset + I, IsVolatile);
+          for (unsigned J = 0; J < ChunkBytes; ++J) {
+            Value *Byte = Chunk;
+            if (J)
+              Byte = B.CreateLShr(Chunk, J * 8,
+                                  "gptr.aggregate.byte.shift");
+            if (ChunkTy != ElementTy)
+              Byte = B.CreateTrunc(Byte, ElementTy, "gptr.aggregate.byte");
+            Result = B.CreateInsertValue(Result, Byte, I + J,
+                                         "gptr.aggregate.element");
+          }
+          I += ChunkBytes;
+        }
+        return Result;
+      }
+      uint64_t Stride = getAggregateSize(DL, ElementTy);
+      for (uint64_t I = 0; I < ATy->getNumElements(); ++I) {
+        Value *Element = lowerAggregateLoadValue(
+            B, M, Pointer, ElementTy, Offset + I * Stride, IsVolatile);
+        Result = B.CreateInsertValue(Result, Element, I,
+                                     "gptr.aggregate.element");
+      }
+      return Result;
+    }
+    return lowerGenericScalarLoadValue(B, M, Pointer, Ty, Offset,
+                                       IsVolatile);
+  }
+
+  static void lowerAggregateStoreValue(IRBuilder<> &B, Module &M,
+                                       Value *Pointer, Value *ValueToStore,
+                                       Type *Ty, uint64_t Offset,
+                                       bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
+    if (auto *STy = dyn_cast<StructType>(Ty)) {
+      const StructLayout *Layout = DL.getStructLayout(STy);
+      for (unsigned I = 0; I < STy->getNumElements(); ++I) {
+        Type *FieldTy = STy->getElementType(I);
+        if (!getAggregateSize(DL, FieldTy))
+          continue;
+        Value *Field = B.CreateExtractValue(ValueToStore, I,
+                                            "gptr.aggregate.field");
+        lowerAggregateStoreValue(
+            B, M, Pointer, Field, FieldTy,
+            Offset + Layout->getElementOffset(I), IsVolatile);
+      }
+      return;
+    }
+    if (auto *ATy = dyn_cast<ArrayType>(Ty)) {
+      Type *ElementTy = ATy->getElementType();
+      if (ElementTy->isIntegerTy(8)) {
+        uint64_t I = 0;
+        while (I < ATy->getNumElements()) {
+          unsigned ChunkBytes =
+              getLargestByteChunk(ATy->getNumElements() - I);
+          Type *ChunkTy = IntegerType::get(C, ChunkBytes * 8);
+          Value *Chunk = ConstantInt::get(ChunkTy, 0);
+          for (unsigned J = 0; J < ChunkBytes; ++J) {
+            Value *Byte = B.CreateExtractValue(ValueToStore, I + J,
+                                               "gptr.aggregate.byte");
+            Value *Part = Byte;
+            if (ChunkTy != ElementTy)
+              Part = B.CreateZExt(Byte, ChunkTy,
+                                  "gptr.aggregate.byte.extend");
+            if (J)
+              Part = B.CreateShl(Part, J * 8,
+                                 "gptr.aggregate.byte.shift");
+            Chunk = B.CreateOr(Chunk, Part, "gptr.aggregate.chunk");
+          }
+          lowerGenericScalarStoreValue(B, M, Pointer, Chunk, ChunkTy,
+                                       Offset + I, IsVolatile);
+          I += ChunkBytes;
+        }
+        return;
+      }
+      uint64_t Stride = getAggregateSize(DL, ElementTy);
+      for (uint64_t I = 0; I < ATy->getNumElements(); ++I) {
+        Value *Element = B.CreateExtractValue(ValueToStore, I,
+                                              "gptr.aggregate.element");
+        lowerAggregateStoreValue(B, M, Pointer, Element, ElementTy,
+                                 Offset + I * Stride, IsVolatile);
+      }
+      return;
+    }
+    lowerGenericScalarStoreValue(B, M, Pointer, ValueToStore, Ty, Offset,
+                                 IsVolatile);
   }
 
   static void lowerAggregateLoad(LoadInst &LI) {
