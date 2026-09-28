@@ -2372,7 +2372,7 @@ def MOV_RN_IMM : MCS51RnImmInst<0b01111, "mov"> {
 
 class MCS51ALUPseudoRR<SDNode node> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51AReg:$dst);
+  let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
   let AsmString = "";
   let Size = 0;
@@ -2380,13 +2380,13 @@ class MCS51ALUPseudoRR<SDNode node> : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst,
+  let Pattern = [(set MCS51GPR8:$dst,
                       (node MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
 }
 
 class MCS51ALUPseudoRI<SDNode node> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51AReg:$dst);
+  let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51GPR8:$lhs, MCS51Imm8:$rhs);
   let AsmString = "";
   let Size = 0;
@@ -2394,7 +2394,7 @@ class MCS51ALUPseudoRI<SDNode node> : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst,
+  let Pattern = [(set MCS51GPR8:$dst,
                       (node MCS51GPR8:$lhs, MCS51Imm8:$rhs))];
 }
 
@@ -2411,7 +2411,7 @@ def SUB8ri : MCS51ALUPseudoRI<sub>;
 
 def MUL8rr : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51AReg:$dst);
+  let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
   let AsmString = "";
   let Size = 0;
@@ -2419,8 +2419,22 @@ def MUL8rr : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst,
+  let Pattern = [(set MCS51GPR8:$dst,
                       (mul MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
+}
+
+def MUL8ri : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Imm8:$rhs);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51GPR8:$dst,
+                      (mul MCS51GPR8:$lhs, MCS51Imm8:$rhs))];
 }
 
 class MCS51DivModPseudo<SDNode node> : Instruction {

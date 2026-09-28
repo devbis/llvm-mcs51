@@ -3229,6 +3229,19 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::MUL8ri) {
+    Register LHS = MI.getOperand(1).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IMM))
+        .addImm(0xF0)
+        .addImm(MI.getOperand(2).getImm());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY),
+            MI.getOperand(0).getReg())
+        .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::MUL8rr) {
     Register RHS = MI.getOperand(2).getReg();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
@@ -3273,7 +3286,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
     BuildMI(*MBB, MII, DL,
             TII.get(IsIncrement ? MCS51::INC_A : MCS51::DEC_A));
-    MBB->getParent()->getRegInfo().replaceRegWith(Dst, MCS51::A);
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::A);
     MI.eraseFromParent();
     return MBB;
   }
