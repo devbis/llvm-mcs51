@@ -11,8 +11,11 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/MathExtras.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -33,6 +36,108 @@ static bool containsFrameIndex(SDValue V) {
         Worklist.push_back(Operand);
   }
   return false;
+}
+
+// IDATA globals without explicit sections are emitted in module order into
+// one target section. Use their section-relative offsets to reuse R0 only when
+// both symbols are local to this object and their relative layout is known.
+static bool getMCS51IDATASectionOffset(const GlobalValue *Value,
+                                      int64_t Addend, int64_t &Offset) {
+  const auto *Target = dyn_cast<GlobalVariable>(Value);
+  if (!Target || Target->getAddressSpace() != MCS51::IData ||
+      Target->hasSection() || Target->isDeclaration() ||
+      Target->isConstant() || Target->isThreadLocal() ||
+      Target->hasCommonLinkage() || !Target->isDSOLocal())
+    return false;
+
+  const bool IsBSS = Target->getInitializer()->isNullValue();
+  const Module &M = *Target->getParent();
+  const DataLayout &DL = M.getDataLayout();
+  uint64_t SectionOffset = 0;
+  for (const GlobalVariable &GV : M.globals()) {
+    if (GV.getAddressSpace() != MCS51::IData || GV.hasSection() ||
+        GV.isDeclaration() || GV.isConstant() || GV.isThreadLocal() ||
+        GV.hasCommonLinkage() || !GV.hasInitializer() ||
+        GV.getInitializer()->isNullValue() != IsBSS)
+      continue;
+
+    Align Alignment = DL.getPreferredAlign(&GV);
+    if (MaybeAlign ExplicitAlignment = GV.getAlign())
+      Alignment = std::max(Alignment, *ExplicitAlignment);
+    SectionOffset = alignTo(SectionOffset, Alignment);
+    if (&GV == Target) {
+      int64_t Result = static_cast<int64_t>(SectionOffset) + Addend;
+      if (Result < 0)
+        return false;
+      Offset = Result;
+      return true;
+    }
+
+    TypeSize Size = DL.getTypeAllocSize(GV.getValueType());
+    if (Size.isScalable())
+      return false;
+    SectionOffset += Size.getFixedValue();
+  }
+  return false;
+}
+
+static void emitIDATAAddress(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator InsertPt,
+                             const DebugLoc &DL, const TargetInstrInfo &TII,
+                             const TargetRegisterInfo *TRI,
+                             const MachineOperand &Address) {
+  int64_t TargetOffset;
+  if (Address.isGlobal() &&
+      getMCS51IDATASectionOffset(Address.getGlobal(), Address.getOffset(),
+                                 TargetOffset)) {
+    int64_t Delta = 0;
+    bool Known = false;
+    for (auto I = InsertPt; I != MBB.begin();) {
+      --I;
+      if (I->isDebugInstr())
+        continue;
+      if (!I->modifiesRegister(MCS51::R0, TRI))
+        continue;
+
+      if ((I->getOpcode() == MCS51::INC_RN ||
+           I->getOpcode() == MCS51::DEC_RN) &&
+          I->getOperand(0).getReg() == MCS51::R0 &&
+          I->getOperand(1).getReg() == MCS51::R0) {
+        Delta += I->getOpcode() == MCS51::INC_RN ? 1 : -1;
+        continue;
+      }
+
+      if (I->getOpcode() == MCS51::MOV_RN_IMM &&
+          I->getOperand(0).getReg() == MCS51::R0 &&
+          I->getOperand(1).isGlobal()) {
+        int64_t BaseOffset;
+        if (getMCS51IDATASectionOffset(I->getOperand(1).getGlobal(),
+                                       I->getOperand(1).getOffset(),
+                                       BaseOffset)) {
+          Known = true;
+          Delta += BaseOffset;
+        }
+      }
+      break;
+    }
+
+    if (Known) {
+      int64_t Difference = TargetOffset - Delta;
+      if (Difference == 0)
+        return;
+      if (Difference == 1 || Difference == -1) {
+        BuildMI(MBB, InsertPt, DL,
+                TII.get(Difference > 0 ? MCS51::INC_RN : MCS51::DEC_RN))
+            .addReg(MCS51::R0, RegState::Define)
+            .addReg(MCS51::R0);
+        return;
+      }
+    }
+  }
+
+  BuildMI(MBB, InsertPt, DL, TII.get(MCS51::MOV_RN_IMM))
+      .addReg(MCS51::R0, RegState::Define)
+      .add(Address);
 }
 
 MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
@@ -1330,9 +1435,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::LOADIDATA_GLOBAL8) {
     Register Dst = MI.getOperand(0).getReg();
     MachineMemOperand *MMO = MI.memoperands().front();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
-        .addReg(MCS51::R0, RegState::Define)
-        .add(MI.getOperand(1));
+    emitIDATAAddress(*MBB, MII, DL, TII, STI.getRegisterInfo(),
+                     MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI))
         .addReg(MCS51::R0)
         .addMemOperand(MMO);
@@ -1363,9 +1467,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Def->eraseFromParent();
     else
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
-        .addReg(MCS51::R0, RegState::Define)
-        .add(MI.getOperand(0));
+    emitIDATAAddress(*MBB, MII, DL, TII, STI.getRegisterInfo(),
+                     MI.getOperand(0));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_IND_RI_A))
         .addReg(MCS51::R0)
         .addMemOperand(MMO);
@@ -1374,9 +1477,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREIDATA_GLOBAL8_IMM) {
     MachineMemOperand *MMO = MI.memoperands().front();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
-        .addReg(MCS51::R0, RegState::Define)
-        .add(MI.getOperand(0));
+    emitIDATAAddress(*MBB, MII, DL, TII, STI.getRegisterInfo(),
+                     MI.getOperand(0));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_R0_IND_IMM))
         .add(MI.getOperand(1))
         .addMemOperand(MMO);
@@ -1457,9 +1559,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MachineFunction &MF = *MBB->getParent();
     MachineMemOperand *LowMMO = MF.getMachineMemOperand(MMO, 0, 1);
     MachineMemOperand *HighMMO = MF.getMachineMemOperand(MMO, 1, 1);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
-        .addReg(MCS51::R0, RegState::Define)
-        .add(MI.getOperand(1));
+    emitIDATAAddress(*MBB, MII, DL, TII, STI.getRegisterInfo(),
+                     MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI))
         .addReg(MCS51::R0)
         .addMemOperand(LowMMO);
@@ -1485,9 +1586,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .add(MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
-        .addReg(MCS51::R0, RegState::Define)
-        .add(MI.getOperand(0));
+    emitIDATAAddress(*MBB, MII, DL, TII, STI.getRegisterInfo(),
+                     MI.getOperand(0));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_IND_RI_A))
         .addReg(MCS51::R0)
         .addMemOperand(LowMMO);
