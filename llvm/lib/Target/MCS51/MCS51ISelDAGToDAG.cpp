@@ -716,6 +716,20 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
           CurDAG->RemoveDeadNode(N);
           return true;
         }
+      if (ST->getMemoryVT() == MVT::i16)
+        if (auto *C = dyn_cast<ConstantSDNode>(ST->getValue())) {
+          SDValue Ops[] = {
+              Addr,
+              CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i16),
+              ST->getChain()};
+          SDNode *Res = CurDAG->getMachineNode(MCS51::STOREXABS16_IMM, DL,
+                                               MVT::Other, Ops);
+          CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res),
+                                 {ST->getMemOperand()});
+          ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+          CurDAG->RemoveDeadNode(N);
+          return true;
+        }
       unsigned Opcode = ST->getMemoryVT() == MVT::i8
                             ? MCS51::STOREXABS8
                             : MCS51::STOREXABS16;
