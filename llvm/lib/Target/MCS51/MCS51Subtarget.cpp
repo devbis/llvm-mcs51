@@ -19,6 +19,9 @@ void MCS51Subtarget::initLibcallLoweringInfo(
     RTLIB::Libcall Op;
     RTLIB::LibcallImpl Impl;
   } LibraryCalls[] = {
+      {RTLIB::MEMCPY, RTLIB::impl_memcpy},
+      {RTLIB::MEMMOVE, RTLIB::impl_memmove},
+      {RTLIB::MEMSET, RTLIB::impl_memset},
       {RTLIB::UDIV_I16, RTLIB::impl___udivhi3},
       {RTLIB::SDIV_I16, RTLIB::impl___divhi3},
       {RTLIB::UREM_I16, RTLIB::impl___umodhi3},

@@ -140,6 +140,17 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent();
     return true;
   }
+  if (Opcode == MCS51::STOREI8) {
+    MachineBasicBlock &MBB = *MI.getParent();
+    MachineBasicBlock::iterator I = MI.getIterator();
+    const DebugLoc &DL = MI.getDebugLoc();
+    Register Addr = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    BuildMI(MBB, I, DL, get(MCS51::MOV_A_RN)).addReg(Src);
+    BuildMI(MBB, I, DL, get(MCS51::MOV_IND_RI_A)).addReg(Addr);
+    MI.eraseFromParent();
+    return true;
+  }
   if (Opcode != MCS51::LOADSTACKARG8)
     return false;
 

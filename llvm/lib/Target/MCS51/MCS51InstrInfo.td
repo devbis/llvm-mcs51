@@ -1126,7 +1126,9 @@ class MCS51IndirectMemPseudo<bits<1> IsLoad> : Instruction {
 }
 
 def LOADI8 : MCS51IndirectMemPseudo<1>;
-def STOREI8 : MCS51IndirectMemPseudo<0>;
+def STOREI8 : MCS51IndirectMemPseudo<0> {
+  let usesCustomInserter = 0;
+}
 def LOADP8 : MCS51IndirectMemPseudo<1>;
 def STOREP8 : MCS51IndirectMemPseudo<0>;
 

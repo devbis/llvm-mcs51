@@ -46,9 +46,14 @@ public:
   explicit MCS51ABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
 
   ABIArgInfo classifyReturnType(QualType RetTy) const {
-    if (isAggregateTypeForABI(RetTy))
+    if (isAggregateTypeForABI(RetTy)) {
       if (llvm::Type *CoerceTy = getAggregateCoerceType(RetTy))
         return ABIArgInfo::getDirect(CoerceTy);
+      if (!getRecordArgABI(RetTy, getCXXABI()))
+        return ABIArgInfo::getIndirect(
+            getContext().getTypeAlignInChars(RetTy),
+            /*AddrSpace=*/2, /*ByVal=*/false);
+    }
     return DefaultABIInfo::classifyReturnType(RetTy);
   }
 
@@ -82,6 +87,9 @@ public:
                                   const VarDecl *D) const override {
     if (D && D->getType().getAddressSpace() != LangAS::Default)
       return D->getType().getAddressSpace();
+
+    if (D && D->getType().isConstQualified())
+      return getLangASFromTargetAS(5);
 
     // The default MCS-51 data model places unqualified globals in XDATA.
     // Explicit address-space-qualified variables keep their declared space.

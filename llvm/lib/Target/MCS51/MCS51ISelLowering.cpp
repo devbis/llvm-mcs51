@@ -91,6 +91,9 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::BR_CC, MVT::i8, Custom);
   setOperationAction(ISD::BR_CC, MVT::i16, Custom);
   setBooleanContents(ZeroOrOneBooleanContent);
+  // Route copies through MCS51SelectionDAGInfo so stack-space casts retain
+  // their IDATA address space during inline lowering.
+  MaxStoresPerMemcpy = MaxStoresPerMemcpyOptSize = 0;
   setStackPointerRegisterToSaveRestore(MCS51::SP);
   computeRegisterProperties(STI.getRegisterInfo());
 }
