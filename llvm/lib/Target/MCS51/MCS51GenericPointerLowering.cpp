@@ -15,6 +15,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -33,6 +34,16 @@ public:
 
   bool runOnFunction(Function &F) override {
     bool Changed = false;
+    SmallVector<MemCpyInst *, 4> DynamicCopies;
+    for (Instruction &I : instructions(F))
+      if (auto *Copy = dyn_cast<MemCpyInst>(&I))
+        if (!isa<ConstantInt>(Copy->getLength()))
+          DynamicCopies.push_back(Copy);
+    for (MemCpyInst *Copy : DynamicCopies) {
+      lowerDynamicAddressSpaceCopy(*Copy);
+      Changed = true;
+    }
+
     SmallVector<GetElementPtrInst *, 8> GenericGEPs;
     for (Instruction &I : instructions(F))
       if (auto *GEP = dyn_cast<GetElementPtrInst>(&I))
@@ -208,6 +219,105 @@ private:
       return false;
     }
     return false;
+  }
+
+  static Value *getMemIntrinsicMemoryPointer(Value *Pointer) {
+    while (true) {
+      if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Pointer)) {
+        // Clang casts qualified pointers to the default pointer type when it
+        // builds llvm.memcpy. The cast is only an intrinsic ABI adaptation;
+        // retain the address space used by the actual memory operation.
+        if (Cast->getDestAddressSpace() == MCS51::Default) {
+          Pointer = Cast->getPointerOperand();
+          continue;
+        }
+      }
+      if (auto *Cast = dyn_cast<BitCastOperator>(Pointer)) {
+        Pointer = Cast->getOperand(0);
+        continue;
+      }
+      return Pointer;
+    }
+  }
+
+  static void lowerDynamicAddressSpaceCopy(MemCpyInst &Copy) {
+    Function &F = *Copy.getFunction();
+    LLVMContext &C = F.getContext();
+    Type *I8Ty = Type::getInt8Ty(C);
+    Value *Dst = getMemIntrinsicMemoryPointer(Copy.getRawDest());
+    Value *Src = getMemIntrinsicMemoryPointer(Copy.getRawSource());
+    unsigned DstAS = cast<PointerType>(Dst->getType())->getAddressSpace();
+    unsigned SrcAS = cast<PointerType>(Src->getType())->getAddressSpace();
+    bool DstIsStack = DstAS == MCS51::Default && pointsToStackObject(Dst);
+    bool SrcIsStack = SrcAS == MCS51::Default && pointsToStackObject(Src);
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    APInt DstOffset(DL.getIndexTypeSizeInBits(Dst->getType()), 0);
+    APInt SrcOffset(DL.getIndexTypeSizeInBits(Src->getType()), 0);
+    if (DstIsStack)
+      Dst = Dst->stripAndAccumulateConstantOffsets(DL, DstOffset, true);
+    if (SrcIsStack)
+      Src = Src->stripAndAccumulateConstantOffsets(DL, SrcOffset, true);
+    if (DstAS == MCS51::Code)
+      report_fatal_error("cannot copy bytes into MCS-51 code memory");
+    if (DstAS == MCS51::Bit || SrcAS == MCS51::Bit)
+      report_fatal_error("byte copy through MCS-51 bit pointers is unsupported");
+
+    BasicBlock *Preheader = Copy.getParent();
+    BasicBlock *Continue =
+        Preheader->splitBasicBlock(Copy.getIterator(), "mcs51.memcpy.cont");
+    Preheader->getTerminator()->eraseFromParent();
+    BasicBlock *Loop = BasicBlock::Create(C, "mcs51.memcpy.loop", &F, Continue);
+    BasicBlock *Body = BasicBlock::Create(C, "mcs51.memcpy.body", &F, Continue);
+
+    IRBuilder<> Entry(Preheader);
+    Entry.SetCurrentDebugLocation(Copy.getDebugLoc());
+    Entry.CreateBr(Loop);
+
+    IRBuilder<> LoopBuilder(Loop);
+    LoopBuilder.SetCurrentDebugLocation(Copy.getDebugLoc());
+    Type *LengthTy = Copy.getLength()->getType();
+    PHINode *Index = LoopBuilder.CreatePHI(LengthTy, 2, "mcs51.memcpy.index");
+    Index->addIncoming(ConstantInt::get(LengthTy, 0), Preheader);
+    Value *More = LoopBuilder.CreateICmpULT(Index, Copy.getLength(),
+                                             "mcs51.memcpy.more");
+    LoopBuilder.CreateCondBr(More, Body, Continue);
+
+    IRBuilder<> BodyBuilder(Body);
+    BodyBuilder.SetCurrentDebugLocation(Copy.getDebugLoc());
+    Value *SourceIndex = Index;
+    if (SrcIsStack && !SrcOffset.isZero()) {
+      Value *Offset = ConstantInt::get(LengthTy, SrcOffset.getSExtValue());
+      SourceIndex = BodyBuilder.CreateAdd(Index, Offset,
+                                          "mcs51.memcpy.src.index");
+    }
+    Value *DestinationIndex = Index;
+    if (DstIsStack && !DstOffset.isZero()) {
+      Value *Offset = ConstantInt::get(LengthTy, DstOffset.getSExtValue());
+      DestinationIndex = BodyBuilder.CreateAdd(
+          Index, Offset, "mcs51.memcpy.dst.index");
+    }
+    Value *SourceAddress =
+        BodyBuilder.CreateGEP(I8Ty, Src, SourceIndex, "mcs51.memcpy.src");
+    Value *DestinationAddress = BodyBuilder.CreateGEP(
+        I8Ty, Dst, DestinationIndex, "mcs51.memcpy.dst");
+    if (SrcIsStack)
+      SourceAddress = BodyBuilder.CreateAddrSpaceCast(
+          SourceAddress, PointerType::get(C, MCS51::IData),
+          "mcs51.memcpy.src.idata");
+    if (DstIsStack)
+      DestinationAddress = BodyBuilder.CreateAddrSpaceCast(
+          DestinationAddress, PointerType::get(C, MCS51::IData),
+          "mcs51.memcpy.dst.idata");
+    LoadInst *Byte = BodyBuilder.CreateLoad(I8Ty, SourceAddress);
+    Byte->setVolatile(Copy.isVolatile());
+    StoreInst *Store = BodyBuilder.CreateStore(Byte, DestinationAddress);
+    Store->setVolatile(Copy.isVolatile());
+    Value *Next = BodyBuilder.CreateAdd(Index, ConstantInt::get(LengthTy, 1),
+                                        "mcs51.memcpy.next");
+    BodyBuilder.CreateBr(Loop);
+    Index->addIncoming(Next, Body);
+
+    Copy.eraseFromParent();
   }
 
   static bool hasMergedPointerProvenance(Value *Pointer) {
