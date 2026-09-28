@@ -2607,6 +2607,20 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::STOREXABS16_IMM) {
+    uint16_t Value = static_cast<uint16_t>(MI.getOperand(1).getImm());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+        .add(MI.getOperand(0));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+        .addImm(Value & 0xff);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+        .addImm(Value >> 8);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::STOREXABS16) {
     Register LowByte = MBB->getParent()->getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);

@@ -167,6 +167,12 @@ entry:
   ret void
 }
 
+define void @write_xdata_symbol_word_constant() {
+entry:
+  store i16 4660, ptr addrspace(4) @xdata_word, align 1
+  ret void
+}
+
 ; CHECK-LABEL: read_xdata:
 ; CHECK: mov 131, #0
 ; CHECK: mov a, r7
@@ -343,6 +349,15 @@ entry:
 ; CHECK: inc dptr
 ; CHECK: movx @dptr, a
 ; CHECK: ret
+
+; CHECK-LABEL: write_xdata_symbol_word_constant:
+; CHECK: mov dptr, #xdata_word
+; CHECK-NEXT: mov a, #52
+; CHECK-NEXT: movx @dptr, a
+; CHECK-NEXT: inc dptr
+; CHECK-NEXT: mov a, #18
+; CHECK-NEXT: movx @dptr, a
+; CHECK-NEXT: ret
 
 ; DIS-LABEL: <read_idata>:
 ; DIS: mov a, @r0
