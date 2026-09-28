@@ -68,6 +68,14 @@ collection can discard unused firmware functions and globals. Pass
 Use `llvm-objcopy --output-target=ihex firmware.elf firmware.hex` to emit Intel
 HEX. `-nostdlib` disables this automatic CC2530 profile.
 
+For semantic validation of the generic-pointer runtime on classic MCS-51, run
+`llvm/lib/Target/MCS51/verify-generic-pointer-runtime.sh` with uCsim's `s51`
+available on `PATH`, or set `MCS51_SIM` to its executable path. The script
+builds a flat test image with the MCS-51 runtime, executes an IDATA byte and
+64-bit generic-pointer round-trip, and checks the XDATA result byte. This is
+an optional runtime check in addition to the lit suite; the simulator is not
+used as the SDCC compiler.
+
 For a standalone CC2530 image, use
 `llvm/lib/Target/MCS51/cc2530-build.sh source.c -o firmware.elf`. The script
 links the CC2530 reset startup and MCS-51 runtime with the application, then
