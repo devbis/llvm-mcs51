@@ -157,6 +157,12 @@ public:
     return getTM<MCS51TargetMachine>();
   }
 
+  void addIRPasses() override {
+    addPass(createMCS51OverlayPass());
+    addPass(createMCS51StackAddressLoweringPass());
+    TargetPassConfig::addIRPasses();
+  }
+
   bool addInstSelector() override {
     addPass(createMCS51ISelDag(getMCS51TargetMachine(), getOptLevel()));
     return false;
