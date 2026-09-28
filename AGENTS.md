@@ -206,9 +206,10 @@ uses the default XDATA model for unknown pointers and recognizes pointers
 rooted in local allocas as IDATA. Casts through `select` and `phi` values
 convert each incoming pointer separately, preserving its memory-space tag;
 CodeGen tests cover these merged-pointer cases. Other pointer provenance still
-needs runtime validation. Casts involving bit or SFR
-spaces are unsupported. Atomic and aggregate accesses and scalar types outside
-the list above are unsupported; the lowering diagnoses unsupported access
-types as a fatal backend error. Keep these limitations visible until the
-generic-pointer ABI and behavior are covered end-to-end with correctness and
-code-size tests.
+needs runtime validation. Casts involving bit or SFR spaces are unsupported.
+Aggregate loads and stores are split into generic scalar accesses for each LLVM
+struct or array field; padding bytes are left untouched. Atomic accesses and
+scalar field types outside the list above remain unsupported; the lowering
+diagnoses unsupported access types as a fatal backend error. Keep these
+limitations visible until the generic-pointer ABI and behavior are covered
+end-to-end with correctness and code-size tests.
