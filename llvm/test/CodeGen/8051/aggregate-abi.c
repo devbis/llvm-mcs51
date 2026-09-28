@@ -73,6 +73,22 @@ __attribute__((noinline)) unsigned char call_sum_union(void) {
   return sum_union(Input);
 }
 
+typedef struct {
+  unsigned char Flag : 1;
+  unsigned char Mode : 3;
+  unsigned char Bytes[8];
+} LargeBitFields;
+
+__attribute__((noinline)) unsigned char sum_bitfields(LargeBitFields Value) {
+  return Value.Flag + Value.Bytes[7];
+}
+
+__attribute__((noinline)) unsigned char call_sum_bitfields(void) {
+  LargeBitFields Input =
+      {.Flag = 1, .Mode = 2, .Bytes = {1, 2, 3, 4, 5, 6, 7, 8}};
+  return sum_bitfields(Input);
+}
+
 int main(void) {
   return call_identity();
 }
@@ -99,8 +115,13 @@ int main(void) {
 // CHECK: ret
 // CHECK-LABEL: call_sum_union:
 // CHECK: lcall sum_union
+// CHECK-LABEL: sum_bitfields:
+// CHECK: ret
+// CHECK-LABEL: call_sum_bitfields:
+// CHECK: lcall sum_bitfields
 // LINK-DAG: Name: identity
 // LINK-DAG: Name: copy_large
 // LINK-DAG: Name: sum_expanded
 // LINK-DAG: Name: return_large
 // LINK-DAG: Name: sum_union
+// LINK-DAG: Name: sum_bitfields
