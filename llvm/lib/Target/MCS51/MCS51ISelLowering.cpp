@@ -1341,6 +1341,17 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
+  if (MI.getOpcode() == MCS51::STOREIDATA_GLOBAL8_IMM) {
+    MachineMemOperand *MMO = MI.memoperands().front();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
+        .addReg(MCS51::R0, RegState::Define)
+        .add(MI.getOperand(0));
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_R0_IND_IMM))
+        .add(MI.getOperand(1))
+        .addMemOperand(MMO);
+    MI.eraseFromParent();
+    return MBB;
+  }
   if (MI.getOpcode() == MCS51::STOREPDATA_GLOBAL8) {
     MachineMemOperand *MMO = MI.memoperands().front();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))

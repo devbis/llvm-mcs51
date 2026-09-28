@@ -1182,6 +1182,19 @@ def STOREIDATA_GLOBAL8 : Instruction {
   let Defs = [A, R0];
 }
 
+def STOREIDATA_GLOBAL8_IMM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imm8:$addr, MCS51Imm8:$imm);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayStore = 1;
+  let Defs = [R0];
+}
+
 def LOADPDATA_GLOBAL8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
