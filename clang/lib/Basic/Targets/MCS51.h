@@ -49,6 +49,10 @@ public:
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 
+  std::optional<LangAS> getConstantAddressSpace() const override {
+    return getLangASFromTargetAS(5);
+  }
+
   llvm::SmallVector<Builtin::InfosShard> getTargetBuiltins() const override {
     return {};
   }
