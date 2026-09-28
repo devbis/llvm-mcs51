@@ -606,6 +606,26 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
           cast<GlobalAddressSDNode>(Addr)->getTargetFlags());
     if (Addr.getOpcode() == ISD::TargetGlobalAddress ||
         Addr.getOpcode() == ISD::TargetConstant) {
+      SDValue Value = ST->getValue();
+      if (Value.getNode()->isMachineOpcode() &&
+          Value.getNode()->getMachineOpcode() == MCS51::MOV_A_IMM)
+        Value = Value.getNode()->getOperand(0);
+      if (auto *C = dyn_cast<ConstantSDNode>(Value)) {
+        SDValue Ops[] = {
+            Addr,
+            CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8),
+            ST->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(MCS51::STOREIDATA_GLOBAL8_IMM,
+                                             DL, MVT::Other, Ops);
+        CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res),
+                               {ST->getMemOperand()});
+        ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+        CurDAG->RemoveDeadNode(N);
+        return true;
+      }
+    }
+    if (Addr.getOpcode() == ISD::TargetGlobalAddress ||
+        Addr.getOpcode() == ISD::TargetConstant) {
       SDValue Ops[] = {Addr, ST->getValue(), ST->getChain()};
       SDNode *Res = CurDAG->getMachineNode(MCS51::STOREIDATA_GLOBAL8, DL,
                                            MVT::Other, Ops);
