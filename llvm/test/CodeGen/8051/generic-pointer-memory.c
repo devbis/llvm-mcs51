@@ -10,6 +10,12 @@ typedef __generic volatile unsigned long long *generic_quad_ptr;
 typedef __generic volatile float *generic_float_ptr;
 typedef __generic const volatile unsigned char *generic_const_byte_ptr;
 
+typedef struct {
+  unsigned char Byte;
+  unsigned short Word;
+} GenericAggregate;
+typedef __generic GenericAggregate *generic_aggregate_ptr;
+
 __code volatile const unsigned char code_byte = 0x81;
 __xdata volatile const unsigned char xdata_byte = 0x42;
 __pdata volatile const unsigned char pdata_byte = 0x24;
@@ -21,6 +27,18 @@ __idata volatile unsigned char idata_target;
 unsigned char load_generic_byte(generic_byte_ptr Pointer) { return *Pointer; }
 
 void store_generic_byte(generic_byte_ptr Pointer, unsigned char Value) {
+  *Pointer = Value;
+}
+
+__attribute__((noinline)) GenericAggregate
+load_generic_aggregate(generic_aggregate_ptr Pointer) {
+  return *Pointer;
+}
+
+__attribute__((noinline)) void
+store_generic_aggregate(generic_aggregate_ptr Pointer, unsigned char Byte,
+                        unsigned short Word) {
+  GenericAggregate Value = {Byte, Word};
   *Pointer = Value;
 }
 
@@ -138,6 +156,12 @@ int main(void) {
 // ASM: lcall __mcs51_gptrget8
 // ASM-LABEL: store_generic_byte:
 // ASM: lcall __mcs51_gptrput8
+// ASM-LABEL: load_generic_aggregate:
+// ASM: lcall __mcs51_gptrget32
+// ASM-LABEL: store_generic_aggregate:
+// ASM: lcall __mcs51_gptrput8
+// ASM: lcall __mcs51_gptrput8
+// ASM: lcall __mcs51_gptrput16
 // ASM-LABEL: load_generic_word:
 // ASM: lcall __mcs51_gptrget16
 // ASM-LABEL: store_generic_word:
