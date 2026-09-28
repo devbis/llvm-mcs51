@@ -1,5 +1,7 @@
 // RUN: clang -target mcs51 -O2 -S %s -o - | FileCheck %s --check-prefix=ASM
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 %s -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -fno-function-sections \
+// RUN:   -fno-data-sections -O2 %s -o %t.flat.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=DIS
 

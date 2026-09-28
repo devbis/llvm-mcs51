@@ -155,8 +155,7 @@ public:
       emitIndirectCallThunk();
     }
 
-    if (TM.getTargetCPU().equals_insensitive("cc2530") &&
-        TM.Options.FunctionSections)
+    if (TM.getTargetCPU().equals_insensitive("cc2530"))
       emitExternalBankCallThunks();
 
     if (!Bank && !AutoBank)
@@ -232,8 +231,7 @@ public:
     }
 
     if (MI->getOpcode() == MCS51::LCALL &&
-        TM.getTargetCPU().equals_insensitive("cc2530") &&
-        TM.Options.FunctionSections) {
+        TM.getTargetCPU().equals_insensitive("cc2530")) {
       for (const MachineOperand &MO : MI->operands())
         if (MO.isSymbol()) {
           StringRef TargetName = MO.getSymbolName();
@@ -258,6 +256,8 @@ public:
             EmitToStreamer(*OutStreamer, Call);
             return;
           }
+          if (Target && !Target->isDeclaration())
+            break;
           MCInst Call;
           Call.setOpcode(MCS51::LCALL);
           Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
@@ -299,6 +299,9 @@ public:
                (MI->getOpcode() != MCS51::LCALL || TargetBank != CallerBank)) ||
               TargetAutoBank)
             Symbol = getBankThunkSymbol(*Target);
+          else if (Target->isDeclaration() &&
+                   TM.getTargetCPU().equals_insensitive("cc2530"))
+            Symbol = getExternalBankCallThunkSymbol(Target->getName());
         }
         const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, OutContext);
         if (MO.getOffset())
