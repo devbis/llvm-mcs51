@@ -1549,9 +1549,10 @@ def SPILL_STORE_A8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  // The expansion saves and restores A, so A is live through this pseudo.
-  let Defs = [R1, SP];
-  let Uses = [R1, SP];
+  // The expansion saves and restores A and PSW while forming the spill
+  // address, so they remain live through the pseudo as well.
+  let Defs = [A, PSW, R1, SP];
+  let Uses = [A, PSW, R1, SP];
 }
 
 // Frame-address and frame-memory pseudos also calculate SP + offset with ADD.
@@ -2485,7 +2486,7 @@ def UREM8rr : MCS51DivModPseudo<urem>;
 
 class MCS51ShiftPseudo<SDNode node> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51AReg:$dst);
+  let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51GPR8:$lhs, MCS51ShiftAmount:$amount);
   let AsmString = "";
   let Size = 0;
@@ -2493,7 +2494,7 @@ class MCS51ShiftPseudo<SDNode node> : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst,
+  let Pattern = [(set MCS51GPR8:$dst,
                       (node MCS51GPR8:$lhs, MCS51ShiftAmount:$amount))];
 }
 
@@ -2501,7 +2502,7 @@ def SHL8ri : MCS51ShiftPseudo<shl>;
 def SRL8ri : MCS51ShiftPseudo<srl>;
 def SRA8ri : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51AReg:$dst);
+  let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51GPR8:$lhs, MCS51ShiftAmount:$amount);
   let AsmString = "";
   let Size = 0;
@@ -2509,7 +2510,7 @@ def SRA8ri : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst,
+  let Pattern = [(set MCS51GPR8:$dst,
                       (MCS51sra8_imm MCS51GPR8:$lhs,
                                      MCS51ShiftAmount:$amount))];
 }

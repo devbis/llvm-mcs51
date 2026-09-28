@@ -42,7 +42,7 @@ public:
     // AS0 is a near 16-bit pointer. The explicitly qualified memory spaces
     // use the native width of their 8051 address bus.
     resetDataLayout("e-p:16:8-p1:8:8-p2:8:8-p3:8:8-p4:16:8-p5:16:8-"
-                    "p6:8:8-p7:8:8-p8:32:8-i1:8-i8:8-i16:8-i32:8-i64:8-"
+                    "p6:8:8-p7:8:8-p8:32:8-A2-i1:8-i8:8-i16:8-i32:8-i64:8-"
                     "f32:8-f64:8-n8:16");
   }
 

@@ -54,7 +54,7 @@ entry:
 ; CHECK: rlc a
 ; CHECK-LABEL: unsigned_char_equal:
 ; CHECK: xrl a,
-; CHECK: jz
+; CHECK: jnz
 ; CHECK: mov a, #1
 ; CHECK: mov a, #0
 ; CHECK-LABEL: unsigned_char_greater_from_stack:
