@@ -130,11 +130,12 @@ common flash and cannot be called directly.
 
 Trivial aggregate arguments and return values of up to 8 bytes are coerced to
 integer packets of 8, 16, 32, or 64 bits and use the scalar register/stack ABI.
-Larger struct arguments without bit-fields are expanded into scalar fields and
-use the same ABI. Larger aggregate returns use the indirect ABI with their
-result object in IDATA; small fixed-size copies preserve CODE and IDATA address
-spaces when lowered inline. Unions and non-trivial C++ records still need
-additional ABI coverage before they can be considered supported.
+Larger struct arguments without bit-fields and larger unions without bit-fields
+are expanded into scalar fields and use the same ABI. Larger aggregate returns
+use the indirect ABI with their result object in IDATA; small fixed-size copies
+preserve CODE and IDATA address spaces when lowered inline. Large aggregates
+with bit-fields and non-trivial C++ records still need additional ABI coverage
+before they can be considered supported.
 
 ## Final target and completion criteria
 
