@@ -1,4 +1,7 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib -S %s -o - | FileCheck %s
+// RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld -Wl,--no-check-sections %S/../../../lib/Target/MCS51/cc2530_startup.s %s -o %t.elf
+// RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=LINK
+// RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINKSYM
 
 __xdata volatile unsigned char a;
 __xdata volatile unsigned char b;
@@ -39,3 +42,11 @@ void main(void) {
 // CHECK: mov dptr, #result
 // CHECK-NEXT: movx @dptr, a
 // CHECK-NEXT: ret
+
+// Linking knows the final XDATA layout. Adjacent global addresses reuse DPTR
+// with INC DPTR, including across volatile accesses.
+// LINK-LABEL: <main>:
+// LINK-COUNT-3: inc dptr
+// LINK-NOT: mov dptr, #1
+// LINKSYM: Name: main
+// LINKSYM: Size: 39

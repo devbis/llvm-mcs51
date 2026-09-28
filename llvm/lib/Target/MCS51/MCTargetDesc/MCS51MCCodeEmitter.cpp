@@ -82,8 +82,11 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
       return static_cast<uint16_t>((Absolute << 8) | (Absolute >> 8));
     }
     if (Op.isExpr()) {
+      unsigned Kind = MI.getOpcode() == MCS51::MOV_DPTR_IMM
+                          ? MCS51::fixup_dptr16
+                          : MCS51::fixup_16_be;
       Fixups.push_back(
-          MCFixup::create(1, Op.getExpr(), MCS51::fixup_16_be));
+          MCFixup::create(1, Op.getExpr(), Kind));
       return 0;
     }
     report_fatal_error("unsupported MCS-51 big-endian address operand");

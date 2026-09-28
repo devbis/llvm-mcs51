@@ -31,6 +31,8 @@ protected:
       return ELF::R_8051_16;
     case MCS51::fixup_16_be:
       return ELF::R_8051_16_BE;
+    case MCS51::fixup_dptr16:
+      return ELF::R_8051_DPTR16;
     default:
       llvm_unreachable("unsupported MCS-51 relocation");
     }
