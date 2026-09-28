@@ -1,6 +1,7 @@
 #include "MCS51TargetMachine.h"
 #include "MCS51.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Compiler.h"
@@ -79,19 +80,44 @@ static bool getFrameAddress(SDValue Ptr, int &FI, int64_t &Offset) {
   return Offset >= -128 && Offset <= 255;
 }
 
-static bool getIndexedFrameAddress(SDValue Ptr, int &FI, SDValue &Index) {
-  if (Ptr.getOpcode() != ISD::ADD)
-    return false;
-  SDValue Base = Ptr.getOperand(0);
-  Index = Ptr.getOperand(1);
-  if (Base.getOpcode() != ISD::FrameIndex) {
-    std::swap(Base, Index);
-    if (Base.getOpcode() != ISD::FrameIndex)
+static bool collectFrameAddress(SDValue Ptr, int &FI, bool &HasFI,
+                                int64_t &Offset,
+                                SmallVectorImpl<SDValue> &Indices) {
+  if (Ptr.getOpcode() == ISD::FrameIndex) {
+    if (HasFI)
       return false;
+    FI = cast<FrameIndexSDNode>(Ptr)->getIndex();
+    HasFI = true;
+    return true;
   }
-  if (isa<ConstantSDNode>(Index))
+  if (Ptr.getOpcode() == ISD::ADD) {
+    for (SDValue Operand : Ptr->ops()) {
+      if (auto *C = dyn_cast<ConstantSDNode>(Operand)) {
+        Offset += C->getSExtValue();
+        continue;
+      }
+      if (!collectFrameAddress(Operand, FI, HasFI, Offset, Indices))
+        return false;
+    }
+    return true;
+  }
+  if (isa<ConstantSDNode>(Ptr)) {
+    Offset += cast<ConstantSDNode>(Ptr)->getSExtValue();
+    return true;
+  }
+  Indices.push_back(Ptr);
+  return true;
+}
+
+static bool getIndexedFrameAddress(SDValue Ptr, int &FI, int64_t &Offset,
+                                   SDValue &Index) {
+  bool HasFI = false;
+  SmallVector<SDValue, 4> Indices;
+  Offset = 0;
+  if (!collectFrameAddress(Ptr, FI, HasFI, Offset, Indices) || !HasFI ||
+      Indices.size() != 1 || Offset < -128 || Offset > 255)
     return false;
-  FI = cast<FrameIndexSDNode>(Base)->getIndex();
+  Index = Indices.front();
   return Index.getValueType() == MVT::i16;
 }
 
@@ -115,12 +141,13 @@ public:
       if (SrcAS == MCS51::Default && DstAS == MCS51::IData) {
         int FI;
         SDValue Index;
-        if (getIndexedFrameAddress(Cast->getOperand(0), FI, Index)) {
+        int64_t Offset;
+        if (getIndexedFrameAddress(Cast->getOperand(0), FI, Offset, Index)) {
           if (Index.getValueType() != MVT::i8)
             Index = CurDAG->getNode(ISD::TRUNCATE, DL, MVT::i8, Index);
           SDValue Ops[] = {
               CurDAG->getTargetFrameIndex(FI, MVT::i16),
-              CurDAG->getTargetConstant(0, DL, MVT::i8), Index};
+              CurDAG->getTargetConstant(Offset, DL, MVT::i8), Index};
           SDNode *Res = CurDAG->getMachineNode(MCS51::FRAMEADDR8_INDEX, DL,
                                                N->getVTList(), Ops);
           ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
@@ -128,11 +155,11 @@ public:
           return;
         }
         int FrameFI;
-        int64_t Offset;
-        if (getFrameAddress(Cast->getOperand(0), FrameFI, Offset)) {
+        int64_t FrameOffset;
+        if (getFrameAddress(Cast->getOperand(0), FrameFI, FrameOffset)) {
           SDValue Ops[] = {
               CurDAG->getTargetFrameIndex(FrameFI, MVT::i16),
-              CurDAG->getTargetConstant(Offset, DL, MVT::i8)};
+              CurDAG->getTargetConstant(FrameOffset, DL, MVT::i8)};
           SDNode *Res = CurDAG->getMachineNode(MCS51::FRAMEADDR8, DL,
                                                N->getVTList(), Ops);
           ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
@@ -333,9 +360,9 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     int64_t Offset;
     SDValue Index;
     if (AS == MCS51::Default && LD->getMemoryVT() == MVT::i8 &&
-        getIndexedFrameAddress(LD->getBasePtr(), FI, Index)) {
+        getIndexedFrameAddress(LD->getBasePtr(), FI, Offset, Index)) {
       SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
-                       CurDAG->getTargetConstant(0, DL, MVT::i8), Index,
+                       CurDAG->getTargetConstant(Offset, DL, MVT::i8), Index,
                        LD->getChain()};
       SDNode *Res = CurDAG->getMachineNode(MCS51::LOAD_FRAME8_INDEX, DL,
                                            N->getVTList(), Ops);
@@ -623,9 +650,9 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
   int64_t Offset;
   SDValue Index;
   if (AS == MCS51::Default && ST->getMemoryVT() == MVT::i8 &&
-      getIndexedFrameAddress(ST->getBasePtr(), FI, Index)) {
+      getIndexedFrameAddress(ST->getBasePtr(), FI, Offset, Index)) {
     SDValue Ops[] = {CurDAG->getTargetFrameIndex(FI, MVT::i16),
-                     CurDAG->getTargetConstant(0, DL, MVT::i8), Index,
+                     CurDAG->getTargetConstant(Offset, DL, MVT::i8), Index,
                      ST->getValue(), ST->getChain()};
     SDNode *Res = CurDAG->getMachineNode(MCS51::STORE_FRAME8_INDEX, DL,
                                          MVT::Other, Ops);

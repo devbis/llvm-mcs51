@@ -161,8 +161,11 @@ fields and use the same ABI. Aggregates with bit-fields are passed as packed
 16-bit words plus a final byte when needed, preserving their object
 representation. Larger aggregate returns use the indirect ABI with their result
 object in IDATA; small fixed-size copies preserve CODE and IDATA address spaces
-when lowered inline. Non-trivial C++ records still need additional ABI coverage
-before they can be considered supported.
+when lowered inline. Dynamic `memcpy` operations over byte-addressable spaces
+are expanded into typed byte loops, including generic pointers and stack
+objects. Dynamic `memmove` and bit-addressed copies still need dedicated
+lowering. Non-trivial C++ records still need additional ABI coverage before
+they can be considered supported.
 
 ## Final target and completion criteria
 

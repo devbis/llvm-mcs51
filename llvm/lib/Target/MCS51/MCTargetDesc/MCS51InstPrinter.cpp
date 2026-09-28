@@ -3,6 +3,7 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
 
@@ -15,6 +16,9 @@ void MCS51InstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
 
 void MCS51InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
                                     raw_ostream &OS) {
+  if (OpNo >= MI->getNumOperands()) {
+    report_fatal_error("invalid MCS-51 asm operand index");
+  }
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg())
     printRegName(OS, Op.getReg());
