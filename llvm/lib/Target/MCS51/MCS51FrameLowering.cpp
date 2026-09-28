@@ -2,10 +2,12 @@
 #include "MCS51InstrInfo.h"
 #include "MCS51RegisterInfo.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
+#include <algorithm>
 
 using namespace llvm;
 
@@ -60,6 +62,95 @@ static void emitStackAdjustment(MachineBasicBlock &MBB,
   }
 }
 
+static SmallVector<unsigned, 13>
+getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
+  // An interrupt may arrive with arbitrary values in the register bank, so
+  // save every architectural register that the handler actually clobbers.
+  // Calls carry their complete clobber list and therefore remain conservative.
+  bool SavePSW = false, SaveA = false, SaveB = false;
+  bool SaveDPL = false, SaveDPH = false;
+  bool SaveR[8] = {};
+  auto Mark = [&](MCRegister Reg) {
+    switch (Reg) {
+    case MCS51::PSW: SavePSW = true; break;
+    case MCS51::C: SavePSW = true; break;
+    case MCS51::A: SaveA = true; break;
+    case MCS51::B: SaveB = true; break;
+    case MCS51::DPTR: SaveDPL = SaveDPH = true; break;
+    case MCS51::DPL: SaveDPL = true; break;
+    case MCS51::DPH: SaveDPH = true; break;
+    case MCS51::R0: SaveR[0] = true; break;
+    case MCS51::R1: SaveR[1] = true; break;
+    case MCS51::R2: SaveR[2] = true; break;
+    case MCS51::R3: SaveR[3] = true; break;
+    case MCS51::R4: SaveR[4] = true; break;
+    case MCS51::R5: SaveR[5] = true; break;
+    case MCS51::R6: SaveR[6] = true; break;
+    case MCS51::R7: SaveR[7] = true; break;
+    default: break;
+    }
+  };
+  auto MarkDirectWrite = [&](unsigned Address) {
+    switch (Address) {
+    case 0xd0:
+      // A direct PSW write can also change the active register bank.
+      SavePSW = true;
+      for (bool &Save : SaveR)
+        Save = true;
+      break;
+    case 0xe0: Mark(MCS51::A); break;
+    case 0xf0: Mark(MCS51::B); break;
+    case 0x82: Mark(MCS51::DPL); break;
+    case 0x83: Mark(MCS51::DPH); break;
+    default:
+      if (Address < 8)
+        SaveR[Address] = true;
+      break;
+    }
+  };
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB) {
+      for (const MachineOperand &MO : MI.operands())
+        if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
+          Mark(MO.getReg());
+      if (MI.getFlag(MachineInstr::FrameSetup) ||
+          MI.getFlag(MachineInstr::FrameDestroy) || MI.getNumOperands() == 0 ||
+          !MI.getOperand(0).isImm())
+        continue;
+      switch (MI.getOpcode()) {
+      case MCS51::MOV_DIRECT_A:
+      case MCS51::ANL_DIRECT_A:
+      case MCS51::ORL_DIRECT_A:
+      case MCS51::XRL_DIRECT_A:
+      case MCS51::MOV_DIRECT_IMM:
+      case MCS51::ANL_DIRECT_IMM:
+      case MCS51::ORL_DIRECT_IMM:
+      case MCS51::XRL_DIRECT_IMM:
+      case MCS51::MOV_DIRECT_DIRECT:
+      case MCS51::MOV_DIRECT_RN:
+      case MCS51::INC_DIRECT:
+      case MCS51::DEC_DIRECT:
+      case MCS51::POP_DIRECT:
+        MarkDirectWrite(MI.getOperand(0).getImm());
+        break;
+      default:
+        break;
+      }
+    }
+
+  SmallVector<unsigned, 13> Addresses;
+  if (SavePSW) Addresses.push_back(0xd0);
+  if (SaveA) Addresses.push_back(0xe0);
+  if (SaveB) Addresses.push_back(0xf0);
+  if (SaveDPL) Addresses.push_back(0x82);
+  if (SaveDPH) Addresses.push_back(0x83);
+  for (unsigned I = 0; I != 8; ++I)
+    if (SaveR[I]) Addresses.push_back(I);
+  if (Reverse)
+    std::reverse(Addresses.begin(), Addresses.end());
+  return Addresses;
+}
+
 void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
@@ -70,12 +161,9 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
          (I->isDebugInstr() || I->getFlag(MachineInstr::FrameSetup)))
     ++I;
   if (IsInterrupt) {
-    // The interrupted code may have live values in any 8051 register. Save
-    // bank 0 plus the accumulator, B, DPTR and PSW before using them in the
-    // handler. The 8051 hardware already saved the return PC.
-    for (unsigned Address : {0xd0, 0xe0, 0xf0, 0x82, 0x83,
-                             0x00, 0x01, 0x02, 0x03,
-                             0x04, 0x05, 0x06, 0x07})
+    // The 8051 hardware already saved the return PC. Preserve the subset of
+    // registers the allocated handler can change.
+    for (unsigned Address : getInterruptSaveAddresses(MF, false))
       BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
           .addImm(Address)
           .addReg(MCS51::SP, RegState::ImplicitDefine)
@@ -91,9 +179,7 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   auto I = MBB.getFirstTerminator();
   emitStackAdjustment(MBB, I, TII, StackSize, /*Deallocate=*/true);
   if (MF.getFunction().hasFnAttribute("interrupt")) {
-    for (unsigned Address : {0x07, 0x06, 0x05, 0x04,
-                             0x03, 0x02, 0x01, 0x00,
-                             0x83, 0x82, 0xf0, 0xe0, 0xd0})
+    for (unsigned Address : getInterruptSaveAddresses(MF, true))
       BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
           .addImm(Address)
           .addReg(MCS51::SP, RegState::ImplicitDefine)
