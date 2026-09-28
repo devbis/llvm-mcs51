@@ -45,9 +45,25 @@ __attribute__((noinline)) unsigned char call_sum_expanded(void) {
   return sum_expanded(Input);
 }
 
+typedef struct {
+  unsigned char Bytes[9];
+} LargeReturn;
+
+__attribute__((noinline)) LargeReturn return_large(void) {
+  LargeReturn Result = {{1, 2, 3, 4, 5, 6, 7, 8, 9}};
+  return Result;
+}
+
+__attribute__((noinline)) unsigned char call_return_large(void) {
+  LargeReturn Result = return_large();
+  return Result.Bytes[0] + Result.Bytes[8];
+}
+
 int main(unsigned char Choice) {
   if (Choice == 2)
     return call_sum_expanded();
+  if (Choice == 3)
+    return call_return_large();
   if (Choice)
     return call_identity();
   return call_copy_large();
@@ -65,7 +81,14 @@ int main(unsigned char Choice) {
 // CHECK: ret
 // CHECK-LABEL: call_sum_expanded:
 // CHECK: lcall sum_expanded
+// CHECK-LABEL: return_large:
+// CHECK: movc a, @a+dptr
+// CHECK: mov @r{{[01]}}, a
+// CHECK: ret
+// CHECK-LABEL: call_return_large:
+// CHECK: lcall return_large
 
 // LINK-DAG: Name: identity
 // LINK-DAG: Name: copy_large
 // LINK-DAG: Name: sum_expanded
+// LINK-DAG: Name: return_large
