@@ -35,12 +35,22 @@ public:
   bool runOnFunction(Function &F) override {
     bool Changed = false;
     SmallVector<MemCpyInst *, 4> DynamicCopies;
-    for (Instruction &I : instructions(F))
-      if (auto *Copy = dyn_cast<MemCpyInst>(&I))
+    SmallVector<MemMoveInst *, 4> DynamicMoves;
+    for (Instruction &I : instructions(F)) {
+      if (auto *Copy = dyn_cast<MemCpyInst>(&I)) {
         if (!isa<ConstantInt>(Copy->getLength()))
           DynamicCopies.push_back(Copy);
+      } else if (auto *Move = dyn_cast<MemMoveInst>(&I)) {
+        if (!isa<ConstantInt>(Move->getLength()))
+          DynamicMoves.push_back(Move);
+      }
+    }
     for (MemCpyInst *Copy : DynamicCopies) {
       lowerDynamicAddressSpaceCopy(*Copy);
+      Changed = true;
+    }
+    for (MemMoveInst *Move : DynamicMoves) {
+      lowerDynamicAddressSpaceMove(*Move);
       Changed = true;
     }
 
@@ -339,6 +349,250 @@ private:
     Index->addIncoming(Next, Body);
 
     Copy.eraseFromParent();
+  }
+
+  static void lowerDynamicAddressSpaceMove(MemMoveInst &Move) {
+    Function &F = *Move.getFunction();
+    LLVMContext &C = F.getContext();
+    const DataLayout &DL = F.getParent()->getDataLayout();
+    Type *I8Ty = Type::getInt8Ty(C);
+    Type *I16Ty = Type::getInt16Ty(C);
+    Type *I32Ty = Type::getInt32Ty(C);
+    Value *Dst = getMemIntrinsicMemoryPointer(Move.getRawDest());
+    Value *Src = getMemIntrinsicMemoryPointer(Move.getRawSource());
+    unsigned DstAS = cast<PointerType>(Dst->getType())->getAddressSpace();
+    unsigned SrcAS = cast<PointerType>(Src->getType())->getAddressSpace();
+    bool DstIsStack = DstAS == MCS51::Default && pointsToStackObject(Dst);
+    bool SrcIsStack = SrcAS == MCS51::Default && pointsToStackObject(Src);
+    APInt DstOffset(DL.getIndexTypeSizeInBits(Dst->getType()), 0);
+    APInt SrcOffset(DL.getIndexTypeSizeInBits(Src->getType()), 0);
+    Value *DstStackObject = nullptr;
+    Value *SrcStackObject = nullptr;
+    if (DstIsStack)
+      DstStackObject = Dst =
+          Dst->stripAndAccumulateConstantOffsets(DL, DstOffset, true);
+    if (SrcIsStack)
+      SrcStackObject = Src =
+          Src->stripAndAccumulateConstantOffsets(DL, SrcOffset, true);
+    if (DstAS == MCS51::Code)
+      report_fatal_error("cannot move bytes into MCS-51 code memory");
+    if (DstAS == MCS51::Bit || SrcAS == MCS51::Bit)
+      report_fatal_error("byte move through MCS-51 bit pointers is unsupported");
+
+    BasicBlock *Preheader = Move.getParent();
+    BasicBlock *Continue =
+        Preheader->splitBasicBlock(Move.getIterator(), "mcs51.memmove.cont");
+    Preheader->getTerminator()->eraseFromParent();
+    BasicBlock *Direction =
+        BasicBlock::Create(C, "mcs51.memmove.direction", &F, Continue);
+    BasicBlock *ForwardLoop =
+        BasicBlock::Create(C, "mcs51.memmove.forward", &F, Continue);
+    BasicBlock *ForwardBody =
+        BasicBlock::Create(C, "mcs51.memmove.forward.body", &F, Continue);
+    BasicBlock *BackwardSetup =
+        BasicBlock::Create(C, "mcs51.memmove.backward.setup", &F, Continue);
+    BasicBlock *BackwardInit =
+        BasicBlock::Create(C, "mcs51.memmove.backward.init", &F, Continue);
+    BasicBlock *BackwardLoop =
+        BasicBlock::Create(C, "mcs51.memmove.backward", &F, Continue);
+    BasicBlock *BackwardBody =
+        BasicBlock::Create(C, "mcs51.memmove.backward.body", &F, Continue);
+
+    IRBuilder<> Entry(Preheader);
+    Entry.SetCurrentDebugLocation(Move.getDebugLoc());
+    Entry.CreateBr(Direction);
+
+    IRBuilder<> DirectionBuilder(Direction);
+    DirectionBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    Value *OverlapAfterSource = ConstantInt::getFalse(C);
+    if (DstIsStack && SrcIsStack) {
+      if (DstStackObject == SrcStackObject && DstOffset.sgt(SrcOffset)) {
+        APInt Distance = DstOffset - SrcOffset;
+        OverlapAfterSource = DirectionBuilder.CreateICmpUGT(
+            Move.getLength(),
+            ConstantInt::get(Move.getLength()->getType(),
+                             Distance.getZExtValue()),
+            "mcs51.memmove.stack.overlap");
+      }
+    } else {
+      auto PhysicalAddressSpace = [](unsigned AS) -> unsigned {
+        return AS == MCS51::Default ? MCS51::XData : AS;
+      };
+      unsigned DstPhysicalAS =
+          DstIsStack ? MCS51::IData : PhysicalAddressSpace(DstAS);
+      unsigned SrcPhysicalAS =
+          SrcIsStack ? MCS51::IData : PhysicalAddressSpace(SrcAS);
+      bool SameInternalRAM =
+          (DstPhysicalAS == MCS51::Data && SrcPhysicalAS == MCS51::IData) ||
+          (DstPhysicalAS == MCS51::IData && SrcPhysicalAS == MCS51::Data);
+      bool HasGeneric = DstAS == MCS51::Generic || SrcAS == MCS51::Generic;
+      bool Comparable = HasGeneric
+                            ? (DstAS == MCS51::Generic &&
+                               SrcAS == MCS51::Generic) ||
+                                  (DstAS == MCS51::Generic &&
+                                   isGenericTagSupported(SrcAS)) ||
+                                  (SrcAS == MCS51::Generic &&
+                                   isGenericTagSupported(DstAS))
+                            : DstPhysicalAS == SrcPhysicalAS || SameInternalRAM;
+      if (Comparable) {
+        auto AddressAsI16 = [&](Value *Pointer, bool IsStack,
+                                const APInt &Offset) -> Value * {
+          if (IsStack) {
+            Pointer = DirectionBuilder.CreateAddrSpaceCast(
+                Pointer, PointerType::get(C, MCS51::IData),
+                "mcs51.memmove.stack.base");
+            if (!Offset.isZero())
+              Pointer = DirectionBuilder.CreateGEP(
+                  I8Ty, Pointer,
+                  ConstantInt::get(
+                      I8Ty, static_cast<uint8_t>(Offset.getSExtValue())),
+                  "mcs51.memmove.stack.address");
+          }
+          unsigned AS = cast<PointerType>(Pointer->getType())->getAddressSpace();
+          unsigned Width = DL.getPointerSizeInBits(AS);
+          Type *IntTy = IntegerType::get(C, Width);
+          Value *Bits = DirectionBuilder.CreatePtrToInt(Pointer, IntTy);
+          return DirectionBuilder.CreateZExtOrTrunc(Bits, I16Ty);
+        };
+        Value *DstAddress = AddressAsI16(Dst, DstIsStack, DstOffset);
+        Value *SrcAddress = AddressAsI16(Src, SrcIsStack, SrcOffset);
+        Value *DstAfterSrc = DirectionBuilder.CreateICmpUGT(
+            DstAddress, SrcAddress, "mcs51.memmove.dst.after.src");
+        Value *Distance = DirectionBuilder.CreateSub(
+            DstAddress, SrcAddress, "mcs51.memmove.distance");
+        Value *InRange = DirectionBuilder.CreateICmpULT(
+            Distance, Move.getLength(), "mcs51.memmove.in.range");
+        OverlapAfterSource = DirectionBuilder.CreateAnd(
+            DstAfterSrc, InRange, "mcs51.memmove.overlap");
+        if (HasGeneric) {
+          auto GetTag = [&](Value *Pointer, unsigned AS) -> Value * {
+            if (AS != MCS51::Generic)
+              return DirectionBuilder.getInt8(getGenericTag(AS, Pointer));
+            Value *Bits = DirectionBuilder.CreatePtrToInt(Pointer, I32Ty);
+            Value *Tag = DirectionBuilder.CreateLShr(
+                Bits, DirectionBuilder.getInt32(16));
+            return DirectionBuilder.CreateTrunc(Tag, I8Ty);
+          };
+          Value *SameTag = DirectionBuilder.CreateICmpEQ(
+              GetTag(Dst, DstAS), GetTag(Src, SrcAS),
+              "mcs51.memmove.same.tag");
+          OverlapAfterSource = DirectionBuilder.CreateAnd(
+              OverlapAfterSource, SameTag, "mcs51.memmove.same.space");
+        }
+      }
+    }
+    DirectionBuilder.CreateCondBr(OverlapAfterSource, BackwardSetup,
+                                  ForwardLoop);
+
+    Type *LengthTy = Move.getLength()->getType();
+    auto CopyByteAt = [&](IRBuilder<> &Builder, Value *Index,
+                          const Twine &Suffix) {
+      auto MakeIndex = [&](bool IsStack, const APInt &Offset,
+                           const Twine &Name) -> Value * {
+        Value *Result = IsStack
+                            ? Builder.CreateIntCast(Index, I8Ty, false,
+                                                    Name + ".index8")
+                            : Index;
+        if (IsStack && !Offset.isZero())
+          Result = Builder.CreateAdd(
+              Result,
+              ConstantInt::get(I8Ty,
+                               static_cast<uint8_t>(Offset.getSExtValue())),
+              Name + ".offset");
+        else if (!IsStack && !Offset.isZero())
+          Result = Builder.CreateAdd(
+              Result, ConstantInt::get(LengthTy, Offset.getSExtValue()),
+              Name + ".offset");
+        return Result;
+      };
+      Value *SourceIndex = MakeIndex(SrcIsStack, SrcOffset,
+                                     Twine("mcs51.memmove.src") + Suffix);
+      Value *DestinationIndex = MakeIndex(
+          DstIsStack, DstOffset, Twine("mcs51.memmove.dst") + Suffix);
+      Value *SourceBase = Src;
+      Value *DestinationBase = Dst;
+      if (SrcIsStack)
+        SourceBase = Builder.CreateAddrSpaceCast(
+            SourceBase, PointerType::get(C, MCS51::IData),
+            "mcs51.memmove.src.idata.base");
+      if (DstIsStack)
+        DestinationBase = Builder.CreateAddrSpaceCast(
+            DestinationBase, PointerType::get(C, MCS51::IData),
+            "mcs51.memmove.dst.idata.base");
+      Value *SourceAddress =
+          Builder.CreateGEP(I8Ty, SourceBase, SourceIndex,
+                            "mcs51.memmove.src.ptr");
+      Value *DestinationAddress = Builder.CreateGEP(
+          I8Ty, DestinationBase, DestinationIndex,
+          "mcs51.memmove.dst.ptr");
+      if (SrcAS == MCS51::Data) {
+        Value *Bits = Builder.CreatePtrToInt(SourceAddress, I8Ty);
+        SourceAddress = Builder.CreateIntToPtr(
+            Bits, PointerType::get(C, MCS51::IData));
+      }
+      if (DstAS == MCS51::Data) {
+        Value *Bits = Builder.CreatePtrToInt(DestinationAddress, I8Ty);
+        DestinationAddress = Builder.CreateIntToPtr(
+            Bits, PointerType::get(C, MCS51::IData));
+      }
+      LoadInst *Byte = Builder.CreateLoad(I8Ty, SourceAddress);
+      Byte->setVolatile(Move.isVolatile());
+      StoreInst *Store = Builder.CreateStore(Byte, DestinationAddress);
+      Store->setVolatile(Move.isVolatile());
+    };
+
+    IRBuilder<> ForwardBuilder(ForwardLoop);
+    ForwardBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    PHINode *ForwardIndex =
+        ForwardBuilder.CreatePHI(LengthTy, 2, "mcs51.memmove.index");
+    ForwardIndex->addIncoming(ConstantInt::get(LengthTy, 0), Direction);
+    Value *ForwardMore = ForwardBuilder.CreateICmpULT(
+        ForwardIndex, Move.getLength(), "mcs51.memmove.forward.more");
+    ForwardBuilder.CreateCondBr(ForwardMore, ForwardBody, Continue);
+
+    IRBuilder<> ForwardBodyBuilder(ForwardBody);
+    ForwardBodyBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    CopyByteAt(ForwardBodyBuilder, ForwardIndex, ".forward");
+    Value *NextForward = ForwardBodyBuilder.CreateAdd(
+        ForwardIndex, ConstantInt::get(LengthTy, 1),
+        "mcs51.memmove.next.forward");
+    ForwardBodyBuilder.CreateBr(ForwardLoop);
+    ForwardIndex->addIncoming(NextForward, ForwardBody);
+
+    IRBuilder<> BackwardSetupBuilder(BackwardSetup);
+    BackwardSetupBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    Value *HasBytes = BackwardSetupBuilder.CreateICmpNE(
+        Move.getLength(), ConstantInt::get(LengthTy, 0),
+        "mcs51.memmove.backward.has.bytes");
+    BackwardSetupBuilder.CreateCondBr(HasBytes, BackwardInit, Continue);
+
+    IRBuilder<> BackwardInitBuilder(BackwardInit);
+    BackwardInitBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    Value *LastIndex = BackwardInitBuilder.CreateSub(
+        Move.getLength(), ConstantInt::get(LengthTy, 1),
+        "mcs51.memmove.last.index");
+    BackwardInitBuilder.CreateBr(BackwardLoop);
+
+    IRBuilder<> BackwardBuilder(BackwardLoop);
+    BackwardBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    PHINode *BackwardIndex =
+        BackwardBuilder.CreatePHI(LengthTy, 2, "mcs51.memmove.index");
+    BackwardIndex->addIncoming(LastIndex, BackwardInit);
+    BackwardBuilder.CreateBr(BackwardBody);
+
+    IRBuilder<> BackwardBodyBuilder(BackwardBody);
+    BackwardBodyBuilder.SetCurrentDebugLocation(Move.getDebugLoc());
+    CopyByteAt(BackwardBodyBuilder, BackwardIndex, ".backward");
+    Value *AtFirst = BackwardBodyBuilder.CreateICmpEQ(
+        BackwardIndex, ConstantInt::get(LengthTy, 0),
+        "mcs51.memmove.backward.done");
+    Value *NextBackward = BackwardBodyBuilder.CreateSub(
+        BackwardIndex, ConstantInt::get(LengthTy, 1),
+        "mcs51.memmove.next.backward");
+    BackwardBodyBuilder.CreateCondBr(AtFirst, Continue, BackwardLoop);
+    BackwardIndex->addIncoming(NextBackward, BackwardBody);
+
+    Move.eraseFromParent();
   }
 
   static bool hasMergedPointerProvenance(Value *Pointer) {
