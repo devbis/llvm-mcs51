@@ -18,6 +18,7 @@ enum Fixups {
   fixup_8 = FirstTargetFixupKind,
   fixup_16,
   fixup_16_be,
+  fixup_dptr16,
   fixup_pcrel8,
   fixup_11,
   NumTargetFixupKinds

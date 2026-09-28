@@ -5,6 +5,7 @@
         .text
         .globl entry
 entry:
+        mov     dptr, #xdata_symbol
         mov     a, #byte_symbol
         ljmp    code_symbol
         lcall   code_symbol
@@ -19,7 +20,9 @@ local_branch:
         .globl byte_symbol
         .globl code_symbol
         .globl branch_symbol
+        .globl xdata_symbol
 
+# ENC: mov dptr, #xdata_symbol{{.*}}encoding: {{\[}}0x90,A,A{{\]}}
 # ENC: mov a, #byte_symbol{{.*}}encoding: {{\[}}0x74,A{{\]}}
 # ENC: ljmp code_symbol{{.*}}encoding: {{\[}}0x02,A,A{{\]}}
 # ENC: lcall code_symbol{{.*}}encoding: {{\[}}0x12,A,A{{\]}}
@@ -27,6 +30,7 @@ local_branch:
 # ENC: jb 32, branch_symbol{{.*}}encoding: {{\[}}0x20,0x20,A{{\]}}
 # ENC: sjmp local_branch{{.*}}encoding: {{\[}}0x80,A{{\]}}
 
+# RELOC: R_8051_DPTR16 xdata_symbol
 # RELOC: R_8051_8 byte_symbol
 # RELOC: R_8051_16_BE code_symbol
 # RELOC: R_8051_16_BE code_symbol
