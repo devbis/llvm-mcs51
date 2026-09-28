@@ -2,10 +2,13 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -S -emit-llvm -O0 %s -o - | FileCheck %s --check-prefix=IR
 
 unsigned int global_counter;
+volatile unsigned char global_flag;
 
 unsigned int read_counter(void) { return global_counter; }
 
 void write_counter(unsigned int value) { global_counter = value; }
+
+void set_global_flag(void) { global_flag = 0x42; }
 
 // IR: @global_counter = {{.*}}addrspace(4) global i16 0
 
@@ -20,3 +23,9 @@ void write_counter(unsigned int value) { global_counter = value; }
 // ASM: inc dptr
 // ASM: movx @dptr, a
 // ASM: ret
+
+// ASM-LABEL: set_global_flag:
+// ASM: mov dptr, #global_flag
+// ASM-NEXT: mov a, #66
+// ASM-NEXT: movx @dptr, a
+// ASM-NEXT: ret
