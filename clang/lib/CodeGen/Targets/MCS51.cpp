@@ -8,6 +8,7 @@
 
 #include "ABIInfoImpl.h"
 #include "TargetInfo.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 
 using namespace clang;
@@ -43,6 +44,28 @@ class MCS51ABIInfo final : public DefaultABIInfo {
     return llvm::IntegerType::get(getVMContext(), Width);
   }
 
+  ABIArgInfo coerceAggregateToWords(QualType Ty) const {
+    // Keep bit-field layout intact by coercing the object representation
+    // instead of trying to expand individual C fields. i16 chunks match the
+    // MCS-51 argument stack ABI; a final odd byte remains an i8 argument.
+    auto *I8Ty = llvm::Type::getInt8Ty(getVMContext());
+    auto *I16Ty = llvm::Type::getInt16Ty(getVMContext());
+    unsigned NumBytes = getContext().getTypeSizeInChars(Ty).getQuantity();
+    llvm::SmallVector<llvm::Type *, 8> Elements;
+    while (NumBytes >= 2) {
+      Elements.push_back(I16Ty);
+      NumBytes -= 2;
+    }
+    if (NumBytes)
+      Elements.push_back(I8Ty);
+    auto *CoerceTy = llvm::StructType::get(getVMContext(), Elements,
+                                           /*isPacked=*/true);
+    llvm::Type *UnpaddedTy = CoerceTy;
+    if (Elements.size() == 1)
+      UnpaddedTy = Elements.front();
+    return ABIArgInfo::getCoerceAndExpand(CoerceTy, UnpaddedTy);
+  }
+
 public:
   explicit MCS51ABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
 
@@ -67,6 +90,7 @@ public:
         return ABIArgInfo::getDirect(CoerceTy);
       if (canExpandAggregate(Ty))
         return ABIArgInfo::getExpand();
+      return coerceAggregateToWords(Ty);
     }
     return DefaultABIInfo::classifyArgumentType(Ty);
   }
