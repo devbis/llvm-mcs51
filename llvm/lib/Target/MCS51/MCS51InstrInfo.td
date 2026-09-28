@@ -2132,6 +2132,35 @@ def ORL_A_DIRECT : MCS51AccDirectInst<0x45, "orl"> {
 def XRL_A_DIRECT : MCS51AccDirectInst<0x65, "xrl"> {
   let Defs = [A]; let Uses = [A];
 }
+
+class MCS51AccIndirectInst<bits<8> opcode, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51Indirect8:$ri);
+  let AsmString = mnemonic # " a, @$ri";
+  let Size = 1;
+  let hasSideEffects = 1;
+  let mayLoad = 1;
+  let Defs = [A];
+  let Uses = [A];
+  bits<1> dst;
+  let dst = 0;
+  bits<1> ri;
+  bits<8> Inst;
+  let Inst{7-1} = opcode{7-1};
+  let Inst{0} = ri;
+}
+
+def ADD_A_IND_RI : MCS51AccIndirectInst<0x26, "add"> {
+  let Defs = [A, C];
+}
+def SUBB_A_IND_RI : MCS51AccIndirectInst<0x96, "subb"> {
+  let Defs = [A, C];
+  let Uses = [A, C];
+}
+def ANL_A_IND_RI : MCS51AccIndirectInst<0x56, "anl">;
+def ORL_A_IND_RI : MCS51AccIndirectInst<0x46, "orl">;
+def XRL_A_IND_RI : MCS51AccIndirectInst<0x66, "xrl">;
 def MOV_DIRECT_A : MCS51DirectAccInst<0xF5, "mov">;
 // Precise implicit register effects for the SFR moves used by wide
 // arithmetic. The generic direct form conservatively clobbers B and DPTR.

@@ -1164,6 +1164,33 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
+  MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+  auto getAccumulatorCopy = [&](Register Reg) -> MachineInstr * {
+    if (!Reg.isVirtual())
+      return nullptr;
+    MachineInstr *Def = MRI.getVRegDef(Reg);
+    if (!Def)
+      return nullptr;
+    if (Def->getOpcode() == TargetOpcode::COPY &&
+        Def->getOperand(1).getReg() == MCS51::A)
+      return Def;
+    if (Def->getOpcode() == MCS51::MOV_RN_A &&
+        Def->getOperand(0).getReg() == Reg)
+      return Def;
+    return nullptr;
+  };
+  auto valueRemainsInAccumulator = [&](Register Reg,
+                                       MachineInstr *&Def) -> bool {
+    if (!Reg.isVirtual() || !MRI.hasOneNonDBGUse(Reg))
+      return false;
+    Def = getAccumulatorCopy(Reg);
+    if (!Def)
+      return false;
+    for (auto I = std::next(Def->getIterator()); I != MII; ++I)
+      if (I->modifiesRegister(MCS51::A, STI.getRegisterInfo()))
+        return false;
+    return true;
+  };
   if (MI.getOpcode() == MCS51::RET_A_IMM) {
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
         .addImm(MI.getOperand(0).getImm());
@@ -1330,8 +1357,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREIDATA_GLOBAL8) {
     MachineMemOperand *MMO = MI.memoperands().front();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
-        .addReg(MI.getOperand(1).getReg());
+    Register Src = MI.getOperand(1).getReg();
+    MachineInstr *Def = nullptr;
+    if (valueRemainsInAccumulator(Src, Def))
+      Def->eraseFromParent();
+    else
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
         .addReg(MCS51::R0, RegState::Define)
         .add(MI.getOperand(0));
@@ -1354,8 +1385,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREPDATA_GLOBAL8) {
     MachineMemOperand *MMO = MI.memoperands().front();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
-        .addReg(MI.getOperand(1).getReg());
+    Register Src = MI.getOperand(1).getReg();
+    MachineInstr *Def = nullptr;
+    if (valueRemainsInAccumulator(Src, Def))
+      Def->eraseFromParent();
+    else
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM))
         .addReg(MCS51::R0, RegState::Define)
         .add(MI.getOperand(0));
@@ -2606,21 +2641,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREDIRECT8) {
     Register Src = MI.getOperand(1).getReg();
-    MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
-    bool SrcAlreadyInA = false;
     MachineInstr *Copy = nullptr;
-    if (Src.isVirtual() && MRI.hasOneNonDBGUse(Src)) {
-      Copy = MRI.getVRegDef(Src);
-      if (Copy && Copy->getOpcode() == TargetOpcode::COPY &&
-          Copy->getOperand(1).getReg() == MCS51::A) {
-        SrcAlreadyInA = true;
-        for (auto I = std::next(Copy->getIterator()); SrcAlreadyInA &&
-                                                     I != MII;
-             ++I)
-          SrcAlreadyInA =
-              !I->modifiesRegister(MCS51::A, STI.getRegisterInfo());
-      }
-    }
+    bool SrcAlreadyInA = valueRemainsInAccumulator(Src, Copy);
     if (SrcAlreadyInA)
       Copy->eraseFromParent();
     else
@@ -3256,11 +3278,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::MUL8ri) {
     Register LHS = MI.getOperand(1).getReg();
     bool LHSAlreadyInA = false;
-    MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
     if (LHS.isVirtual() && MRI.hasOneNonDBGUse(LHS)) {
-      MachineInstr *Copy = MRI.getVRegDef(LHS);
-      if (Copy && Copy->getOpcode() == TargetOpcode::COPY &&
-          Copy->getOperand(1).getReg() == MCS51::A) {
+      MachineInstr *Copy = getAccumulatorCopy(LHS);
+      if (Copy) {
         LHSAlreadyInA = true;
         for (auto I = std::next(Copy->getIterator()); LHSAlreadyInA &&
                                                     I != MII;
@@ -3333,13 +3353,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
 
-  MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
   MachineInstr *LHSCopy = nullptr;
   bool LHSAlreadyInA = false;
   if (LHS.isVirtual()) {
-    LHSCopy = MRI.getVRegDef(LHS);
-    if (LHSCopy && LHSCopy->getOpcode() == TargetOpcode::COPY &&
-        LHSCopy->getOperand(1).getReg() == MCS51::A) {
+    LHSCopy = getAccumulatorCopy(LHS);
+    if (LHSCopy) {
       LHSAlreadyInA = true;
       for (auto I = std::next(LHSCopy->getIterator()); LHSAlreadyInA &&
                                                   I != MII;
@@ -3351,21 +3369,27 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
 
   if (!IsImmediate) {
     unsigned DirectOpcode = 0;
+    unsigned IndirectOpcode = 0;
     switch (MI.getOpcode()) {
     case MCS51::ADD8rr:
       DirectOpcode = MCS51::ADD_A_DIRECT;
+      IndirectOpcode = MCS51::ADD_A_IND_RI;
       break;
     case MCS51::SUB8rr:
       DirectOpcode = MCS51::SUBB_A_DIRECT;
+      IndirectOpcode = MCS51::SUBB_A_IND_RI;
       break;
     case MCS51::AND8rr:
       DirectOpcode = MCS51::ANL_A_DIRECT;
+      IndirectOpcode = MCS51::ANL_A_IND_RI;
       break;
     case MCS51::OR8rr:
       DirectOpcode = MCS51::ORL_A_DIRECT;
+      IndirectOpcode = MCS51::ORL_A_IND_RI;
       break;
     case MCS51::XOR8rr:
       DirectOpcode = MCS51::XRL_A_DIRECT;
+      IndirectOpcode = MCS51::XRL_A_IND_RI;
       break;
     default:
       break;
@@ -3374,22 +3398,31 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register RHS = MI.getOperand(2).getReg();
     if (DirectOpcode && RHS != LHS && RHS.isVirtual() &&
         MRI.hasOneNonDBGUse(RHS)) {
-      MachineInstr *Copy = MRI.getVRegDef(RHS);
-      if (Copy && Copy->getOpcode() == TargetOpcode::COPY &&
-          Copy->getOperand(1).getReg() == MCS51::A) {
+      MachineInstr *Copy = getAccumulatorCopy(RHS);
+      if (Copy) {
         auto LoadIt = Copy->getIterator();
         while (LoadIt != MBB->begin() && std::prev(LoadIt)->isDebugInstr())
           --LoadIt;
         if (LoadIt != MBB->begin()) {
           MachineInstr *Load = &*std::prev(LoadIt);
-          bool CanFold = Load->getOpcode() == MCS51::MOV_A_DIRECT &&
-                         !Load->memoperands_empty();
+          bool IsDirectLoad = Load->getOpcode() == MCS51::MOV_A_DIRECT;
+          bool IsIndirectLoad = Load->getOpcode() == MCS51::MOV_A_IND_RI;
+          bool CanFold =
+              !Load->memoperands_empty() &&
+              ((IsDirectLoad && DirectOpcode) ||
+               (IsIndirectLoad && IndirectOpcode));
+          Register IndirectAddress = IsIndirectLoad
+                                         ? Load->getOperand(0).getReg()
+                                         : Register();
           for (auto I = std::next(Copy->getIterator()); CanFold && I != MII;
                ++I)
             CanFold = !I->mayLoadOrStore() &&
                       !I->hasUnmodeledSideEffects() && !I->isCall() &&
                       !I->isTerminator() &&
-                      !I->readsRegister(MCS51::A, STI.getRegisterInfo());
+                      !I->readsRegister(MCS51::A, STI.getRegisterInfo()) &&
+                      (!IsIndirectLoad ||
+                       !I->modifiesRegister(IndirectAddress,
+                                            STI.getRegisterInfo()));
           if (CanFold) {
             if (LHSCopy && LHSCopy != Copy) {
               LHSAlreadyInA = true;
@@ -3399,15 +3432,25 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                   LHSAlreadyInA =
                       !I->modifiesRegister(MCS51::A, STI.getRegisterInfo());
             }
+            if (LHSAlreadyInA && LHSCopy &&
+                MRI.hasOneNonDBGUse(LHS))
+              LHSCopy->eraseFromParent();
             if (!LHSAlreadyInA)
               BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
             if (IsSubtraction)
               BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-            MachineInstrBuilder Direct =
-                BuildMI(*MBB, MII, DL, TII.get(DirectOpcode), MCS51::A)
-                    .add(Load->getOperand(1));
+            MachineInstrBuilder FoldedOp;
+            if (IsDirectLoad) {
+              FoldedOp =
+                  BuildMI(*MBB, MII, DL, TII.get(DirectOpcode), MCS51::A)
+                      .add(Load->getOperand(1));
+            } else {
+              FoldedOp =
+                  BuildMI(*MBB, MII, DL, TII.get(IndirectOpcode), MCS51::A)
+                      .addReg(IndirectAddress);
+            }
             for (MachineMemOperand *MMO : Load->memoperands())
-              Direct.addMemOperand(MMO);
+              FoldedOp.addMemOperand(MMO);
             BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
                 .addReg(MCS51::A);
             Load->eraseFromParent();
@@ -3420,6 +3463,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     }
   }
 
+  bool RHSIsLHS = !IsImmediate && MI.getOperand(2).getReg() == LHS;
+  if (LHSAlreadyInA && !RHSIsLHS && LHSCopy &&
+      MRI.hasOneNonDBGUse(LHS))
+    LHSCopy->eraseFromParent();
   if (!LHSAlreadyInA)
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
   if (IsSubtraction)
