@@ -31,11 +31,13 @@ add_llvm_target(MCS51CodeGen
   MCS51AsmPrinter.cpp
   MCS51FrameLowering.cpp
   MCS51GenericPointerLowering.cpp
+  MCS51Overlay.cpp
   MCS51InstrInfo.cpp
   MCS51ISelDAGToDAG.cpp
   MCS51ISelLowering.cpp
   MCS51RegisterInfo.cpp
   MCS51SelectionDAGInfo.cpp
+  MCS51StackAddressLowering.cpp
   MCS51Subtarget.cpp
   MCS51TargetMachine.cpp
   mcs51-runtime.c
