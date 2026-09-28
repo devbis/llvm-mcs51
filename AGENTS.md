@@ -208,8 +208,9 @@ convert each incoming pointer separately, preserving its memory-space tag;
 CodeGen tests cover these merged-pointer cases. Other pointer provenance still
 needs runtime validation. Casts involving bit or SFR spaces are unsupported.
 Aggregate loads and stores are split into generic scalar accesses for each LLVM
-struct or array field; padding bytes are left untouched. Atomic accesses and
-scalar field types outside the list above remain unsupported; the lowering
-diagnoses unsupported access types as a fatal backend error. Keep these
-limitations visible until the generic-pointer ABI and behavior are covered
-end-to-end with correctness and code-size tests.
+struct or array field; contiguous byte arrays are coalesced into accesses up to
+64 bits, and padding bytes are left untouched. Atomic accesses and scalar field
+types outside the list above remain unsupported; the lowering diagnoses
+unsupported access types as a fatal backend error. Keep these limitations
+visible until the generic-pointer ABI and behavior are covered end-to-end with
+correctness and code-size tests.

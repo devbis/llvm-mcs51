@@ -25,6 +25,34 @@ entry:
   ret void
 }
 
+define i8 @load_generic_byte_array(ptr addrspace(8) %Pointer) {
+entry:
+  %Value = load [15 x i8], ptr addrspace(8) %Pointer, align 1
+  %Byte = extractvalue [15 x i8] %Value, 0
+  ret i8 %Byte
+}
+
+define void @store_generic_byte_array(ptr addrspace(8) %Pointer) {
+entry:
+  %Value0 = insertvalue [15 x i8] poison, i8 1, 0
+  %Value1 = insertvalue [15 x i8] %Value0, i8 2, 1
+  %Value2 = insertvalue [15 x i8] %Value1, i8 3, 2
+  %Value3 = insertvalue [15 x i8] %Value2, i8 4, 3
+  %Value4 = insertvalue [15 x i8] %Value3, i8 5, 4
+  %Value5 = insertvalue [15 x i8] %Value4, i8 6, 5
+  %Value6 = insertvalue [15 x i8] %Value5, i8 7, 6
+  %Value7 = insertvalue [15 x i8] %Value6, i8 8, 7
+  %Value8 = insertvalue [15 x i8] %Value7, i8 9, 8
+  %Value9 = insertvalue [15 x i8] %Value8, i8 10, 9
+  %Value10 = insertvalue [15 x i8] %Value9, i8 11, 10
+  %Value11 = insertvalue [15 x i8] %Value10, i8 12, 11
+  %Value12 = insertvalue [15 x i8] %Value11, i8 13, 12
+  %Value13 = insertvalue [15 x i8] %Value12, i8 14, 13
+  %Value14 = insertvalue [15 x i8] %Value13, i8 15, 14
+  store [15 x i8] %Value14, ptr addrspace(8) %Pointer, align 1
+  ret void
+}
+
 ; CHECK-LABEL: load_generic_aggregate:
 ; CHECK: lcall __mcs51_gptrget8
 ; CHECK: lcall __mcs51_gptrget16
@@ -39,3 +67,13 @@ entry:
 ; CHECK: lcall __mcs51_gptrput16
 ; CHECK: lcall __mcs51_gptrput16
 ; CHECK: lcall __mcs51_gptrput16
+; CHECK-LABEL: load_generic_byte_array:
+; CHECK: lcall __mcs51_gptrget64
+; CHECK: lcall __mcs51_gptrget32
+; CHECK: lcall __mcs51_gptrget16
+; CHECK: lcall __mcs51_gptrget8
+; CHECK-LABEL: store_generic_byte_array:
+; CHECK: lcall __mcs51_gptrput64
+; CHECK: lcall __mcs51_gptrput32
+; CHECK: lcall __mcs51_gptrput16
+; CHECK: lcall __mcs51_gptrput8
