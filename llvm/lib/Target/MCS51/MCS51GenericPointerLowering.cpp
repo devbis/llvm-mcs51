@@ -285,13 +285,34 @@ private:
     IRBuilder<> BodyBuilder(Body);
     BodyBuilder.SetCurrentDebugLocation(Copy.getDebugLoc());
     Value *SourceIndex = Index;
+    if (SrcIsStack) {
+      // Stack objects live in IDATA, whose address is an 8-bit @Ri pointer.
+      // Keep the GEP index in that width instead of asking instruction
+      // selection to truncate a DPTR value after it has been selected.
+      SourceIndex = BodyBuilder.CreateIntCast(Index, I8Ty, false,
+                                              "mcs51.memcpy.src.index8");
+    }
     if (SrcIsStack && !SrcOffset.isZero()) {
+      Value *Offset = ConstantInt::get(
+          I8Ty, static_cast<uint8_t>(SrcOffset.getSExtValue()));
+      SourceIndex = BodyBuilder.CreateAdd(SourceIndex, Offset,
+                                          "mcs51.memcpy.src.index");
+    } else if (!SrcIsStack && !SrcOffset.isZero()) {
       Value *Offset = ConstantInt::get(LengthTy, SrcOffset.getSExtValue());
       SourceIndex = BodyBuilder.CreateAdd(Index, Offset,
                                           "mcs51.memcpy.src.index");
     }
     Value *DestinationIndex = Index;
+    if (DstIsStack) {
+      DestinationIndex = BodyBuilder.CreateIntCast(
+          Index, I8Ty, false, "mcs51.memcpy.dst.index8");
+    }
     if (DstIsStack && !DstOffset.isZero()) {
+      Value *Offset = ConstantInt::get(
+          I8Ty, static_cast<uint8_t>(DstOffset.getSExtValue()));
+      DestinationIndex = BodyBuilder.CreateAdd(
+          DestinationIndex, Offset, "mcs51.memcpy.dst.index");
+    } else if (!DstIsStack && !DstOffset.isZero()) {
       Value *Offset = ConstantInt::get(LengthTy, DstOffset.getSExtValue());
       DestinationIndex = BodyBuilder.CreateAdd(
           Index, Offset, "mcs51.memcpy.dst.index");
