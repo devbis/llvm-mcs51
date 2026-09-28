@@ -45,6 +45,21 @@ public:
           ++I;
           continue;
         }
+        // A value copied from A to a general register and immediately
+        // copied back is still in A. Drop both copies when the register's
+        // last use is the reload; this commonly appears before compares
+        // whose operand class excludes A.
+        if (First->getOpcode() == MCS51::MOV_RN_A &&
+            Second->getOpcode() == MCS51::MOV_A_RN &&
+            First->getOperand(0).getReg() == Second->getOperand(0).getReg() &&
+            Second->getOperand(0).isKill()) {
+          First->eraseFromParent();
+          Second->eraseFromParent();
+          Changed = true;
+          I = MBB.begin();
+          continue;
+        }
+
         auto Third = std::next(Second);
         if (Third == MBB.end()) {
           ++I;

@@ -408,6 +408,50 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   }
   auto LowerByteCompare = [&](SDValue LHS, SDValue RHS,
                               ISD::CondCode CC) -> SDValue {
+    auto CompareUnsignedConstant = [&](SDValue Value, uint8_t Limit,
+                                      bool IsLess) {
+      unsigned Opcode = IsLess ? MCS51ISD::CMPULT8 : MCS51ISD::CMPUGE8;
+      return DAG.getNode(Opcode, DL, MVT::i8, Value,
+                         DAG.getConstant(Limit, DL, MVT::i8));
+    };
+    if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
+      uint8_t Value = C->getZExtValue();
+      switch (CC) {
+      case ISD::SETULT:
+        return CompareUnsignedConstant(LHS, Value, /*IsLess=*/true);
+      case ISD::SETUGE:
+        return CompareUnsignedConstant(LHS, Value, /*IsLess=*/false);
+      case ISD::SETULE:
+        if (Value == 0xff)
+          return DAG.getConstant(1, DL, MVT::i8);
+        return CompareUnsignedConstant(LHS, Value + 1, /*IsLess=*/true);
+      case ISD::SETUGT:
+        if (Value == 0xff)
+          return DAG.getConstant(0, DL, MVT::i8);
+        return CompareUnsignedConstant(LHS, Value + 1, /*IsLess=*/false);
+      default:
+        break;
+      }
+    }
+    if (auto *C = dyn_cast<ConstantSDNode>(LHS)) {
+      uint8_t Value = C->getZExtValue();
+      switch (CC) {
+      case ISD::SETULT:
+        if (Value == 0xff)
+          return DAG.getConstant(0, DL, MVT::i8);
+        return CompareUnsignedConstant(RHS, Value + 1, /*IsLess=*/false);
+      case ISD::SETUGE:
+        if (Value == 0xff)
+          return DAG.getConstant(1, DL, MVT::i8);
+        return CompareUnsignedConstant(RHS, Value + 1, /*IsLess=*/true);
+      case ISD::SETULE:
+        return CompareUnsignedConstant(RHS, Value, /*IsLess=*/false);
+      case ISD::SETUGT:
+        return CompareUnsignedConstant(RHS, Value, /*IsLess=*/true);
+      default:
+        break;
+      }
+    }
     bool Invert = false;
     bool IsGreaterEqual = false;
     int64_t CompareKind = ISD::isSignedIntSetCC(CC) ? 1 : 0;
@@ -734,6 +778,51 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   }
   if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8)
     report_fatal_error("unsupported MCS-51 conditional branch");
+
+  auto BranchUnsignedConstant = [&](SDValue Value, uint8_t Limit,
+                                    bool IsLess) {
+    unsigned BranchOpcode = IsLess ? MCS51ISD::BR_ULT : MCS51ISD::BR_UGE;
+    return DAG.getNode(BranchOpcode, DL, MVT::Other, Op.getOperand(0), Value,
+                       DAG.getConstant(Limit, DL, MVT::i8), Dest);
+  };
+  if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
+    uint8_t Value = C->getZExtValue();
+    switch (CC) {
+    case ISD::SETULT:
+      return BranchUnsignedConstant(LHS, Value, /*IsLess=*/true);
+    case ISD::SETUGE:
+      return BranchUnsignedConstant(LHS, Value, /*IsLess=*/false);
+    case ISD::SETULE:
+      if (Value == 0xff)
+        return DAG.getNode(ISD::BR, DL, MVT::Other, Op.getOperand(0), Dest);
+      return BranchUnsignedConstant(LHS, Value + 1, /*IsLess=*/true);
+    case ISD::SETUGT:
+      if (Value == 0xff)
+        return Op.getOperand(0);
+      return BranchUnsignedConstant(LHS, Value + 1, /*IsLess=*/false);
+    default:
+      break;
+    }
+  }
+  if (auto *C = dyn_cast<ConstantSDNode>(LHS)) {
+    uint8_t Value = C->getZExtValue();
+    switch (CC) {
+    case ISD::SETULT:
+      if (Value == 0xff)
+        return Op.getOperand(0);
+      return BranchUnsignedConstant(RHS, Value + 1, /*IsLess=*/false);
+    case ISD::SETUGE:
+      if (Value == 0xff)
+        return DAG.getNode(ISD::BR, DL, MVT::Other, Op.getOperand(0), Dest);
+      return BranchUnsignedConstant(RHS, Value + 1, /*IsLess=*/true);
+    case ISD::SETULE:
+      return BranchUnsignedConstant(RHS, Value, /*IsLess=*/false);
+    case ISD::SETUGT:
+      return BranchUnsignedConstant(RHS, Value, /*IsLess=*/true);
+    default:
+      break;
+    }
+  }
 
   unsigned Opcode;
   switch (CC) {
@@ -1354,6 +1443,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register FalseCopy = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51PTRRegClass);
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
     // DPTR is reloaded from the selected virtual value in the tail. The
     // generic split liveness can retain it as a physical live-in even though
     // it is defined before its first use there, which is invalid for an
@@ -1374,6 +1469,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (Cond != MCS51::A)
       BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(Cond);
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(FalseBB);
+    // MachineBlockPlacement may put the newly-created arms before MBB, so
+    // the true arm is not guaranteed to be the fallthrough block.
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(TrueBB);
     BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(TargetOpcode::COPY), TrueCopy)
         .addReg(TrueValue);
     BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
@@ -1397,6 +1495,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register FalseCopy = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
@@ -1413,6 +1517,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (Cond != MCS51::A)
       BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(Cond);
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JZ)).addMBB(FalseBB);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(TrueBB);
     BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(TargetOpcode::COPY), TrueCopy)
         .addReg(TrueValue);
     BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
@@ -2001,8 +2106,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register RHSReg = IsImmediate ? Register() : MI.getOperand(2).getReg();
     int64_t RHSImm = IsImmediate ? MI.getOperand(2).getImm() : 0;
     int64_t CompareKind = MI.getOperand(3).getImm();
-    if (IsImmediate && CompareKind != 2)
-      report_fatal_error("MCS-51 immediate comparison only supports equality");
+    if (IsImmediate && CompareKind != 0 && CompareKind != 2 &&
+        CompareKind != 3)
+      report_fatal_error("unsupported MCS-51 immediate comparison");
     if (CompareKind == 2) {
       MachineBasicBlock *Tail = MBB->splitAt(MI);
       Tail->removeLiveIn(MCS51::DPTR);
@@ -2050,6 +2156,21 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
           .addReg(EqualResult).addMBB(EqualBB)
           .addReg(NotEqualResult).addMBB(NotEqualBB);
       return Tail;
+    }
+
+    if (IsImmediate) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A)
+          .addImm(RHSImm);
+      if (CompareKind == 3)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+          .addReg(MCS51::A);
+      MI.eraseFromParent();
+      return MBB;
     }
 
     bool IsSigned = CompareKind == 1 || CompareKind == 4;

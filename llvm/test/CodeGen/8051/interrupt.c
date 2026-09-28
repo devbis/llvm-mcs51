@@ -20,6 +20,11 @@ int main(void) { return background(); }
 // CHECK: .section .mcs51.vector.0
 // CHECK: ljmp timer0
 // CHECK-LABEL: dma:
+// CHECK: push 224
+// CHECK: push 130
+// CHECK: push 131
+// CHECK-NOT: push 0
+// CHECK: mov dptr, #ticks
 // CHECK: reti
 // CHECK: .section .mcs51.vector.6
 // CHECK: ljmp dma
