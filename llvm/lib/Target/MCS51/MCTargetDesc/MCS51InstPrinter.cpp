@@ -1,4 +1,5 @@
 #include "MCS51InstPrinter.h"
+#include "MCS51MCTargetDesc.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -20,9 +21,15 @@ void MCS51InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     report_fatal_error("invalid MCS-51 asm operand index");
   }
   const MCOperand &Op = MI->getOperand(OpNo);
-  if (Op.isReg())
+  if (Op.isReg()) {
+    MCRegister Reg = Op.getReg();
+    if (!Reg || Reg.id() >= MCS51::NUM_TARGET_REGS)
+      report_fatal_error(Twine("invalid MCS-51 asm register ") +
+                         Twine(Reg.id()) + " at opcode " +
+                         Twine(MI->getOpcode()) + ", operand " +
+                         Twine(OpNo));
     printRegName(OS, Op.getReg());
-  else if (Op.isImm())
+  } else if (Op.isImm())
     OS << Op.getImm();
   else if (Op.isExpr())
     MAI.printExpr(OS, *Op.getExpr());
