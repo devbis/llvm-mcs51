@@ -77,6 +77,23 @@ PDATA, DATA, and IDATA generic pointers, then checks the XDATA result byte.
 This is an optional runtime check in addition to the lit suite; the simulator
 is not used as the SDCC compiler.
 
+For code-size comparisons against SDCC, IAR, and Keil, use the companion
+benchmark checkout at `/Users/ivan.belokobylskiy/projects/ti/mcs51-bench`.
+Run `make short` there and point it at this checkout's sibling build:
+
+```sh
+cd /Users/ivan.belokobylskiy/projects/ti/mcs51-bench
+make short \
+  LLVM_BUILD=/Users/ivan.belokobylskiy/projects/telink/llvm-tc32-arm-based/llvm-8051-build \
+  LLVM_SRC=/Users/ivan.belokobylskiy/projects/telink/llvm-tc32-arm-based/llvm-8051
+```
+
+Keep the benchmark's normal `build` output path under that checkout because
+the IAR and Keil runs use it through a Docker volume mount. `make short`
+reports code and memory sizes per test. The Keil image currently has a license
+error, so do not treat its reported size as valid until the container license
+is repaired.
+
 For a standalone CC2530 image, use
 `llvm/lib/Target/MCS51/cc2530-build.sh source.c -o firmware.elf`. The script
 links the CC2530 reset startup and MCS-51 runtime with the application, then
