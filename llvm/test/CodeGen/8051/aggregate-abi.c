@@ -1,4 +1,5 @@
 // RUN: clang -target mcs51 -O2 -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
+// RUN: clang -target mcs51 -O0 -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s --check-prefix=O0
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin %s -Wl,--no-gc-sections -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 
@@ -125,3 +126,8 @@ int main(void) {
 // LINK-DAG: Name: return_large
 // LINK-DAG: Name: sum_union
 // LINK-DAG: Name: sum_bitfields
+
+// O0-LABEL: sum_bitfields:
+// O0: ret
+// O0-LABEL: call_sum_bitfields:
+// O0: lcall sum_bitfields
