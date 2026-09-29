@@ -653,6 +653,43 @@ public:
         if (I->modifiesRegister(MCS51::DPTR, TRI))
           DPTRGlobal = nullptr;
 
+        // After saving a masked operand, keep it in A and commute the add
+        // instead of reloading the running sum into A.
+        if (I->getOpcode() == MCS51::ANL_A_RN) {
+          MachineInstr *SaveMask = I->getNextNode();
+          MachineInstr *LoadSum = SaveMask ? SaveMask->getNextNode() : nullptr;
+          MachineInstr *Add = LoadSum ? LoadSum->getNextNode() : nullptr;
+          MachineInstr *AddImmediate = Add ? Add->getNextNode() : nullptr;
+          MachineInstr *StoreSum =
+              AddImmediate ? AddImmediate->getNextNode() : nullptr;
+          if (SaveMask && LoadSum && Add && AddImmediate && StoreSum &&
+              SaveMask->getOpcode() == MCS51::MOV_RN_A &&
+              LoadSum->getOpcode() == MCS51::MOV_A_RN &&
+              Add->getOpcode() == MCS51::ADD_A_RN &&
+              AddImmediate->getOpcode() == MCS51::ADD_A_IMM &&
+              StoreSum->getOpcode() == MCS51::MOV_RN_A &&
+              SaveMask->getNumOperands() && LoadSum->getNumOperands() &&
+              Add->getNumOperands() && StoreSum->getNumOperands() &&
+              SaveMask->getOperand(0).isReg() &&
+              LoadSum->getOperand(0).isReg() &&
+              Add->getOperand(0).isReg() &&
+              StoreSum->getOperand(0).isReg()) {
+            Register MaskReg = SaveMask->getOperand(0).getReg();
+            Register SumReg = LoadSum->getOperand(0).getReg();
+            if (MaskReg != SumReg && Add->getOperand(0).getReg() == MaskReg &&
+                StoreSum->getOperand(0).getReg() == SumReg) {
+              bool MaskDies = Add->getOperand(0).isKill();
+              Add->getOperand(0).setReg(SumReg);
+              Add->getOperand(0).setIsKill(false);
+              if (MaskDies)
+                SaveMask->eraseFromParent();
+              LoadSum->eraseFromParent();
+              Changed = true;
+              continue;
+            }
+          }
+        }
+
         // Frame-index elimination forms R1 = SP + offset before most stack
         // accesses. Reuse its current value for an adjacent stack byte.
         if (I->getOpcode() == MCS51::MOV_RN_DIRECT &&
