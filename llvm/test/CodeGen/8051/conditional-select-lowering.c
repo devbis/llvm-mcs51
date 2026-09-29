@@ -20,6 +20,11 @@ unsigned char select_below_64(unsigned char condition, unsigned char yes,
   return condition < 64u ? yes : no;
 }
 
+unsigned char conditional_add_bit2(unsigned char condition, unsigned char sum,
+                                   unsigned char value) {
+  return sum + ((condition & 4u) ? value : 0);
+}
+
 // Compare and select are lowered as one branch; the compare result is not
 // materialized as a separate 0/1 register value.
 // CHECK-LABEL: select_equal_zero:
@@ -42,3 +47,6 @@ unsigned char select_below_64(unsigned char condition, unsigned char yes,
 // CHECK-NEXT: anl a, #192
 // CHECK-NEXT: clr c
 // CHECK-NEXT: jz
+// CHECK-LABEL: conditional_add_bit2:
+// CHECK: jnb 226,
+// CHECK-NOT: subb a, #0

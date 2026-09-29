@@ -59,7 +59,7 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
 static void emitStackAdjustment(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I,
                                 const TargetInstrInfo &TII, uint64_t Amount,
-                                bool Deallocate) {
+                                bool Deallocate, bool PreserveA = false) {
   if (Amount > 255)
     report_fatal_error(
         "MCS-51 stack frame exceeds 255-byte stack address space");
@@ -86,7 +86,7 @@ static void emitStackAdjustment(MachineBasicBlock &MBB,
                          : static_cast<int64_t>(Amount))
       .setMIFlag(FrameFlag);
   BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::MOV_SP_A)).setMIFlag(FrameFlag);
-  if (Deallocate) {
+  if (Deallocate && PreserveA) {
     // A may hold the function's return value. After releasing the frame, a
     // balanced push/pop preserves A without disturbing the caller's stack.
     // FrameDestroy describes the net adjustment even though the balanced
@@ -221,7 +221,10 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
   auto I = MBB.getFirstTerminator();
-  emitStackAdjustment(MBB, I, TII, StackSize, /*Deallocate=*/true);
+  bool PreserveA = I != MBB.end() && I->getOpcode() == MCS51::RET_A &&
+                   I->getNumOperands() && I->getOperand(0).isReg() &&
+                   I->getOperand(0).getReg() == MCS51::A;
+  emitStackAdjustment(MBB, I, TII, StackSize, /*Deallocate=*/true, PreserveA);
   if (MF.getFunction().hasFnAttribute("interrupt")) {
     for (unsigned Address : getInterruptSaveAddresses(MF, true))
       BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
