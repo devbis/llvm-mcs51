@@ -655,6 +655,18 @@ public:
 
         // Frame-index elimination forms R1 = SP + offset before most stack
         // accesses. Reuse its current value for an adjacent stack byte.
+        if (I->getOpcode() == MCS51::MOV_RN_DIRECT &&
+            I->getNumOperands() > 1 && I->getOperand(0).isReg() &&
+            I->getOperand(1).isImm() && I->getOperand(1).getImm() == 0x81) {
+          Register AddressReg = I->getOperand(0).getReg();
+          if (AddressReg == MCS51::R0 || AddressReg == MCS51::R1) {
+            std::optional<int> &CachedOffset =
+                AddressReg == MCS51::R0 ? R0StackOffset : R1StackOffset;
+            CachedOffset = 0;
+            ++I;
+            continue;
+          }
+        }
         auto AddressAdd = std::next(I);
         auto AddressMove = AddressAdd == MBB.end() ? MBB.end()
                                                    : std::next(AddressAdd);
