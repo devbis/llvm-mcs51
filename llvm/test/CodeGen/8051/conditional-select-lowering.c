@@ -10,6 +10,16 @@ unsigned char select_if_negative(signed char condition,
   return condition < 0 ? value : 0;
 }
 
+unsigned char select_mask_bit3(unsigned char condition, unsigned char yes,
+                               unsigned char no) {
+  return (condition & 8u) ? yes : no;
+}
+
+unsigned char select_below_64(unsigned char condition, unsigned char yes,
+                              unsigned char no) {
+  return condition < 64u ? yes : no;
+}
+
 // Compare and select are lowered as one branch; the compare result is not
 // materialized as a separate 0/1 register value.
 // CHECK-LABEL: select_equal_zero:
@@ -23,3 +33,12 @@ unsigned char select_if_negative(signed char condition,
 // CHECK-NEXT: clr a
 // CHECK-NEXT: subb a, #0
 // CHECK-NOT: rrc a
+// CHECK-LABEL: select_mask_bit3:
+// CHECK: mov a, r7
+// CHECK-NEXT: jnb 227,
+// CHECK-NOT: anl a, #8
+// CHECK-LABEL: select_below_64:
+// CHECK: mov a, r7
+// CHECK-NEXT: anl a, #192
+// CHECK-NEXT: clr c
+// CHECK-NEXT: jz

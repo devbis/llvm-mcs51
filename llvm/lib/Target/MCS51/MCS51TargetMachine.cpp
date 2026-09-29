@@ -339,6 +339,110 @@ public:
       int64_t DPTRGlobalOffset = 0;
       auto I = MBB.begin();
       while (I != MBB.end()) {
+        auto ADeadOnSuccessors = [&]() {
+          bool Dead = !MBB.succ_empty();
+          for (MachineBasicBlock *Succ : MBB.successors()) {
+            bool Redefined = false;
+            for (MachineInstr &SuccMI : *Succ) {
+              if (SuccMI.isPHI())
+                continue;
+              if (SuccMI.readsRegister(MCS51::A, TRI))
+                break;
+              if (SuccMI.modifiesRegister(MCS51::A, TRI)) {
+                Redefined = true;
+                break;
+              }
+            }
+            Dead &= Redefined;
+          }
+          return Dead;
+        };
+
+        // A compare against 2^n followed by materializing its carry in A is
+        // just a test of the high n bits. Avoid SUBB/CLR/RLC when only the
+        // branch result is live; explicitly clear carry to preserve RLC's
+        // final carry value.
+        if (!HasObservablePSWAccess && I->getOpcode() == MCS51::MOV_A_RN &&
+            ADeadOnSuccessors()) {
+          MachineInstr *ClearCarry = I->getNextNode();
+          MachineInstr *Subtract = ClearCarry ? ClearCarry->getNextNode()
+                                               : nullptr;
+          MachineInstr *ClearA = Subtract ? Subtract->getNextNode() : nullptr;
+          MachineInstr *Rotate = ClearA ? ClearA->getNextNode() : nullptr;
+          MachineInstr *Branch = Rotate ? Rotate->getNextNode() : nullptr;
+          if (ClearCarry && Subtract && ClearA && Rotate && Branch &&
+              ClearCarry->getOpcode() == MCS51::CLR_C &&
+              Subtract->getOpcode() == MCS51::SUBB_A_IMM &&
+              Subtract->getNumOperands() > 1 &&
+              Subtract->getOperand(1).isImm() &&
+              ClearA->getOpcode() == MCS51::CLR_A &&
+              Rotate->getOpcode() == MCS51::RLC_A &&
+              (Branch->getOpcode() == MCS51::JZ ||
+               Branch->getOpcode() == MCS51::JNZ) &&
+              Branch->getOperand(0).isMBB()) {
+            unsigned Limit = Subtract->getOperand(1).getImm() & 0xff;
+            bool IsPowerOfTwo = Limit && !(Limit & (Limit - 1));
+            if (IsPowerOfTwo && Limit < 0x100) {
+              unsigned Mask = (0x100 - Limit) & 0xff;
+              unsigned TargetOpcode = Branch->getOpcode() == MCS51::JNZ
+                                          ? MCS51::JZ
+                                          : MCS51::JNZ;
+              MachineBasicBlock *Target = Branch->getOperand(0).getMBB();
+              DebugLoc Loc = I->getDebugLoc();
+              BuildMI(MBB, ClearCarry, Loc, TII->get(MCS51::ANL_A_IMM),
+                      MCS51::A)
+                  .addImm(Mask);
+              BuildMI(MBB, ClearCarry, Loc, TII->get(MCS51::CLR_C));
+              BuildMI(MBB, Branch, Branch->getDebugLoc(),
+                      TII->get(TargetOpcode))
+                  .addMBB(Target);
+              MachineInstr *AfterBranch = Branch->getNextNode();
+              ClearCarry->eraseFromParent();
+              Subtract->eraseFromParent();
+              ClearA->eraseFromParent();
+              Rotate->eraseFromParent();
+              Branch->eraseFromParent();
+              I = AfterBranch ? AfterBranch->getIterator() : MBB.end();
+              Changed = true;
+              continue;
+            }
+          }
+        }
+
+        // Testing one bit after an AND is cheaper as a bit-addressed branch.
+        // Keep the load of the source byte, but avoid materializing the masked
+        // value in A when neither outgoing path observes it.
+        if (!HasObservablePSWAccess && I->getOpcode() == MCS51::MOV_A_RN) {
+          MachineInstr *And = I->getNextNode();
+          MachineInstr *Branch = And ? And->getNextNode() : nullptr;
+          if (And && Branch && And->getOpcode() == MCS51::ANL_A_IMM &&
+              And->getNumOperands() > 1 && And->getOperand(1).isImm() &&
+              (Branch->getOpcode() == MCS51::JZ ||
+               Branch->getOpcode() == MCS51::JNZ) &&
+              Branch->getOperand(0).isMBB()) {
+            unsigned Mask = And->getOperand(1).getImm() & 0xff;
+            bool IsSingleBit = Mask && !(Mask & (Mask - 1));
+            if (IsSingleBit && ADeadOnSuccessors()) {
+              unsigned Bit = 0;
+              while ((Mask >> Bit) != 1)
+                ++Bit;
+              unsigned BitAddress = 0xE0 + Bit;
+              unsigned Opcode = Branch->getOpcode() == MCS51::JZ
+                                    ? MCS51::JNB
+                                    : MCS51::JB;
+              BuildMI(MBB, Branch, Branch->getDebugLoc(), TII->get(Opcode))
+                  .addImm(BitAddress)
+                  .addMBB(Branch->getOperand(0).getMBB());
+              MachineInstr *AfterBranch = Branch->getNextNode();
+              And->eraseFromParent();
+              Branch->eraseFromParent();
+              I = AfterBranch ? AfterBranch->getIterator() : MBB.end();
+              Changed = true;
+              continue;
+            }
+          }
+        }
+
         // Repeatedly copying A.7 to carry and rotating right seven times
         // sign-extends the original high bit to 0x00/0xff. Preserve both A
         // and carry with the shorter equivalent: carry = A.7; A = 0 - carry.
