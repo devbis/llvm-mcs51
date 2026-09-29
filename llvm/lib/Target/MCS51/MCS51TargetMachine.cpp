@@ -358,6 +358,49 @@ public:
           return Dead;
         };
 
+        // Moving a selected bit into A.7 with repeated CLR C / RLC A pairs
+        // is unnecessary when the shifted accumulator is cleared immediately
+        // afterward. Read the original bit directly from the bit-addressable
+        // accumulator instead.
+        if (I->getOpcode() == MCS51::MOV_A_RN) {
+          SmallVector<MachineInstr *, 14> ShiftSequence;
+          auto Cursor = std::next(I);
+          unsigned ShiftCount = 0;
+          while (ShiftCount != 7 && Cursor != MBB.end() &&
+                 Cursor->getOpcode() == MCS51::CLR_C) {
+            MachineInstr *Rotate = Cursor->getNextNode();
+            if (!Rotate || Rotate->getOpcode() != MCS51::RLC_A)
+              break;
+            ShiftSequence.push_back(&*Cursor);
+            ShiftSequence.push_back(Rotate);
+            Cursor = std::next(Rotate->getIterator());
+            ++ShiftCount;
+          }
+          MachineInstr *CarryFromMSB =
+              Cursor != MBB.end() ? &*Cursor : nullptr;
+          MachineInstr *ClearA = CarryFromMSB
+                                     ? CarryFromMSB->getNextNode()
+                                     : nullptr;
+          MachineInstr *Subtract = ClearA ? ClearA->getNextNode() : nullptr;
+          if (ShiftCount && CarryFromMSB && ClearA && Subtract &&
+              CarryFromMSB->getOpcode() == MCS51::MOV_C_BIT &&
+              CarryFromMSB->getNumOperands() &&
+              CarryFromMSB->getOperand(0).isImm() &&
+              CarryFromMSB->getOperand(0).getImm() == 0xE7 &&
+              ClearA->getOpcode() == MCS51::CLR_A &&
+              Subtract->getOpcode() == MCS51::SUBB_A_IMM &&
+              Subtract->getNumOperands() > 1 &&
+              Subtract->getOperand(1).isImm() &&
+              Subtract->getOperand(1).getImm() == 0) {
+            CarryFromMSB->getOperand(0).setImm(0xE0 + 7 - ShiftCount);
+            for (MachineInstr *MI : ShiftSequence)
+              MI->eraseFromParent();
+            I = CarryFromMSB->getIterator();
+            Changed = true;
+            continue;
+          }
+        }
+
         // A compare against 2^n followed by materializing its carry in A is
         // just a test of the high n bits. Avoid SUBB/CLR/RLC when only the
         // branch result is live; explicitly clear carry to preserve RLC's
