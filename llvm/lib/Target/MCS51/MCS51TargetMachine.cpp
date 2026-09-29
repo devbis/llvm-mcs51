@@ -246,8 +246,38 @@ public:
     for (MachineBasicBlock &MBB : MF) {
       std::optional<int> R0StackOffset;
       std::optional<int> R1StackOffset;
+      const GlobalValue *DPTRGlobal = nullptr;
+      int64_t DPTRGlobalOffset = 0;
       auto I = MBB.begin();
       while (I != MBB.end()) {
+        // Keep DPTR live across nearby accesses to consecutive bytes of the
+        // same global. Re-loading a 16-bit XDATA address costs three bytes;
+        // incrementing DPTR costs one and leaves A and the flags untouched.
+        if (I->getOpcode() == MCS51::MOV_DPTR_IMM &&
+            I->getNumOperands() > 1 && I->getOperand(1).isGlobal()) {
+          const MachineOperand &Address = I->getOperand(1);
+          const GlobalValue *Global = Address.getGlobal();
+          int64_t Offset = Address.getOffset();
+          if (DPTRGlobal == Global && Offset == DPTRGlobalOffset + 1) {
+            BuildMI(MBB, I, I->getDebugLoc(), TII->get(MCS51::INC_DPTR));
+            I = MBB.erase(I);
+            DPTRGlobalOffset = Offset;
+            Changed = true;
+            continue;
+          }
+          DPTRGlobal = Global;
+          DPTRGlobalOffset = Offset;
+          ++I;
+          continue;
+        }
+        if (I->getOpcode() == MCS51::INC_DPTR && DPTRGlobal) {
+          ++DPTRGlobalOffset;
+          ++I;
+          continue;
+        }
+        if (I->modifiesRegister(MCS51::DPTR, TRI))
+          DPTRGlobal = nullptr;
+
         // Frame-index elimination forms R1 = SP + offset before most stack
         // accesses. Reuse its current value for an adjacent stack byte.
         auto AddressAdd = std::next(I);
