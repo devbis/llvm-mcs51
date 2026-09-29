@@ -339,6 +339,36 @@ public:
       int64_t DPTRGlobalOffset = 0;
       auto I = MBB.begin();
       while (I != MBB.end()) {
+        MachineInstr *CopySPToA = &*I;
+        MachineInstr *AddZero = CopySPToA->getNextNode();
+        MachineInstr *CopyAToR1 = AddZero ? AddZero->getNextNode() : nullptr;
+        bool LoadsSP = CopySPToA->getOpcode() == MCS51::MOV_A_SP ||
+                       (CopySPToA->getOpcode() == MCS51::MOV_A_DIRECT &&
+                        CopySPToA->getNumOperands() > 1 &&
+                        CopySPToA->getOperand(1).isImm() &&
+                        CopySPToA->getOperand(1).getImm() == 0x81);
+        if (LoadsSP && AddZero &&
+            CopyAToR1 && AddZero->getOpcode() == MCS51::ADD_A_IMM &&
+            AddZero->getNumOperands() > 1 &&
+            AddZero->getOperand(1).isImm() &&
+            AddZero->getOperand(1).getImm() == 0 &&
+            CopyAToR1->getOpcode() == MCS51::MOV_RN_A &&
+            CopyAToR1->getNumOperands() &&
+            CopyAToR1->getOperand(0).isReg() &&
+            CopyAToR1->getOperand(0).getReg() == MCS51::R1) {
+          BuildMI(MBB, CopySPToA, CopySPToA->getDebugLoc(),
+                  TII->get(MCS51::MOV_RN_DIRECT))
+              .addReg(MCS51::R1)
+              .addImm(0x81);
+          auto Next = CopyAToR1->getNextNode();
+          CopySPToA->eraseFromParent();
+          AddZero->eraseFromParent();
+          CopyAToR1->eraseFromParent();
+          I = Next ? Next->getIterator() : MBB.end();
+          Changed = true;
+          continue;
+        }
+
         auto ADeadOnSuccessors = [&]() {
           bool Dead = !MBB.succ_empty();
           for (MachineBasicBlock *Succ : MBB.successors()) {
@@ -383,7 +413,6 @@ public:
             MachineFunction &MF = *MBB.getParent();
             Register ValueReg = And->getOperand(0).getReg();
             Register SumReg = Add->getOperand(0).getReg();
-            unsigned BitAddress = I->getOperand(0).getImm();
             MachineBasicBlock *Tail = MBB.splitAt(*Store);
             if (Tail == &MBB) {
               Tail = MF.CreateMachineBasicBlock(MBB.getBasicBlock());
@@ -391,6 +420,7 @@ public:
               Tail->transferSuccessorsAndUpdatePHIs(&MBB);
               MBB.addSuccessor(Tail);
             }
+            Tail->splice(Tail->begin(), &MBB, Store->getIterator());
             MachineBasicBlock *AddBlock =
                 MF.CreateMachineBasicBlock(MBB.getBasicBlock());
             MF.insert(Tail->getIterator(), AddBlock);
@@ -400,23 +430,25 @@ public:
             MBB.addSuccessor(Tail);
             AddBlock->addSuccessor(Tail);
             AddBlock->addLiveIn(MCS51::A);
+            AddBlock->addLiveIn(MCS51::R1);
             AddBlock->addLiveIn(ValueReg);
-            AddBlock->addLiveIn(SumReg);
             Tail->addLiveIn(MCS51::A);
+            Tail->addLiveIn(MCS51::R1);
 
+            // MOV_C_BIT captured the original condition before loading the
+            // accumulator with the running sum. MOV A,Rn preserves carry, so
+            // JNC can skip the add without losing the selected bit.
             BuildMI(MBB, MBB.end(), I->getDebugLoc(),
                     TII->get(MCS51::MOV_A_RN))
                 .addReg(SumReg);
-            BuildMI(MBB, MBB.end(), I->getDebugLoc(), TII->get(MCS51::CLR_C));
-            BuildMI(MBB, MBB.end(), I->getDebugLoc(), TII->get(MCS51::JNB))
-                .addImm(BitAddress)
+            BuildMI(MBB, MBB.end(), I->getDebugLoc(), TII->get(MCS51::JNC))
                 .addMBB(Tail);
             BuildMI(*AddBlock, AddBlock->end(), Add->getDebugLoc(),
                     TII->get(MCS51::ADD_A_RN))
                 .addReg(ValueReg);
 
-            SmallVector<MachineInstr *, 5> Replaced;
-            Replaced.append({&*I, ClearA, Subtract, And, Add});
+            SmallVector<MachineInstr *, 4> Replaced;
+            Replaced.append({ClearA, Subtract, And, Add});
             for (MachineInstr *MI : Replaced)
               MI->eraseFromParent();
             I = MBB.end();
