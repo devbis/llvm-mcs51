@@ -13,6 +13,8 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "TargetInfo/MCS51TargetInfo.h"
@@ -22,6 +24,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Utils.h"
+#include <optional>
 
 using namespace llvm;
 
@@ -40,6 +43,128 @@ public:
 };
 
 char MCS51RemoveOptNone::ID = 0;
+
+// Integer promotions turn byte-sized mask tests into i16 operations. The
+// generic optimizer does not always push a zero extension through the AND,
+// leaving the 8051 to materialize and compare both bytes. Narrow tests against
+// an i8 zero-extended value back to i8 before instruction selection.
+class MCS51NarrowByteMaskTests final : public FunctionPass {
+public:
+  static char ID;
+  MCS51NarrowByteMaskTests() : FunctionPass(ID) {}
+
+  bool runOnFunction(Function &F) override {
+    SmallVector<ICmpInst *, 16> Tests;
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (auto *Cmp = dyn_cast<ICmpInst>(&I))
+          Tests.push_back(Cmp);
+
+    bool Changed = false;
+    for (ICmpInst *Cmp : Tests) {
+      if (Cmp->getPredicate() != ICmpInst::ICMP_EQ &&
+          Cmp->getPredicate() != ICmpInst::ICMP_NE)
+        continue;
+      auto *Zero = dyn_cast<ConstantInt>(Cmp->getOperand(1));
+      Value *TestValue = Cmp->getOperand(0);
+      if (!Zero) {
+        Zero = dyn_cast<ConstantInt>(Cmp->getOperand(0));
+        TestValue = Cmp->getOperand(1);
+      }
+      if (!Zero || !Zero->isZero())
+        continue;
+
+      auto *And = dyn_cast<BinaryOperator>(TestValue);
+      if (!And || And->getOpcode() != Instruction::And ||
+          !And->getType()->isIntegerTy(16))
+        continue;
+      auto *Mask = dyn_cast<ConstantInt>(And->getOperand(1));
+      Value *ExtendedByte = And->getOperand(0);
+      if (!Mask) {
+        Mask = dyn_cast<ConstantInt>(And->getOperand(0));
+        ExtendedByte = And->getOperand(1);
+      }
+      if (!Mask || Mask->getValue().getActiveBits() > 8)
+        continue;
+      auto *ZExt = dyn_cast<ZExtInst>(ExtendedByte);
+      if (!ZExt || !ZExt->getSrcTy()->isIntegerTy(8))
+        continue;
+
+      IRBuilder<> Builder(Cmp);
+      Value *NarrowMask = ConstantInt::get(Builder.getInt8Ty(),
+                                            Mask->getZExtValue());
+      Value *NarrowAnd = Builder.CreateAnd(ZExt->getOperand(0), NarrowMask,
+                                           And->getName() + ".byte");
+      Value *NarrowCmp = Builder.CreateICmp(
+          Cmp->getPredicate(), NarrowAnd,
+          ConstantInt::get(Builder.getInt8Ty(), 0), Cmp->getName() + ".byte");
+      Cmp->replaceAllUsesWith(NarrowCmp);
+      Cmp->eraseFromParent();
+      if (And->use_empty())
+        And->eraseFromParent();
+      if (ZExt->use_empty())
+        ZExt->eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
+  }
+};
+
+char MCS51NarrowByteMaskTests::ID = 0;
+
+// Turn an add of a zero-or-value select into a conditional accumulator update.
+// Keeping this as control flow lets the backend branch on the original test
+// instead of materializing a boolean, selecting zero/value, then adding.
+class MCS51FoldConditionalByteAdd final : public FunctionPass {
+public:
+  static char ID;
+  MCS51FoldConditionalByteAdd() : FunctionPass(ID) {}
+
+  bool runOnFunction(Function &F) override {
+    SmallVector<BinaryOperator *, 16> Adds;
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (auto *Add = dyn_cast<BinaryOperator>(&I))
+          if (Add->getOpcode() == Instruction::Add &&
+              Add->getType()->isIntegerTy(8))
+            Adds.push_back(Add);
+
+    bool Changed = false;
+    for (BinaryOperator *Add : Adds) {
+      SelectInst *Select = dyn_cast<SelectInst>(Add->getOperand(0));
+      Value *Accumulator = Add->getOperand(1);
+      if (!Select) {
+        Select = dyn_cast<SelectInst>(Add->getOperand(1));
+        Accumulator = Add->getOperand(0);
+      }
+      if (!Select || Select->getType() != Add->getType())
+        continue;
+      auto *TrueZero = dyn_cast<ConstantInt>(Select->getTrueValue());
+      auto *FalseZero = dyn_cast<ConstantInt>(Select->getFalseValue());
+      bool ZeroOnTrue = TrueZero && TrueZero->isZero();
+      bool ZeroOnFalse = FalseZero && FalseZero->isZero();
+      if (ZeroOnTrue == ZeroOnFalse || Select->getParent() != Add->getParent() ||
+          !Select->hasOneUse())
+        continue;
+
+      IRBuilder<> Builder(Add);
+      Value *SelectedValue = ZeroOnTrue ? Select->getFalseValue()
+                                        : Select->getTrueValue();
+      Value *Updated = Builder.CreateAdd(Accumulator, SelectedValue,
+                                         Add->getName() + ".cond");
+      cast<BinaryOperator>(Updated)->copyIRFlags(Add);
+      Value *NewSelect = Builder.CreateSelect(
+          Select->getCondition(), ZeroOnTrue ? Accumulator : Updated,
+          ZeroOnTrue ? Updated : Accumulator, Select->getName() + ".cond");
+      Add->replaceAllUsesWith(NewSelect);
+      Add->eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
+  }
+};
+
+char MCS51FoldConditionalByteAdd::ID = 0;
 
 class MCS51AccCopyHoisting final : public MachineFunctionPass {
 public:
@@ -119,8 +244,110 @@ public:
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     bool Changed = false;
     for (MachineBasicBlock &MBB : MF) {
+      std::optional<int> R0StackOffset;
+      std::optional<int> R1StackOffset;
       auto I = MBB.begin();
       while (I != MBB.end()) {
+        // Frame-index elimination forms R1 = SP + offset before most stack
+        // accesses. Reuse its current value for an adjacent stack byte.
+        auto AddressAdd = std::next(I);
+        auto AddressMove = AddressAdd == MBB.end() ? MBB.end()
+                                                   : std::next(AddressAdd);
+        if (AddressMove != MBB.end() &&
+            I->getOpcode() == MCS51::MOV_A_DIRECT &&
+            I->getOperand(1).isImm() && I->getOperand(1).getImm() == 0x81 &&
+            AddressAdd->getOpcode() == MCS51::ADD_A_IMM &&
+            AddressAdd->getOperand(1).isImm() &&
+            AddressMove->getOpcode() == MCS51::MOV_RN_A &&
+            (AddressMove->getOperand(0).getReg() == MCS51::R0 ||
+             AddressMove->getOperand(0).getReg() == MCS51::R1)) {
+          Register AddressReg = AddressMove->getOperand(0).getReg();
+          std::optional<int> &CachedOffset =
+              AddressReg == MCS51::R0 ? R0StackOffset : R1StackOffset;
+          int NewOffset =
+              static_cast<int8_t>(AddressAdd->getOperand(1).getImm());
+          if (CachedOffset) {
+            int Delta = static_cast<int8_t>(
+                static_cast<uint8_t>(NewOffset - *CachedOffset));
+            if (Delta == 0) {
+              auto AfterAddress = std::next(AddressMove);
+              I->eraseFromParent();
+              AddressAdd->eraseFromParent();
+              AddressMove->eraseFromParent();
+              CachedOffset = NewOffset;
+              I = AfterAddress;
+              Changed = true;
+              continue;
+            }
+            auto AfterAddress = std::next(AddressMove);
+            if (Delta >= -3 && Delta <= 3) {
+              unsigned Opcode = Delta > 0 ? MCS51::INC_RN : MCS51::DEC_RN;
+              int Steps = Delta > 0 ? Delta : -Delta;
+              for (int Count = 0; Count < Steps; ++Count)
+                BuildMI(MBB, I, AddressMove->getDebugLoc(), TII->get(Opcode))
+                    .addReg(AddressReg, RegState::Define)
+                    .addReg(AddressReg);
+            } else {
+              BuildMI(MBB, I, AddressMove->getDebugLoc(),
+                      TII->get(MCS51::MOV_A_RN))
+                  .addReg(AddressReg);
+              BuildMI(MBB, I, AddressMove->getDebugLoc(),
+                      TII->get(MCS51::ADD_A_IMM), MCS51::A)
+                  .addImm(static_cast<uint8_t>(Delta));
+              BuildMI(MBB, I, AddressMove->getDebugLoc(),
+                      TII->get(MCS51::MOV_RN_A))
+                  .addReg(AddressReg, RegState::Define);
+            }
+            I->eraseFromParent();
+            AddressAdd->eraseFromParent();
+            AddressMove->eraseFromParent();
+            CachedOffset = NewOffset;
+            I = AfterAddress;
+            Changed = true;
+            continue;
+          }
+          CachedOffset = NewOffset;
+          I = std::next(AddressMove);
+          continue;
+        }
+
+        // Calls may use R1 in the callee, and pushes/pops change the SP base.
+        auto PointerStep = std::next(I);
+        auto PointerStepMove = PointerStep == MBB.end()
+                                   ? MBB.end()
+                                   : std::next(PointerStep);
+        Register PointerReg;
+        if (I->getOpcode() == MCS51::MOV_A_RN)
+          PointerReg = I->getOperand(0).getReg();
+        std::optional<int> *PointerOffset =
+            PointerReg == MCS51::R0 ? &R0StackOffset
+            : PointerReg == MCS51::R1 ? &R1StackOffset
+                                      : nullptr;
+        if (PointerOffset && *PointerOffset &&
+            PointerStepMove != MBB.end() &&
+            I->getOpcode() == MCS51::MOV_A_RN &&
+            (PointerStep->getOpcode() == MCS51::INC_A ||
+             PointerStep->getOpcode() == MCS51::DEC_A) &&
+            PointerStepMove->getOpcode() == MCS51::MOV_RN_A &&
+            PointerStepMove->getOperand(0).getReg() == PointerReg) {
+          **PointerOffset += PointerStep->getOpcode() == MCS51::INC_A ? 1 : -1;
+          I = std::next(PointerStepMove);
+          continue;
+        }
+
+        if (I->isCall() || I->getOpcode() == MCS51::PUSH_DIRECT ||
+            I->getOpcode() == MCS51::PUSH_PSW ||
+            I->getOpcode() == MCS51::POP_DIRECT ||
+            I->getOpcode() == MCS51::POP_PSW) {
+          R0StackOffset.reset();
+          R1StackOffset.reset();
+        } else {
+          if (R0StackOffset && I->modifiesRegister(MCS51::R0, TRI))
+            R0StackOffset.reset();
+          if (R1StackOffset && I->modifiesRegister(MCS51::R1, TRI))
+            R1StackOffset.reset();
+        }
+
         if (I->getOpcode() != MCS51::MOV_RN_A) {
           ++I;
           continue;
@@ -287,6 +514,8 @@ public:
 
   bool addPreISel() override {
     addPass(createMCS51GenericPointerLoweringPass());
+    addPass(new MCS51NarrowByteMaskTests());
+    addPass(new MCS51FoldConditionalByteAdd());
     if (getOptLevel() == CodeGenOptLevel::None) {
       addPass(createInstructionCombiningPass());
       addPass(createCFGSimplificationPass());

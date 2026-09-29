@@ -14,6 +14,48 @@ using namespace llvm;
 MCS51FrameLowering::MCS51FrameLowering()
     : TargetFrameLowering(StackGrowsUp, Align(1), 1) {}
 
+bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
+    MachineFunction &, const TargetRegisterInfo *,
+    std::vector<CalleeSavedInfo> &) const {
+  // Callee-saved R registers are pushed directly; they do not need frame slots.
+  return true;
+}
+
+bool MCS51FrameLowering::spillCalleeSavedRegisters(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+    ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *) const {
+  const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
+  for (const CalleeSavedInfo &CS : CSI) {
+    Register Reg = CS.getReg();
+    unsigned Direct = Reg.id() - MCS51::R0;
+    MBB.addLiveIn(Reg);
+    BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
+        .addImm(Direct)
+        .addReg(Reg, RegState::Implicit)
+        .addReg(MCS51::SP, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::Implicit)
+        .setMIFlag(MachineInstr::FrameSetup);
+  }
+  return true;
+}
+
+bool MCS51FrameLowering::restoreCalleeSavedRegisters(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+    MutableArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *) const {
+  const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
+  for (CalleeSavedInfo &CS : llvm::reverse(CSI)) {
+    Register Reg = CS.getReg();
+    unsigned Direct = Reg.id() - MCS51::R0;
+    BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::POP_DIRECT))
+        .addImm(Direct)
+        .addReg(Reg, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::Implicit)
+        .setMIFlag(MachineInstr::FrameDestroy);
+  }
+  return true;
+}
+
 static void emitStackAdjustment(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I,
                                 const TargetInstrInfo &TII, uint64_t Amount,
@@ -155,6 +197,8 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
+  if (StackSize + MF.getFrameInfo().getCalleeSavedInfo().size() > 255)
+    report_fatal_error("MCS-51 stack frame exceeds 255-byte stack address space");
   bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
   MachineBasicBlock::iterator I = MBB.begin();
   while (I != MBB.end() &&
