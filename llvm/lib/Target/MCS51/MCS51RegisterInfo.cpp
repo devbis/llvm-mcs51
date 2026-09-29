@@ -16,7 +16,13 @@ using namespace llvm;
 MCS51RegisterInfo::MCS51RegisterInfo() : MCS51GenRegisterInfo(MCS51::PC) {}
 
 const MCPhysReg *
-MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
+MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+  // The freestanding C entry point is entered by startup code and never
+  // returns to a C caller. It does not need to preserve the normal callee-save
+  // register bank around its body.
+  static const MCPhysReg MainSaveList[] = {0};
+  if (MF && MF->getFunction().getName() == "main")
+    return MainSaveList;
   return CSR_MCS51_SaveList;
 }
 
