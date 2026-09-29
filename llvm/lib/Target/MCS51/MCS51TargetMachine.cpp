@@ -3,7 +3,6 @@
 #include "MCS51InstrInfo.h"
 #include "MCS51.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -51,8 +50,7 @@ public:
         if (!Use.isCopy() || Use.getOperand(1).getReg() != AccValue ||
             MRI.getRegClass(Use.getOperand(0).getReg()) !=
                 &MCS51::MCS51GPR8RegClass ||
-            !MRI.hasOneDef(Use.getOperand(0).getReg()) ||
-            Use.getParent() != &MBB) {
+            !MRI.hasOneDef(Use.getOperand(0).getReg())) {
           OnlyCopies = false;
           break;
         }
@@ -61,19 +59,30 @@ public:
       if (!OnlyCopies || Copies.empty())
         continue;
 
-      bool CopyBeforeDef = false;
-      for (auto I = MBB.begin(); I != Def->getIterator(); ++I)
-        CopyBeforeDef |= llvm::is_contained(Copies, &*I);
-      if (CopyBeforeDef)
-        continue;
-
-      auto InsertPt = std::next(Def->getIterator());
-      for (MachineInstr *Copy : Copies) {
-        MBB.splice(InsertPt, &MBB, Copy->getIterator());
-        Copy->getOperand(1).setIsKill(false);
-        InsertPt = std::next(Copy->getIterator());
+      // Keep the accumulator value live only until its first GPR snapshot,
+      // even when its original copies are in successor blocks. Later copies
+      // read the saved GPR value instead.
+      MachineInstr *Snapshot = Copies.front();
+      Register SnapshotReg = Snapshot->getOperand(0).getReg();
+      if (Def->getOpcode() == MCS51::MOV_A_IMM) {
+        const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+        BuildMI(MBB, std::next(Def->getIterator()), Def->getDebugLoc(),
+                TII->get(MCS51::MOV_RN_IMM), SnapshotReg)
+            .addImm(Def->getOperand(1).getImm());
+        Snapshot->eraseFromParent();
+        for (MachineOperand &MO : Def->operands())
+          if (MO.isReg() && MO.isDef() && MO.getReg() == AccValue)
+            MO.setReg(MCS51::A);
+      } else {
+        MachineBasicBlock::iterator InsertPt =
+            Def->isPHI() ? MBB.getFirstNonPHI()
+                         : std::next(Def->getIterator());
+        MBB.splice(InsertPt, Snapshot->getParent(), Snapshot->getIterator());
+        Snapshot->getOperand(1).setIsKill(true);
       }
-      Copies.back()->getOperand(1).setIsKill(true);
+      for (unsigned I = 1; I < Copies.size(); ++I)
+        Copies[I]->getOperand(1).setReg(SnapshotReg);
+      MRI.clearKillFlags(SnapshotReg);
       Changed = true;
     }
     return Changed;
