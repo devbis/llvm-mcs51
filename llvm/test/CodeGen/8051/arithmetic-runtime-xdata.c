@@ -1,4 +1,4 @@
-// RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib -S %s -o - | FileCheck %s
+// RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
 // RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld -Wl,--no-check-sections %S/../../../lib/Target/MCS51/cc2530_startup.s %s -o %t.elf
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=LINK
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINKSYM
