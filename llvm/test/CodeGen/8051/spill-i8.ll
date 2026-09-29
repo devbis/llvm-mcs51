@@ -1,4 +1,5 @@
-; RUN: llc -O0 -mtriple=mcs51 -o - %s | FileCheck %s
+; RUN: llc -O0 -mtriple=mcs51 -mcpu=cc2530 -o - %s | FileCheck %s
+; RUN: llc -O0 -mtriple=mcs51 -o - %s | FileCheck %s --check-prefix=GENERIC
 
 define i8 @sum_ten(i8 %a, i8 %b, i8 %c, i8 %d, i8 %e, i8 %f, i8 %g,
                    i8 %h, i8 %i, i8 %j) {
@@ -45,6 +46,13 @@ entry:
 ; restore the register bank when it returns to the startup halt loop.
 ; CHECK-LABEL: main:
 ; CHECK-NOT: push
-; CHECK: lcall entry_barrier
+; CHECK: lcall __mcs51_bankcall_entry_barrier
 ; CHECK-NOT: pop
+; CHECK-NOT: mov 129, a
 ; CHECK: ret
+
+; Other MCS-51 profiles retain the ordinary function ABI for main.
+; GENERIC-LABEL: main:
+; GENERIC: push 2
+; GENERIC: lcall entry_barrier
+; GENERIC: pop 2

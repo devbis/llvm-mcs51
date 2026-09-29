@@ -6,6 +6,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -21,7 +22,8 @@ MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   // returns to a C caller. It does not need to preserve the normal callee-save
   // register bank around its body.
   static const MCPhysReg MainSaveList[] = {0};
-  if (MF && MF->getFunction().getName() == "main")
+  if (MF && MF->getFunction().getName() == "main" &&
+      MF->getTarget().getTargetCPU().equals_insensitive("cc2530"))
     return MainSaveList;
   return CSR_MCS51_SaveList;
 }

@@ -7,6 +7,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetMachine.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -224,7 +225,12 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   bool PreserveA = I != MBB.end() && I->getOpcode() == MCS51::RET_A &&
                    I->getNumOperands() && I->getOperand(0).isReg() &&
                    I->getOperand(0).getReg() == MCS51::A;
-  emitStackAdjustment(MBB, I, TII, StackSize, /*Deallocate=*/true, PreserveA);
+  // The freestanding entry point returns to startup's halt loop. No caller
+  // resumes with its stack, so releasing main's final frame is unnecessary.
+  if (MF.getFunction().getName() != "main" ||
+      !MF.getTarget().getTargetCPU().equals_insensitive("cc2530"))
+    emitStackAdjustment(MBB, I, TII, StackSize, /*Deallocate=*/true,
+                        PreserveA);
   if (MF.getFunction().hasFnAttribute("interrupt")) {
     for (unsigned Address : getInterruptSaveAddresses(MF, true))
       BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
