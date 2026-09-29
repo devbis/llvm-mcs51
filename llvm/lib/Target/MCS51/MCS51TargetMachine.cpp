@@ -243,6 +243,95 @@ public:
     const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     bool Changed = false;
+    bool HasObservablePSWAccess = false;
+    for (const MachineBasicBlock &MBB : MF)
+      for (const MachineInstr &MI : MBB) {
+        // The sign-extension fold below uses SUBB, which changes AC and OV.
+        // Those flags can be observed through PSW SFR/bit accesses or inline
+        // assembly, so keep the original rotates in functions that expose
+        // machine state this way.
+        if (MI.isInlineAsm())
+          HasObservablePSWAccess = true;
+        for (const MachineOperand &MO : MI.operands())
+          if (MO.isImm() && MO.getImm() >= 0xD0 && MO.getImm() <= 0xD7)
+            HasObservablePSWAccess = true;
+      }
+    for (MachineBasicBlock &MBB : MF) {
+      SmallVector<MachineInstr *, 4> Calls;
+      for (MachineInstr &MI : MBB)
+        if (MI.isCall())
+          Calls.push_back(&MI);
+
+      for (MachineInstr *Call : Calls) {
+        for (MachineInstr *I = Call->getNextNode(); I;) {
+          MachineInstr *Add = I->getNextNode();
+          MachineInstr *Store = Add ? Add->getNextNode() : nullptr;
+          if (!Store || I->getOpcode() != MCS51::MOV_A_RN ||
+              Add->getOpcode() != MCS51::ADD_A_IMM ||
+              Store->getOpcode() != MCS51::MOV_RN_A ||
+              I->getOperand(0).getReg() != Store->getOperand(0).getReg()) {
+            I = I->getNextNode();
+            continue;
+          }
+
+          Register Reg = I->getOperand(0).getReg();
+          MachineInstr *Def = Call;
+          bool FoundDef = false;
+          while ((Def = Def->getPrevNode())) {
+            if (!Def->modifiesRegister(Reg, TRI))
+              continue;
+            FoundDef = Def->getOpcode() == MCS51::MOV_RN_A &&
+                       Def->getOperand(0).getReg() == Reg;
+            break;
+          }
+          if (!FoundDef || Call->readsRegister(Reg, TRI) ||
+              Call->modifiesRegister(Reg, TRI)) {
+            I = Store->getNextNode();
+            continue;
+          }
+
+          // The post-call value is only a delayed byte add if the original
+          // register value and A/C are unobserved between its definition and
+          // the call. In that case perform the add while the load is still in
+          // A, then discard the post-call round trip.
+          bool SafeToHoist = true;
+          bool ARedefined = false;
+          bool CRedefined = false;
+          for (MachineInstr *J = Def->getNextNode(); J != Call;
+               J = J->getNextNode()) {
+            if (J->readsRegister(Reg, TRI) || J->modifiesRegister(Reg, TRI)) {
+              SafeToHoist = false;
+              break;
+            }
+            if ((!ARedefined && J->readsRegister(MCS51::A, TRI)) ||
+                (!CRedefined && J->readsRegister(MCS51::C, TRI))) {
+              SafeToHoist = false;
+              break;
+            }
+            ARedefined |= J->modifiesRegister(MCS51::A, TRI);
+            CRedefined |= J->modifiesRegister(MCS51::C, TRI);
+          }
+          for (MachineInstr *J = Call->getNextNode(); SafeToHoist && J != I;
+               J = J->getNextNode())
+            if (J->readsRegister(Reg, TRI) || J->modifiesRegister(Reg, TRI))
+              SafeToHoist = false;
+          if (!SafeToHoist) {
+            I = Store->getNextNode();
+            continue;
+          }
+
+          BuildMI(MBB, Def, Def->getDebugLoc(), TII->get(MCS51::ADD_A_IMM),
+                  MCS51::A)
+              .addImm(Add->getOperand(1).getImm());
+          MachineInstr *AfterStore = Store->getNextNode();
+          I->eraseFromParent();
+          Add->eraseFromParent();
+          Store->eraseFromParent();
+          I = AfterStore;
+          Changed = true;
+        }
+      }
+    }
     for (MachineBasicBlock &MBB : MF) {
       std::optional<int> R0StackOffset;
       std::optional<int> R1StackOffset;
@@ -250,6 +339,46 @@ public:
       int64_t DPTRGlobalOffset = 0;
       auto I = MBB.begin();
       while (I != MBB.end()) {
+        // Repeatedly copying A.7 to carry and rotating right seven times
+        // sign-extends the original high bit to 0x00/0xff. Preserve both A
+        // and carry with the shorter equivalent: carry = A.7; A = 0 - carry.
+        if (!HasObservablePSWAccess && I->getOpcode() == MCS51::MOV_C_BIT &&
+            I->getNumOperands() > 0 &&
+            I->getOperand(0).isImm() && I->getOperand(0).getImm() == 0xE7) {
+          SmallVector<MachineInstr *, 14> RotateSequence;
+          auto Cursor = std::next(I);
+          bool IsSignExtend = true;
+          for (unsigned Count = 0; Count != 7; ++Count) {
+            if (Cursor == MBB.end() ||
+                Cursor->getOpcode() != MCS51::RRC_A) {
+              IsSignExtend = false;
+              break;
+            }
+            RotateSequence.push_back(&*Cursor++);
+            if (Count == 6)
+              break;
+            if (Cursor == MBB.end() ||
+                Cursor->getOpcode() != MCS51::MOV_C_BIT ||
+                !Cursor->getOperand(0).isImm() ||
+                Cursor->getOperand(0).getImm() != 0xE7) {
+              IsSignExtend = false;
+              break;
+            }
+            RotateSequence.push_back(&*Cursor++);
+          }
+          if (IsSignExtend) {
+            auto Insert = std::next(I);
+            BuildMI(MBB, Insert, I->getDebugLoc(), TII->get(MCS51::CLR_A));
+            BuildMI(MBB, Insert, I->getDebugLoc(),
+                    TII->get(MCS51::SUBB_A_IMM), MCS51::A).addImm(0);
+            for (MachineInstr *MI : RotateSequence)
+              MI->eraseFromParent();
+            I = std::next(I);
+            Changed = true;
+            continue;
+          }
+        }
+
         // Keep DPTR live across nearby accesses to consecutive bytes of the
         // same global. Re-loading a 16-bit XDATA address costs three bytes;
         // incrementing DPTR costs one and leaves A and the flags untouched.
@@ -407,6 +536,45 @@ public:
         auto Third = std::next(Second);
         if (Third == MBB.end()) {
           ++I;
+          continue;
+        }
+
+        // A spill value can be round-tripped through a temporary GPR while
+        // the stack pointer is adjusted. INC/DEC Rn preserves A, so when the
+        // reload is the last use the save and reload are redundant.
+        Register RoundTripReg = First->getOperand(0).getReg();
+        bool RoundTripValueDead = true;
+        bool RoundTripRedefined = false;
+        for (auto J = std::next(Third); RoundTripValueDead && J != MBB.end();
+             ++J) {
+          if (J->readsRegister(RoundTripReg, TRI)) {
+            RoundTripValueDead = false;
+            break;
+          }
+          if (J->modifiesRegister(RoundTripReg, TRI)) {
+            RoundTripRedefined = true;
+            break;
+          }
+        }
+        if (!RoundTripRedefined)
+          for (const MachineBasicBlock::RegisterMaskPair &LiveOut :
+               MBB.liveouts())
+            if (TRI->regsOverlap(RoundTripReg, LiveOut.PhysReg)) {
+              RoundTripValueDead = false;
+              break;
+            }
+        if (First->getOpcode() == MCS51::MOV_RN_A &&
+            (Second->getOpcode() == MCS51::INC_RN ||
+             Second->getOpcode() == MCS51::DEC_RN) &&
+            Third->getOpcode() == MCS51::MOV_A_RN &&
+            RoundTripReg == Third->getOperand(0).getReg() &&
+            RoundTripValueDead &&
+            Second->getOperand(0).getReg() != RoundTripReg &&
+            !Second->modifiesRegister(MCS51::A, TRI)) {
+          First->eraseFromParent();
+          Third->eraseFromParent();
+          I = Second;
+          Changed = true;
           continue;
         }
 

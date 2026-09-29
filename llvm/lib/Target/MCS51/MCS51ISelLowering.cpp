@@ -708,6 +708,30 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     return LowerWordCompare(Op.getOperand(0), Op.getOperand(1), CC, IsSigned);
   }
   if (Op.getOpcode() == ISD::SELECT_CC &&
+      Op.getOperand(0).getValueType() == MVT::i8 &&
+      Op.getValueType() == MVT::i8) {
+    ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+    if (CC == ISD::SETEQ || CC == ISD::SETNE) {
+      SDValue TrueValue = Op.getOperand(2);
+      SDValue FalseValue = Op.getOperand(3);
+      if (CC == ISD::SETNE)
+        std::swap(TrueValue, FalseValue);
+      return DAG.getNode(MCS51ISD::SELECT_EQ8, DL, MVT::i8,
+                         Op.getOperand(0), Op.getOperand(1), TrueValue,
+                         FalseValue);
+    }
+    if ((CC == ISD::SETLT || CC == ISD::SETGE) &&
+        isa<ConstantSDNode>(Op.getOperand(1)) &&
+        cast<ConstantSDNode>(Op.getOperand(1))->isZero()) {
+      SDValue TrueValue = Op.getOperand(2);
+      SDValue FalseValue = Op.getOperand(3);
+      if (CC == ISD::SETGE)
+        std::swap(TrueValue, FalseValue);
+      return DAG.getNode(MCS51ISD::SELECT_SIGN8, DL, MVT::i8,
+                         Op.getOperand(0), TrueValue, FalseValue);
+    }
+  }
+  if (Op.getOpcode() == ISD::SELECT_CC &&
       Op.getOperand(0).getValueType() == MVT::i16 &&
       (Op.getValueType() == MVT::i8 || Op.getValueType() == MVT::i16)) {
     ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
@@ -1433,6 +1457,108 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addReg(MCS51::DPTR, RegState::Implicit);
     MI.eraseFromParent();
     return MBB;
+  }
+  if (MI.getOpcode() == MCS51::SELECT_SIGN8) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    Register TrueValue = MI.getOperand(2).getReg();
+    Register FalseValue = MI.getOperand(3).getReg();
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
+    Tail->removeLiveIn(MCS51::DPTR);
+    MachineBasicBlock *NegativeBB =
+        MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *NonNegativeBB =
+        MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), NegativeBB);
+    MF.insert(Tail->getIterator(), NonNegativeBB);
+    while (!MBB->succ_empty())
+      MBB->removeSuccessor(MBB->succ_begin());
+    MBB->addSuccessor(NegativeBB);
+    MBB->addSuccessor(NonNegativeBB);
+    NegativeBB->addSuccessor(Tail);
+    NonNegativeBB->addSuccessor(Tail);
+    MI.eraseFromParent();
+
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNB)).addImm(0xE7)
+        .addMBB(NonNegativeBB);
+    Register NegativeCopy = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register NonNegativeCopy = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    BuildMI(*NegativeBB, NegativeBB->end(), DL, TII.get(TargetOpcode::COPY),
+            NegativeCopy).addReg(TrueValue);
+    BuildMI(*NegativeBB, NegativeBB->end(), DL,
+            TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*NonNegativeBB, NonNegativeBB->end(), DL,
+            TII.get(TargetOpcode::COPY), NonNegativeCopy).addReg(FalseValue);
+    BuildMI(*Tail, Tail->getFirstNonPHI(), DL,
+            TII.get(TargetOpcode::PHI), Dst)
+        .addReg(NegativeCopy).addMBB(NegativeBB)
+        .addReg(NonNegativeCopy).addMBB(NonNegativeBB);
+    return Tail;
+  }
+  if (MI.getOpcode() == MCS51::SELECT_EQ8ri ||
+      MI.getOpcode() == MCS51::SELECT_EQ8rr) {
+    MachineFunction &MF = *MBB->getParent();
+    Register Dst = MI.getOperand(0).getReg();
+    Register LHS = MI.getOperand(1).getReg();
+    bool IsImmediate = MI.getOpcode() == MCS51::SELECT_EQ8ri;
+    Register RHSReg = IsImmediate ? Register() : MI.getOperand(2).getReg();
+    int64_t RHSImm = IsImmediate ? MI.getOperand(2).getImm() : 0;
+    Register TrueValue = MI.getOperand(3).getReg();
+    Register FalseValue = MI.getOperand(4).getReg();
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
+    Tail->removeLiveIn(MCS51::DPTR);
+    MachineBasicBlock *EqualBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *NotEqualBB =
+        MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), EqualBB);
+    MF.insert(Tail->getIterator(), NotEqualBB);
+    while (!MBB->succ_empty())
+      MBB->removeSuccessor(MBB->succ_begin());
+    MBB->addSuccessor(EqualBB);
+    MBB->addSuccessor(NotEqualBB);
+    EqualBB->addSuccessor(Tail);
+    NotEqualBB->addSuccessor(Tail);
+    MI.eraseFromParent();
+
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    if (IsImmediate) {
+      if (RHSImm)
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+            .addImm(RHSImm);
+    } else {
+      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN)).addReg(RHSReg);
+    }
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(NotEqualBB);
+    Register EqualCopy = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register NotEqualCopy = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(TargetOpcode::COPY),
+            EqualCopy).addReg(TrueValue);
+    BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*NotEqualBB, NotEqualBB->end(), DL,
+            TII.get(TargetOpcode::COPY), NotEqualCopy).addReg(FalseValue);
+    BuildMI(*Tail, Tail->getFirstNonPHI(), DL,
+            TII.get(TargetOpcode::PHI), Dst)
+        .addReg(EqualCopy).addMBB(EqualBB)
+        .addReg(NotEqualCopy).addMBB(NotEqualBB);
+    return Tail;
   }
   if (MI.getOpcode() == MCS51::SELECT16) {
     MachineFunction &MF = *MBB->getParent();

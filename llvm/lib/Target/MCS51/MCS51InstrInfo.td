@@ -134,6 +134,18 @@ def SDT_MCS51Select8 : SDTypeProfile<1, 3, [SDTCisVT<0, i8>,
                                            SDTCisVT<2, i8>,
                                            SDTCisVT<3, i8>] >;
 def MCS51select8 : SDNode<"MCS51ISD::SELECT8", SDT_MCS51Select8>;
+def SDT_MCS51SelectEq8 : SDTypeProfile<1, 4, [SDTCisVT<0, i8>,
+                                             SDTCisVT<1, i8>,
+                                             SDTCisVT<2, i8>,
+                                             SDTCisVT<3, i8>,
+                                             SDTCisVT<4, i8>] >;
+def MCS51selecteq8 : SDNode<"MCS51ISD::SELECT_EQ8", SDT_MCS51SelectEq8>;
+def SDT_MCS51SelectSign8 : SDTypeProfile<1, 3, [SDTCisVT<0, i8>,
+                                               SDTCisVT<1, i8>,
+                                               SDTCisVT<2, i8>,
+                                               SDTCisVT<3, i8>] >;
+def MCS51selectsign8 : SDNode<"MCS51ISD::SELECT_SIGN8",
+                              SDT_MCS51SelectSign8>;
 def SDT_MCS51Select16 : SDTypeProfile<1, 3, [SDTCisVT<0, i16>,
                                             SDTCisVT<1, i8>,
                                             SDTCisVT<2, i16>,
@@ -559,6 +571,52 @@ def MCS51Imm8 : Operand<i8>,
   let EncoderMethod = "getImm8OpValue";
   let DecoderMethod = "DecodeImm8";
 }
+
+def SELECT_EQ8ri : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51Imm8:$rhs,
+                           MCS51GPR8:$tv, MCS51GPR8:$fv);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def SELECT_EQ8rr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs,
+                           MCS51GPR8:$tv, MCS51GPR8:$fv);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def SELECT_SIGN8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$tv,
+                           MCS51GPR8:$fv);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def : Pat<(MCS51selecteq8 MCS51GPR8:$lhs, MCS51Imm8:$rhs,
+                           MCS51GPR8:$tv, MCS51GPR8:$fv),
+          (SELECT_EQ8ri MCS51GPR8:$lhs, MCS51Imm8:$rhs,
+                        MCS51GPR8:$tv, MCS51GPR8:$fv)>;
+def : Pat<(MCS51selecteq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs,
+                           MCS51GPR8:$tv, MCS51GPR8:$fv),
+          (SELECT_EQ8rr MCS51GPR8:$lhs, MCS51GPR8:$rhs,
+                        MCS51GPR8:$tv, MCS51GPR8:$fv)>;
+def : Pat<(MCS51selectsign8 MCS51GPR8:$lhs, MCS51GPR8:$tv,
+                            MCS51GPR8:$fv),
+          (SELECT_SIGN8 MCS51GPR8:$lhs, MCS51GPR8:$tv,
+                        MCS51GPR8:$fv)>;
 
 def RET_I32_IMM : Instruction {
   let Namespace = "MCS51";
