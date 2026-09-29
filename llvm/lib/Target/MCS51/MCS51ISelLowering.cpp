@@ -3769,8 +3769,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MachineInstr *RHSDef = nullptr;
     if (valueRemainsInAccumulator(RHS, RHSDef)) {
       RHSDef->eraseFromParent();
-      if (IsSubtraction)
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::XCH_A_RN), LHS).addReg(LHS);
+      if (IsSubtraction) {
+        Register SwappedLHS = MRI.createVirtualRegister(&MCS51::MCS51GPR8RegClass);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::XCH_A_RN), SwappedLHS)
+            .addReg(LHS);
+        LHS = SwappedLHS;
+      }
       if (IsSubtraction)
         BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
       BuildMI(*MBB, MII, DL, TII.get(AccOpcode)).addReg(LHS);

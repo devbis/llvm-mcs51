@@ -3,6 +3,8 @@
 #include "MCS51InstrInfo.h"
 #include "MCS51.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -22,6 +24,64 @@
 using namespace llvm;
 
 namespace {
+class MCS51AccCopyHoisting final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51AccCopyHoisting() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    MachineRegisterInfo &MRI = MF.getRegInfo();
+    bool Changed = false;
+    SmallVector<Register, 32> AccValues;
+    for (MachineBasicBlock &MBB : MF)
+      for (MachineInstr &MI : MBB)
+        for (const MachineOperand &MO : MI.operands())
+          if (MO.isReg() && MO.isDef() && MO.getReg().isVirtual() &&
+              MRI.getRegClass(MO.getReg()) == &MCS51::MCS51ARegRegClass)
+            AccValues.push_back(MO.getReg());
+
+    for (Register AccValue : AccValues) {
+      MachineInstr *Def = MRI.getVRegDef(AccValue);
+      if (!Def || !Def->getParent())
+        continue;
+      MachineBasicBlock &MBB = *Def->getParent();
+      SmallVector<MachineInstr *, 4> Copies;
+      bool OnlyCopies = true;
+      for (MachineInstr &Use : MRI.use_nodbg_instructions(AccValue)) {
+        if (!Use.isCopy() || Use.getOperand(1).getReg() != AccValue ||
+            MRI.getRegClass(Use.getOperand(0).getReg()) !=
+                &MCS51::MCS51GPR8RegClass ||
+            !MRI.hasOneDef(Use.getOperand(0).getReg()) ||
+            Use.getParent() != &MBB) {
+          OnlyCopies = false;
+          break;
+        }
+        Copies.push_back(&Use);
+      }
+      if (!OnlyCopies || Copies.empty())
+        continue;
+
+      bool CopyBeforeDef = false;
+      for (auto I = MBB.begin(); I != Def->getIterator(); ++I)
+        CopyBeforeDef |= llvm::is_contained(Copies, &*I);
+      if (CopyBeforeDef)
+        continue;
+
+      auto InsertPt = std::next(Def->getIterator());
+      for (MachineInstr *Copy : Copies) {
+        MBB.splice(InsertPt, &MBB, Copy->getIterator());
+        Copy->getOperand(1).setIsKill(false);
+        InsertPt = std::next(Copy->getIterator());
+      }
+      Copies.back()->getOperand(1).setIsKill(true);
+      Changed = true;
+    }
+    return Changed;
+  }
+};
+
+char MCS51AccCopyHoisting::ID = 0;
+
 class MCS51PostRAPeephole final : public MachineFunctionPass {
 public:
   static char ID;
@@ -187,6 +247,8 @@ public:
     addPass(createMCS51GenericPointerLoweringPass());
     return false;
   }
+
+  void addPreRegAlloc() override { addPass(new MCS51AccCopyHoisting()); }
 
   void addPreEmitPass() override {
     addPass(new MCS51PostRAPeephole());
