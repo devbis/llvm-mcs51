@@ -1549,10 +1549,9 @@ def SPILL_STORE_A8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  // The expansion saves and restores A and PSW while forming the spill
-  // address, so they remain live through the pseudo as well.
-  let Defs = [A, PSW, R1, SP];
-  let Uses = [A, PSW, R1, SP];
+  // The src operand keeps A live; the expansion preserves both A and PSW.
+  let Defs = [R1, SP];
+  let Uses = [PSW, R1, SP];
 }
 
 // Frame-address and frame-memory pseudos also calculate SP + offset with ADD.
