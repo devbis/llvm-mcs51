@@ -1365,6 +1365,7 @@ def MOV_DPTR_IMM : Instruction {
   let AsmString = "mov dptr, #$imm";
   let Size = 3;
   let hasSideEffects = 0;
+  let isReMaterializable = 1;
   bits<1> dst;
   let dst = 0;
   bits<16> imm;

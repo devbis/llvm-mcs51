@@ -19,10 +19,28 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Utils.h"
 
 using namespace llvm;
 
 namespace {
+class MCS51RemoveOptNone final : public FunctionPass {
+public:
+  static char ID;
+  MCS51RemoveOptNone() : FunctionPass(ID) {}
+
+  bool runOnFunction(Function &F) override {
+    if (!F.hasFnAttribute(Attribute::OptimizeNone))
+      return false;
+    F.removeFnAttr(Attribute::OptimizeNone);
+    return true;
+  }
+};
+
+char MCS51RemoveOptNone::ID = 0;
+
 class MCS51AccCopyHoisting final : public MachineFunctionPass {
 public:
   static char ID;
@@ -241,10 +259,25 @@ public:
     return getTM<MCS51TargetMachine>();
   }
 
+  void addFastRegAlloc() override {
+    // The fast allocator can create more spill slots than the 8051's 8-bit
+    // stack frame can address, even for functions that the optimized
+    // allocator handles comfortably. Use the optimized allocation pipeline
+    // at -O0 as well, unless the user explicitly selected an allocator.
+    if (usingDefaultRegAlloc())
+      addOptimizedRegAlloc();
+    else
+      TargetPassConfig::addFastRegAlloc();
+  }
+
   void addIRPasses() override {
     addPass(createMCS51OverlayPass());
     addPass(createMCS51StackAddressLoweringPass());
     TargetPassConfig::addIRPasses();
+    if (getOptLevel() == CodeGenOptLevel::None) {
+      addPass(new MCS51RemoveOptNone());
+      addPass(createPromoteMemoryToRegisterPass());
+    }
   }
 
   bool addInstSelector() override {
@@ -254,6 +287,10 @@ public:
 
   bool addPreISel() override {
     addPass(createMCS51GenericPointerLoweringPass());
+    if (getOptLevel() == CodeGenOptLevel::None) {
+      addPass(createInstructionCombiningPass());
+      addPass(createCFGSimplificationPass());
+    }
     return false;
   }
 
