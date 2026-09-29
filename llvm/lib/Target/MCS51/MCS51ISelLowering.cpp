@@ -174,6 +174,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRL, MVT::i8, Legal);
   setOperationAction(ISD::ROTL, MVT::i8, Expand);
   setOperationAction(ISD::ROTL, MVT::i16, Expand);
+  setOperationAction(ISD::ROTR, MVT::i8, Expand);
+  setOperationAction(ISD::ROTR, MVT::i16, Expand);
   setOperationAction(ISD::SRA, MVT::i8, Custom);
   setOperationAction(ISD::SRA, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i16, Custom);
@@ -2489,7 +2491,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MF.insert(Tail->getIterator(), Zero);
     MF.insert(Tail->getIterator(), Loop);
     Loop->addLiveIn(MCS51::B);
-    Loop->addLiveIn(MCS51::R0);
+    Loop->addLiveIn(MCS51::R2);
     CheckAmount->addLiveIn(MCS51::B);
     LoadCount->addLiveIn(MCS51::B);
     Tail->addLiveIn(MCS51::B);
@@ -2542,7 +2544,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x82);
     BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(MCS51::R0, RegState::Define);
+        .addReg(MCS51::R2, RegState::Define);
     BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::JZ))
         .addMBB(Tail);
     BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::LJMP))
@@ -2591,8 +2593,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_B_A));
     }
-    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DJNZ_RN), MCS51::R0)
-        .addReg(MCS51::R0)
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DJNZ_RN), MCS51::R2)
+        .addReg(MCS51::R2)
         .addMBB(Loop);
 
     BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
