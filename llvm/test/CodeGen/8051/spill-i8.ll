@@ -22,3 +22,29 @@ entry:
 ; CHECK: mov @r1, a
 ; CHECK: dec 129
 ; CHECK: ret
+
+declare void @entry_barrier()
+
+define i8 @main(i8 %a, i8 %b, i8 %c, i8 %d, i8 %e, i8 %f, i8 %g, i8 %h,
+                i8 %i, i8 %j) {
+entry:
+  call void @entry_barrier()
+  %ab = add i8 %a, %b
+  %abc = add i8 %ab, %c
+  %abcd = add i8 %abc, %d
+  %abcde = add i8 %abcd, %e
+  %abcdef = add i8 %abcde, %f
+  %abcdefg = add i8 %abcdef, %g
+  %abcdefgh = add i8 %abcdefg, %h
+  %abcdefghi = add i8 %abcdefgh, %i
+  %abcdefghij = add i8 %abcdefghi, %j
+  ret i8 %abcdefghij
+}
+
+; The freestanding entry point is not called by ordinary C code and need not
+; restore the register bank when it returns to the startup halt loop.
+; CHECK-LABEL: main:
+; CHECK-NOT: push
+; CHECK: lcall entry_barrier
+; CHECK-NOT: pop
+; CHECK: ret
