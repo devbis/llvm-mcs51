@@ -358,6 +358,73 @@ public:
           return Dead;
         };
 
+        // A sign mask used only to conditionally add a byte can be replaced
+        // with a branch around the addition. This avoids materializing
+        // 0x00/0xff, masking the value, and adding zero on the false path.
+        if (!HasObservablePSWAccess && I->getOpcode() == MCS51::MOV_C_BIT &&
+            I->getNumOperands() && I->getOperand(0).isImm()) {
+          MachineInstr *ClearA = I->getNextNode();
+          MachineInstr *Subtract = ClearA ? ClearA->getNextNode() : nullptr;
+          MachineInstr *And = Subtract ? Subtract->getNextNode() : nullptr;
+          MachineInstr *Add = And ? And->getNextNode() : nullptr;
+          MachineInstr *Store = Add ? Add->getNextNode() : nullptr;
+          if (ClearA && Subtract && And && Add && Store &&
+              ClearA->getOpcode() == MCS51::CLR_A &&
+              Subtract->getOpcode() == MCS51::SUBB_A_IMM &&
+              Subtract->getNumOperands() > 1 &&
+              Subtract->getOperand(1).isImm() &&
+              Subtract->getOperand(1).getImm() == 0 &&
+              And->getOpcode() == MCS51::ANL_A_RN &&
+              And->getNumOperands() && And->getOperand(0).isReg() &&
+              Add->getOpcode() == MCS51::ADD_A_RN &&
+              Add->getNumOperands() && Add->getOperand(0).isReg() &&
+              Store->getOpcode() == MCS51::MOV_RN_A &&
+              Store->getNumOperands() && Store->getOperand(0).isReg()) {
+            MachineFunction &MF = *MBB.getParent();
+            Register ValueReg = And->getOperand(0).getReg();
+            Register SumReg = Add->getOperand(0).getReg();
+            unsigned BitAddress = I->getOperand(0).getImm();
+            MachineBasicBlock *Tail = MBB.splitAt(*Store);
+            if (Tail == &MBB) {
+              Tail = MF.CreateMachineBasicBlock(MBB.getBasicBlock());
+              MF.insert(std::next(MBB.getIterator()), Tail);
+              Tail->transferSuccessorsAndUpdatePHIs(&MBB);
+              MBB.addSuccessor(Tail);
+            }
+            MachineBasicBlock *AddBlock =
+                MF.CreateMachineBasicBlock(MBB.getBasicBlock());
+            MF.insert(Tail->getIterator(), AddBlock);
+            while (!MBB.succ_empty())
+              MBB.removeSuccessor(MBB.succ_begin());
+            MBB.addSuccessor(AddBlock);
+            MBB.addSuccessor(Tail);
+            AddBlock->addSuccessor(Tail);
+            AddBlock->addLiveIn(MCS51::A);
+            AddBlock->addLiveIn(ValueReg);
+            AddBlock->addLiveIn(SumReg);
+            Tail->addLiveIn(MCS51::A);
+
+            BuildMI(MBB, MBB.end(), I->getDebugLoc(),
+                    TII->get(MCS51::MOV_A_RN))
+                .addReg(SumReg);
+            BuildMI(MBB, MBB.end(), I->getDebugLoc(), TII->get(MCS51::CLR_C));
+            BuildMI(MBB, MBB.end(), I->getDebugLoc(), TII->get(MCS51::JNB))
+                .addImm(BitAddress)
+                .addMBB(Tail);
+            BuildMI(*AddBlock, AddBlock->end(), Add->getDebugLoc(),
+                    TII->get(MCS51::ADD_A_RN))
+                .addReg(ValueReg);
+
+            SmallVector<MachineInstr *, 5> Replaced;
+            Replaced.append({&*I, ClearA, Subtract, And, Add});
+            for (MachineInstr *MI : Replaced)
+              MI->eraseFromParent();
+            I = MBB.end();
+            Changed = true;
+            continue;
+          }
+        }
+
         // Moving a selected bit into A.7 with repeated CLR C / RLC A pairs
         // is unnecessary when the shifted accumulator is cleared immediately
         // afterward. Read the original bit directly from the bit-addressable
