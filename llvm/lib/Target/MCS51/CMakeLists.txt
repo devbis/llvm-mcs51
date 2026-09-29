@@ -50,12 +50,15 @@ add_llvm_target(MCS51CodeGen
   CodeGen
   Core
   MC
+  InstCombine
   MCS51Desc
   MCS51Info
   SelectionDAG
+  Scalar
   Support
   Target
   TargetParser
+  TransformUtils
 
   ADD_TO_COMPONENT
   MCS51
