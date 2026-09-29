@@ -17,13 +17,12 @@ MCS51RegisterInfo::MCS51RegisterInfo() : MCS51GenRegisterInfo(MCS51::PC) {}
 
 const MCPhysReg *
 MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
-  static const MCPhysReg CalleeSavedRegs[] = {0};
-  return CalleeSavedRegs;
+  return CSR_MCS51_SaveList;
 }
 
 const uint32_t *MCS51RegisterInfo::getCallPreservedMask(
     const MachineFunction &, CallingConv::ID) const {
-  return nullptr;
+  return CSR_MCS51_RegMask;
 }
 
 BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
