@@ -20,3 +20,7 @@ def RetCC_MCS51 : CallingConv<[
   CCIfType<[i8], CCAssignToReg<[A]>>,
   CCIfType<[i16], CCAssignToReg<[DPTR]>>
 ]>;
+
+// R2-R7 are callee-saved. This lets values remain in registers across calls
+// instead of spilling each one through the 8051's expensive SP-relative path.
+def CSR_MCS51 : CalleeSavedRegs<(add R2, R3, R4, R5, R6, R7)>;
