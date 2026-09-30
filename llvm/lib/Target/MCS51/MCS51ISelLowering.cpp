@@ -2377,17 +2377,18 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
           &MCS51::MCS51GPR8RegClass);
       MI.eraseFromParent();
 
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-      // JNZ tests A directly, so XOR with zero is unnecessary.
-      if (!(IsImmediate && RHSImm == 0)) {
-        if (IsImmediate)
-          BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
-              .addImm(RHSImm);
-        else
-          BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN))
-              .addReg(RHSReg);
+      // CJNE can perform the comparison and branch in one instruction. It is
+      // shorter than moving the operand to A, XORing with the immediate, and
+      // testing the result with JNZ.
+      if (IsImmediate)
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::CJNE_RN))
+            .addReg(LHS).addImm(RHSImm).addMBB(NotEqualBB);
+      else {
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::XRL_A_RN))
+            .addReg(RHSReg);
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(NotEqualBB);
       }
-      BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(NotEqualBB);
       BuildMI(*EqualBB, EqualBB->end(), DL,
               TII.get(MCS51::MOV_A_IMM), MCS51::A).addImm(1);
       BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(TargetOpcode::COPY),
