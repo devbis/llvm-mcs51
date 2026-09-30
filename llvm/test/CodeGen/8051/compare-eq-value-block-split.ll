@@ -17,5 +17,5 @@ merge:
 ; CHECK:       jnz
 ; CHECK:       mov a, #1
 ; CHECK:       sjmp
-; CHECK:       mov a, #0
+; CHECK:       clr a
 ; CHECK:       ret
