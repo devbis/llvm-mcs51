@@ -2311,6 +2311,27 @@ class MCS51FixedSFRLoad<bits<8> address, string mnemonic,
 }
 def MOV_DPL_A : MCS51FixedSFRStore<0x82, "mov 130, a", DPTR>;
 def MOV_DPH_A : MCS51FixedSFRStore<0x83, "mov 131, a", DPTR>;
+class MCS51DptrByteLoad<bits<8> address, string mnemonic> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51AReg:$dst);
+  let InOperandList = (ins MCS51PTR:$dptr);
+  let AsmString = mnemonic;
+  let Size = 2;
+  let hasSideEffects = 1;
+  let mayLoad = 1;
+  let Defs = [];
+  bits<1> dst;
+  let dst = 0;
+  // The source operand models the DPTR value for register allocation. Its
+  // physical encoding is fixed by the SFR address below.
+  bits<4> dptr;
+  let dptr = 0;
+  bits<16> Inst;
+  let Inst{7-0} = 0xE5;
+  let Inst{15-8} = address;
+}
+def MOV_A_DPL : MCS51DptrByteLoad<0x82, "mov a, 130">;
+def MOV_A_DPH : MCS51DptrByteLoad<0x83, "mov a, 131">;
 def MOV_SP_A : MCS51FixedSFRStore<0x81, "mov 129, a", SP>;
 def MOV_B_A : MCS51FixedSFRStore<0xF0, "mov 240, a", B>;
 def MOV_A_B : MCS51FixedSFRLoad<0xF0, "mov a, 240", B>;
