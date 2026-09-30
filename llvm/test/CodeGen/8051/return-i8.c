@@ -7,7 +7,7 @@
 unsigned char answer(void) { return 42; }
 
 // CHECK-LABEL: false_value:
-// CHECK: mov a, #0
+// CHECK: clr a
 // CHECK-NEXT: ret
 _Bool false_value(void) { return 0; }
 

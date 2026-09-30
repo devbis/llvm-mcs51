@@ -870,6 +870,15 @@ public:
           continue;
         }
         if (MI->getOpcode() == MCS51::MOV_A_IMM &&
+            MI->getNumOperands() > 1 && MI->getOperand(1).isImm() &&
+            MI->getOperand(1).getImm() == 0) {
+          BuildMI(*MI->getParent(), MI->getIterator(), MI->getDebugLoc(),
+                  TII->get(MCS51::CLR_A));
+          MI->eraseFromParent();
+          Changed = true;
+          continue;
+        }
+        if (MI->getOpcode() == MCS51::MOV_A_IMM &&
             MI->getOperand(0).isDead()) {
           MI->eraseFromParent();
           Changed = true;

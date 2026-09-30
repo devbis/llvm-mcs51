@@ -190,7 +190,7 @@ exit:
 ; CHECK: xrl a,
 ; CHECK: jnz
 ; CHECK: mov a, #1
-; CHECK: mov a, #0
+; CHECK: clr a
 
 ; CHECK-LABEL: branch_not_equal_i16:
 ; CHECK: xrl a,
