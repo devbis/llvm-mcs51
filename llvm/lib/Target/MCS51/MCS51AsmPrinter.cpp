@@ -27,10 +27,19 @@ using namespace llvm;
 namespace {
 static bool isAutoBankFunction(const Function &F, StringRef CPU,
                                bool FunctionSections) {
-  if (F.hasSection())
-    return isMCS51AutoBankSection(F.getSection());
-  return CPU.equals_insensitive("cc2530") && FunctionSections &&
-         F.getName() != "main" && !F.hasFnAttribute("interrupt");
+  if (F.hasSection() && isMCS51AutoBankSection(F.getSection()))
+    return true;
+  if (!CPU.equals_insensitive("cc2530") || !FunctionSections ||
+      F.getName() == "main" || F.hasFnAttribute("interrupt"))
+    return false;
+  if (!F.hasSection())
+    return true;
+  StringRef Section = F.getSection();
+  return Section.starts_with(".text.") && Section != ".text.main" &&
+         !Section.starts_with(".text.main.") &&
+         !Section.starts_with(".text.startup") &&
+         !Section.starts_with(".text.bankthunks.") &&
+         !Section.starts_with(".text.autobankthunks.");
 }
 
 class MCS51AsmPrinter final : public AsmPrinter {
