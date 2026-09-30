@@ -6,6 +6,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -1841,6 +1842,10 @@ public:
           Changed = true;
         }
       }
+    SmallVector<MachineBasicBlock *, 16> Blocks;
+    for (MachineBasicBlock &MBB : MF)
+      Blocks.push_back(&MBB);
+    fullyRecomputeLiveIns(Blocks);
     return Changed;
   }
 };
