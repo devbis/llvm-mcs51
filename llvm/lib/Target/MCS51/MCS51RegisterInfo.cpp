@@ -152,10 +152,8 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
     } else {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::INC_A));
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
-          .addReg(MCS51::R1, RegState::Define);
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
     }
@@ -186,10 +184,8 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
           .addImm(0x82);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::INC_A));
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
-          .addReg(MCS51::R1, RegState::Define);
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
           .addImm(0x83);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);

@@ -3,6 +3,7 @@
 #include "MCS51InstrInfo.h"
 #include "MCS51.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -12,9 +13,11 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "TargetInfo/MCS51TargetInfo.h"
@@ -25,6 +28,7 @@
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Utils.h"
 #include <optional>
+#include <utility>
 
 using namespace llvm;
 
@@ -44,6 +48,264 @@ public:
 
 char MCS51RemoveOptNone::ID = 0;
 
+// Large volatile XDATA operands are expensive to keep in caller registers on
+// the 8051. Outline their unsigned i32 comparison into one target runtime
+// helper, matching the helper-call strategy used by established 8051
+// compilers. The helper performs the volatile reads in source order.
+class MCS51OutlineXDataI32Compare final : public FunctionPass {
+public:
+  static char ID;
+  MCS51OutlineXDataI32Compare() : FunctionPass(ID) {}
+
+  static Function *getOrCreateHelper(Module &M) {
+    if (Function *Existing = M.getFunction("__mcs51_xdata_ult32"))
+      return Existing;
+
+    LLVMContext &Context = M.getContext();
+    Type *I32Ty = Type::getInt32Ty(Context);
+    Type *I1Ty = Type::getInt1Ty(Context);
+    Type *XDataPtrTy = PointerType::get(Context, 4);
+    FunctionType *FTy = FunctionType::get(
+        I1Ty, {XDataPtrTy, XDataPtrTy}, /*isVarArg=*/false);
+    Function *Helper = Function::Create(
+        FTy, GlobalValue::WeakODRLinkage, "__mcs51_xdata_ult32", M);
+    Helper->addFnAttr(Attribute::NoInline);
+    Helper->addFnAttr(Attribute::NoUnwind);
+    Helper->addFnAttr(Attribute::OptimizeForSize);
+    Helper->getArg(0)->setName("lhs");
+    Helper->getArg(1)->setName("rhs");
+
+    BasicBlock *Entry = BasicBlock::Create(Context, "entry", Helper);
+    IRBuilder<> Builder(Entry);
+    LoadInst *LHS = Builder.CreateLoad(I32Ty, Helper->getArg(0), "lhs.value");
+    LHS->setVolatile(true);
+    LHS->setAlignment(Align(1));
+    LoadInst *RHS = Builder.CreateLoad(I32Ty, Helper->getArg(1), "rhs.value");
+    RHS->setVolatile(true);
+    RHS->setAlignment(Align(1));
+    Builder.CreateRet(Builder.CreateICmpULT(LHS, RHS, "less"));
+    return Helper;
+  }
+
+  static Function *getOrCreateSentinelHelper(Module &M) {
+    if (Function *Existing =
+            M.getFunction("__mcs51_xdata_ult32_or_max"))
+      return Existing;
+
+    LLVMContext &Context = M.getContext();
+    Type *I32Ty = Type::getInt32Ty(Context);
+    Type *I1Ty = Type::getInt1Ty(Context);
+    Type *XDataPtrTy = PointerType::get(Context, 4);
+    FunctionType *FTy = FunctionType::get(
+        I1Ty, {XDataPtrTy, XDataPtrTy}, /*isVarArg=*/false);
+    Function *Helper = Function::Create(
+        FTy, GlobalValue::WeakODRLinkage,
+        "__mcs51_xdata_ult32_or_max", M);
+    Helper->addFnAttr(Attribute::NoInline);
+    Helper->addFnAttr(Attribute::NoUnwind);
+    Helper->addFnAttr(Attribute::OptimizeForSize);
+    Helper->getArg(0)->setName("lhs");
+    Helper->getArg(1)->setName("rhs");
+
+    BasicBlock *Entry = BasicBlock::Create(Context, "entry", Helper);
+    BasicBlock *IsMax = BasicBlock::Create(Context, "is.max", Helper);
+    BasicBlock *Compare = BasicBlock::Create(Context, "compare", Helper);
+    IRBuilder<> Builder(Entry);
+    LoadInst *LHS = Builder.CreateLoad(I32Ty, Helper->getArg(0), "lhs.value");
+    LHS->setVolatile(true);
+    LHS->setAlignment(Align(1));
+    Value *IsMaxValue = Builder.CreateICmpEQ(
+        LHS, ConstantInt::get(I32Ty, UINT32_MAX), "lhs.is.max");
+    Builder.CreateCondBr(IsMaxValue, IsMax, Compare);
+    Builder.SetInsertPoint(IsMax);
+    Builder.CreateRet(ConstantInt::getTrue(Context));
+    Builder.SetInsertPoint(Compare);
+    LoadInst *RHS = Builder.CreateLoad(I32Ty, Helper->getArg(1), "rhs.value");
+    RHS->setVolatile(true);
+    RHS->setAlignment(Align(1));
+    Builder.CreateRet(Builder.CreateICmpULT(LHS, RHS, "less"));
+    return Helper;
+  }
+
+  static bool outlineSentinelCompare(Function &F) {
+    if (F.size() != 3)
+      return false;
+
+    ICmpInst *IsMax = nullptr;
+    ICmpInst *IsLess = nullptr;
+    LoadInst *LHS = nullptr;
+    LoadInst *RHS = nullptr;
+    CondBrInst *Dispatch = nullptr;
+    PHINode *Result = nullptr;
+    StoreInst *ResultStore = nullptr;
+    ReturnInst *Return = nullptr;
+    ZExtInst *Extended = nullptr;
+
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB) {
+        if (auto *Cmp = dyn_cast<ICmpInst>(&I)) {
+          if (Cmp->getPredicate() == ICmpInst::ICMP_EQ)
+            IsMax = Cmp;
+          else if (Cmp->getPredicate() == ICmpInst::ICMP_ULT)
+            IsLess = Cmp;
+        } else if (auto *Load = dyn_cast<LoadInst>(&I)) {
+          if (!LHS)
+            LHS = Load;
+          else if (!RHS)
+            RHS = Load;
+          else
+            return false;
+        } else if (auto *Branch = dyn_cast<CondBrInst>(&I)) {
+          Dispatch = Branch;
+        } else if (auto *Phi = dyn_cast<PHINode>(&I)) {
+          Result = Phi;
+        } else if (auto *Store = dyn_cast<StoreInst>(&I)) {
+          ResultStore = Store;
+        } else if (auto *Ret = dyn_cast<ReturnInst>(&I)) {
+          Return = Ret;
+        } else if (auto *ZExt = dyn_cast<ZExtInst>(&I)) {
+          Extended = ZExt;
+        }
+      }
+
+    if (!IsMax || !IsLess || !LHS || !RHS || !Dispatch || !Result ||
+        !ResultStore || !Return || !Extended ||
+        Dispatch->getCondition() != IsMax || !LHS->isVolatile() ||
+        !RHS->isVolatile() || !LHS->getType()->isIntegerTy(32) ||
+        LHS->getType() != RHS->getType() || !ResultStore->isVolatile() ||
+        !ResultStore->getValueOperand()->getType()->isIntegerTy(8) ||
+        !isa<ConstantInt>(IsMax->getOperand(1)) ||
+        !cast<ConstantInt>(IsMax->getOperand(1))->isMinusOne() ||
+        IsMax->getOperand(0) != LHS || IsLess->getOperand(0) != LHS ||
+        IsLess->getOperand(1) != RHS || Extended->getOperand(0) != IsLess ||
+        ResultStore->getValueOperand() != Result ||
+        Extended->getType() != Result->getType() ||
+        !LHS->hasNUses(2) || !RHS->hasOneUse() ||
+        !isa<PointerType>(LHS->getPointerOperandType()) ||
+        !isa<PointerType>(RHS->getPointerOperandType()) ||
+        cast<PointerType>(LHS->getPointerOperandType())->getAddressSpace() != 4 ||
+        cast<PointerType>(RHS->getPointerOperandType())->getAddressSpace() != 4 ||
+        !isa<PointerType>(ResultStore->getPointerOperandType()) ||
+        cast<PointerType>(ResultStore->getPointerOperandType())
+                ->getAddressSpace() != 4 ||
+        !isa<Constant>(LHS->getPointerOperand()) ||
+        !isa<Constant>(RHS->getPointerOperand()) ||
+        !isa<Constant>(ResultStore->getPointerOperand()) ||
+        Return->getReturnValue())
+      return false;
+
+    BasicBlock *Entry = Dispatch->getParent();
+    BasicBlock *Continue = nullptr;
+    BasicBlock *Join = Result->getParent();
+    for (unsigned I = 0; I != 2; ++I) {
+      BasicBlock *Successor = Dispatch->getSuccessor(I);
+      if (Successor == Join)
+        continue;
+      if (Continue)
+        return false;
+      Continue = Successor;
+    }
+    if (!Continue || Continue == Entry || Join == Entry ||
+        pred_size(Join) != 2 || Result->getNumIncomingValues() != 2 ||
+        !isa<UncondBrInst>(Continue->getTerminator()) ||
+        cast<UncondBrInst>(Continue->getTerminator())->getSuccessor(0) != Join)
+      return false;
+
+    bool HasTrueEdge = false;
+    bool HasCompareEdge = false;
+    for (unsigned I = 0; I != Result->getNumIncomingValues(); ++I) {
+      Value *Incoming = Result->getIncomingValue(I);
+      BasicBlock *IncomingBlock = Result->getIncomingBlock(I);
+      if (IncomingBlock == Entry) {
+        auto *Constant = dyn_cast<ConstantInt>(Incoming);
+        HasTrueEdge = Constant && Constant->isOne();
+      } else if (IncomingBlock == Continue) {
+        HasCompareEdge = Incoming == Extended;
+      }
+    }
+    if (!HasTrueEdge || !HasCompareEdge || Dispatch->getSuccessor(0) != Join)
+      return false;
+
+    SmallPtrSet<Instruction *, 16> ExpectedInstructions = {
+        LHS, IsMax, Dispatch, RHS, IsLess, Extended,
+        cast<Instruction>(Continue->getTerminator()), Result, ResultStore,
+        Return};
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (!I.isDebugOrPseudoInst() && !ExpectedInstructions.contains(&I))
+          return false;
+
+    Value *LHSAddress = LHS->getPointerOperand();
+    Value *RHSAddress = RHS->getPointerOperand();
+    Value *ResultAddress = ResultStore->getPointerOperand();
+    Align ResultAlign = ResultStore->getAlign();
+    DebugLoc Debug = ResultStore->getDebugLoc();
+    Function *Helper = getOrCreateSentinelHelper(*F.getParent());
+    F.deleteBody();
+    BasicBlock *NewEntry = BasicBlock::Create(F.getContext(), "entry", &F);
+    IRBuilder<> Builder(NewEntry);
+    CallInst *Call = Builder.CreateCall(Helper, {LHSAddress, RHSAddress},
+                                        "counter.valid");
+    Call->setDebugLoc(Debug);
+    Value *ByteResult = Builder.CreateZExt(Call, Builder.getInt8Ty());
+    StoreInst *Store = Builder.CreateStore(ByteResult, ResultAddress);
+    Store->setVolatile(true);
+    Store->setAlignment(ResultAlign);
+    Store->setDebugLoc(Debug);
+    Builder.CreateRetVoid();
+    return true;
+  }
+
+  bool runOnFunction(Function &F) override {
+    if (F.getName().starts_with("__mcs51_"))
+      return false;
+
+    if (outlineSentinelCompare(F))
+      return true;
+
+    SmallVector<ICmpInst *, 4> Comparisons;
+    for (BasicBlock &BB : F)
+      for (Instruction &I : BB)
+        if (auto *Cmp = dyn_cast<ICmpInst>(&I))
+          if (Cmp->getPredicate() == ICmpInst::ICMP_ULT &&
+              Cmp->getOperand(0)->getType()->isIntegerTy(32))
+            Comparisons.push_back(Cmp);
+
+    bool Changed = false;
+    for (ICmpInst *Cmp : Comparisons) {
+      auto *LHS = dyn_cast<LoadInst>(Cmp->getOperand(0));
+      auto *RHS = dyn_cast<LoadInst>(Cmp->getOperand(1));
+      if (!LHS || !RHS || !LHS->isVolatile() || !RHS->isVolatile() ||
+          !LHS->hasOneUse() || !RHS->hasOneUse() ||
+          LHS->getType() != RHS->getType() ||
+          !LHS->getType()->isIntegerTy(32))
+        continue;
+      auto *LHSPtrTy = dyn_cast<PointerType>(LHS->getPointerOperandType());
+      auto *RHSPtrTy = dyn_cast<PointerType>(RHS->getPointerOperandType());
+      if (!LHSPtrTy || !RHSPtrTy || LHSPtrTy->getAddressSpace() != 4 ||
+          RHSPtrTy->getAddressSpace() != 4)
+        continue;
+
+      Function *Helper = getOrCreateHelper(*F.getParent());
+      IRBuilder<> Builder(Cmp);
+      CallInst *Call = Builder.CreateCall(
+          Helper, {LHS->getPointerOperand(), RHS->getPointerOperand()},
+          Cmp->getName() + ".outlined");
+      Call->setDebugLoc(Cmp->getDebugLoc());
+      Cmp->replaceAllUsesWith(Call);
+      Cmp->eraseFromParent();
+      if (LHS->use_empty())
+        LHS->eraseFromParent();
+      if (RHS->use_empty())
+        RHS->eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
+  }
+};
+
+char MCS51OutlineXDataI32Compare::ID = 0;
+
 // Integer promotions turn byte-sized mask tests into i16 operations. The
 // generic optimizer does not always push a zero extension through the AND,
 // leaving the 8051 to materialize and compare both bytes. Narrow tests against
@@ -53,14 +315,112 @@ public:
   static char ID;
   MCS51NarrowByteMaskTests() : FunctionPass(ID) {}
 
+  static PHINode *getSmallLoopIndex(Value *Index, unsigned &LimitOut) {
+    auto *IndexPhi = dyn_cast<PHINode>(Index);
+    if (!IndexPhi)
+      if (auto *ZExt = dyn_cast<ZExtInst>(Index))
+        IndexPhi = dyn_cast<PHINode>(ZExt->getOperand(0));
+    if (!IndexPhi || !IndexPhi->getType()->isIntegerTy())
+      return nullptr;
+
+    auto *Branch = dyn_cast<CondBrInst>(IndexPhi->getParent()->getTerminator());
+    if (!Branch)
+      return nullptr;
+    auto *ExitTest = dyn_cast<ICmpInst>(Branch->getCondition());
+    if (!ExitTest || ExitTest->getPredicate() != ICmpInst::ICMP_EQ)
+      return nullptr;
+
+    auto *ControlPhi = dyn_cast<PHINode>(ExitTest->getOperand(0));
+    ConstantInt *Limit = dyn_cast<ConstantInt>(ExitTest->getOperand(1));
+    if (!ControlPhi) {
+      ControlPhi = dyn_cast<PHINode>(ExitTest->getOperand(1));
+      Limit = dyn_cast<ConstantInt>(ExitTest->getOperand(0));
+    }
+    if (!ControlPhi || !Limit ||
+        ControlPhi->getParent() != IndexPhi->getParent() ||
+        ControlPhi->getType() != Limit->getType() || Limit->isZero() ||
+        Limit->getValue().uge(8))
+      return nullptr;
+
+    auto IsOne = [](Value *V) {
+      auto *C = dyn_cast<ConstantInt>(V);
+      return C && C->isOne();
+    };
+    auto GetLoopEdges = [&](PHINode *Phi)
+        -> std::pair<BasicBlock *, BasicBlock *> {
+      if (Phi->getNumIncomingValues() != 2)
+        return {nullptr, nullptr};
+      BasicBlock *Backedge = nullptr;
+      BasicBlock *Entry = nullptr;
+      bool HasZeroEntry = false;
+      for (unsigned I = 0; I != 2; ++I) {
+        Value *Incoming = Phi->getIncomingValue(I);
+        BasicBlock *IncomingBlock = Phi->getIncomingBlock(I);
+        auto *Add = dyn_cast<BinaryOperator>(Incoming);
+        if (Add && Add->getOpcode() == Instruction::Add &&
+            Add->getType() == Phi->getType() &&
+            ((Add->getOperand(0) == Phi && IsOne(Add->getOperand(1))) ||
+             (Add->getOperand(1) == Phi && IsOne(Add->getOperand(0))))) {
+          auto *LatchBranch =
+              dyn_cast<UncondBrInst>(IncomingBlock->getTerminator());
+          if (!LatchBranch ||
+              LatchBranch->getSuccessor(0) != Phi->getParent())
+            return {nullptr, nullptr};
+          Backedge = IncomingBlock;
+        } else if (auto *Initial = dyn_cast<ConstantInt>(Incoming)) {
+          HasZeroEntry = Initial->isZero();
+          Entry = IncomingBlock;
+        } else {
+          return {nullptr, nullptr};
+        }
+      }
+      if (!HasZeroEntry || !Backedge || Entry == Backedge)
+        return {nullptr, nullptr};
+      return {Entry, Backedge};
+    };
+
+    auto IndexEdges = GetLoopEdges(IndexPhi);
+    auto ControlEdges = GetLoopEdges(ControlPhi);
+    BasicBlock *IndexEntry = IndexEdges.first;
+    BasicBlock *Backedge = IndexEdges.second;
+    BasicBlock *ControlEntry = ControlEdges.first;
+    BasicBlock *ControlBackedge = ControlEdges.second;
+
+    auto CanReachBackedge = [&](BasicBlock *Start) {
+      SmallVector<BasicBlock *, 8> Worklist(1, Start);
+      SmallPtrSet<BasicBlock *, 16> Visited;
+      while (!Worklist.empty()) {
+        BasicBlock *Current = Worklist.pop_back_val();
+        if (Current == Backedge)
+          return true;
+        if (!Visited.insert(Current).second)
+          continue;
+        for (BasicBlock *Successor : successors(Current))
+          Worklist.push_back(Successor);
+      }
+      return false;
+    };
+
+    // The loop header exits when the induction variable reaches Limit. Its
+    // only recurrent value is Phi + 1, so every executed shift count is below
+    // Limit and fits in three bits.
+    if (!IndexEntry || IndexEntry != ControlEntry || !Backedge ||
+        Backedge != ControlBackedge ||
+        CanReachBackedge(Branch->getSuccessor(0)) ||
+        !CanReachBackedge(Branch->getSuccessor(1)))
+      return nullptr;
+    LimitOut = Limit->getZExtValue();
+    return IndexPhi;
+  }
+
   bool runOnFunction(Function &F) override {
+    bool Changed = false;
     SmallVector<ICmpInst *, 16> Tests;
     for (BasicBlock &BB : F)
       for (Instruction &I : BB)
         if (auto *Cmp = dyn_cast<ICmpInst>(&I))
           Tests.push_back(Cmp);
 
-    bool Changed = false;
     for (ICmpInst *Cmp : Tests) {
       if (Cmp->getPredicate() != ICmpInst::ICMP_EQ &&
           Cmp->getPredicate() != ICmpInst::ICMP_NE)
@@ -75,6 +435,59 @@ public:
         continue;
 
       auto *And = dyn_cast<BinaryOperator>(TestValue);
+      if (And && And->getOpcode() == Instruction::And &&
+          And->getType()->isIntegerTy(16)) {
+        auto *Shift = dyn_cast<BinaryOperator>(And->getOperand(0));
+        Value *ExtendedByte = And->getOperand(1);
+        if (!Shift) {
+          Shift = dyn_cast<BinaryOperator>(And->getOperand(1));
+          ExtendedByte = And->getOperand(0);
+        }
+        auto *One = Shift && Shift->getOpcode() == Instruction::Shl
+                        ? dyn_cast<ConstantInt>(Shift->getOperand(0))
+                        : nullptr;
+        auto *ZExt = dyn_cast<ZExtInst>(ExtendedByte);
+        unsigned IndexLimit = 0;
+        PHINode *Index = Shift ? getSmallLoopIndex(Shift->getOperand(1),
+                                                  IndexLimit)
+                               : nullptr;
+        if (One && One->isOne() && ZExt &&
+            ZExt->getSrcTy()->isIntegerTy(8) && Index) {
+          IRBuilder<> Builder(Cmp);
+          Value *ShiftCount = Index;
+          if (Index->getType() != Builder.getInt8Ty())
+            ShiftCount = Builder.CreateTrunc(
+                Index, Builder.getInt8Ty(), Cmp->getName() + ".bit.index");
+          Value *TestedBits = nullptr;
+          if (IndexLimit == 2) {
+            Value *IsZero = Builder.CreateICmpEQ(
+                ShiftCount, ConstantInt::get(ShiftCount->getType(), 0),
+                Cmp->getName() + ".index.zero");
+            Value *Mask = Builder.CreateSelect(
+                IsZero, ConstantInt::get(Builder.getInt8Ty(), 1),
+                ConstantInt::get(Builder.getInt8Ty(), 2),
+                Cmp->getName() + ".bit.mask");
+            TestedBits = Builder.CreateAnd(ZExt->getOperand(0), Mask,
+                                           Cmp->getName() + ".selected.bit");
+          } else {
+            Value *ShiftedByte = Builder.CreateLShr(
+                ZExt->getOperand(0), ShiftCount,
+                Cmp->getName() + ".bit.shifted");
+            TestedBits = Builder.CreateAnd(
+                ShiftedByte, ConstantInt::get(Builder.getInt8Ty(), 1),
+                Cmp->getName() + ".bit");
+          }
+          Value *NarrowCmp = Builder.CreateICmp(
+              Cmp->getPredicate(), TestedBits,
+              ConstantInt::get(Builder.getInt8Ty(), 0),
+              Cmp->getName() + ".byte");
+          Cmp->replaceAllUsesWith(NarrowCmp);
+          Cmp->eraseFromParent();
+          Changed = true;
+          continue;
+        }
+      }
+
       if (!And || And->getOpcode() != Instruction::And ||
           !And->getType()->isIntegerTy(16))
         continue;
@@ -166,6 +579,147 @@ public:
 
 char MCS51FoldConditionalByteAdd::ID = 0;
 
+// Sink selected constant bytes into their return edges for IDATA globals.
+// A common store otherwise keeps the value in a register across the branch
+// join and may overwrite the indirect pointer register needed by later edges.
+class MCS51SinkIdataConstantStore final : public FunctionPass {
+public:
+  static char ID;
+  MCS51SinkIdataConstantStore() : FunctionPass(ID) {}
+
+  bool runOnFunction(Function &F) override {
+    SmallVector<BasicBlock *, 4> Blocks;
+    for (BasicBlock &BB : F)
+      Blocks.push_back(&BB);
+
+    for (BasicBlock *Join : Blocks) {
+      auto First = Join->getFirstNonPHIIt();
+      auto *Store = First == Join->end() ? nullptr
+                                         : dyn_cast<StoreInst>(&*First);
+      auto *Ret = Store ? dyn_cast<ReturnInst>(Store->getNextNode()) : nullptr;
+      auto *Selected = Store ? dyn_cast<PHINode>(Store->getValueOperand())
+                             : nullptr;
+      auto *PointerTy = Store ? dyn_cast<PointerType>(
+                                   Store->getPointerOperandType())
+                             : nullptr;
+      bool HasUnexpectedPhiUse = false;
+      for (PHINode &Phi : Join->phis())
+        if (&Phi == Selected ? !Phi.hasOneUse() || *Phi.user_begin() != Store
+                             : !Phi.use_empty())
+          HasUnexpectedPhiUse = true;
+      if (!Store || !Store->isVolatile() || !Ret || Ret->getReturnValue() ||
+          !Selected || Selected->getParent() != Join ||
+          !Selected->getType()->isIntegerTy(8) || !PointerTy ||
+          PointerTy->getAddressSpace() != 2 ||
+          !isa<Constant>(Store->getPointerOperand()) ||
+          Selected->getNumIncomingValues() != pred_size(Join) ||
+          HasUnexpectedPhiUse)
+        continue;
+
+      struct StoreEdge {
+        BasicBlock *Pred;
+        ConstantInt *Value;
+        SelectInst *Choice;
+        BasicBlock *Dispatch;
+      };
+      SmallVector<StoreEdge, 4> Edges;
+      SmallPtrSet<BasicBlock *, 8> SeenPreds;
+      bool CanSink = true;
+      for (unsigned I = 0; I != Selected->getNumIncomingValues(); ++I) {
+        BasicBlock *Pred = Selected->getIncomingBlock(I);
+        if (!SeenPreds.insert(Pred).second) {
+          CanSink = false;
+          break;
+        }
+        Value *Incoming = Selected->getIncomingValue(I);
+        ConstantInt *Constant = dyn_cast<ConstantInt>(Incoming);
+        SelectInst *Choice = dyn_cast<SelectInst>(Incoming);
+        if (Choice && Choice->getParent() != Pred)
+          Choice = nullptr;
+        auto *TrueValue = Choice
+                              ? dyn_cast<ConstantInt>(Choice->getTrueValue())
+                              : nullptr;
+        auto *FalseValue = Choice
+                               ? dyn_cast<ConstantInt>(Choice->getFalseValue())
+                               : nullptr;
+        if ((!Constant && (!Choice || !TrueValue || !FalseValue)) ||
+            (Constant &&
+             Constant->getType() != Store->getValueOperand()->getType()) ||
+            (Choice &&
+             (Choice->getType() != Store->getValueOperand()->getType() ||
+              Choice->getNextNode() != Pred->getTerminator()))) {
+          CanSink = false;
+          break;
+        }
+        auto *Term = Pred->getTerminator();
+        unsigned JoinSuccessor = Term->getNumSuccessors();
+        for (unsigned S = 0; S != Term->getNumSuccessors(); ++S)
+          if (Term->getSuccessor(S) == Join) {
+            if (JoinSuccessor != Term->getNumSuccessors()) {
+              CanSink = false;
+              break;
+            }
+            JoinSuccessor = S;
+          }
+        if (!CanSink || JoinSuccessor == Term->getNumSuccessors()) {
+          CanSink = false;
+          break;
+        }
+        Edges.push_back({Pred, Constant, Choice, nullptr});
+      }
+      if (!CanSink)
+        continue;
+
+      auto MakeStoreReturnBlock = [&](ConstantInt *Value,
+                                      const Twine &Name) {
+        BasicBlock *Edge = BasicBlock::Create(F.getContext(), Name, &F, Join);
+        IRBuilder<> Builder(Edge);
+        StoreInst *EdgeStore =
+            Builder.CreateStore(Value, Store->getPointerOperand());
+        EdgeStore->setVolatile(true);
+        EdgeStore->setAlignment(Store->getAlign());
+        EdgeStore->copyMetadata(*Store);
+        EdgeStore->setDebugLoc(Store->getDebugLoc());
+        auto *EdgeReturn = Builder.CreateRetVoid();
+        EdgeReturn->setDebugLoc(Ret->getDebugLoc());
+        return Edge;
+      };
+
+      for (StoreEdge &Edge : Edges) {
+        Instruction *Term = Edge.Pred->getTerminator();
+        unsigned JoinSuccessor = 0;
+        while (Term->getSuccessor(JoinSuccessor) != Join)
+          ++JoinSuccessor;
+        if (Edge.Choice) {
+          Edge.Dispatch = BasicBlock::Create(F.getContext(),
+                                             "mcs51.store.dispatch", &F, Join);
+          BasicBlock *TrueEdge = MakeStoreReturnBlock(
+              cast<ConstantInt>(Edge.Choice->getTrueValue()),
+              "mcs51.store.true");
+          BasicBlock *FalseEdge = MakeStoreReturnBlock(
+              cast<ConstantInt>(Edge.Choice->getFalseValue()),
+              "mcs51.store.false");
+          CondBrInst::Create(Edge.Choice->getCondition(), TrueEdge, FalseEdge,
+                             Edge.Dispatch);
+        } else {
+          Edge.Dispatch =
+              MakeStoreReturnBlock(Edge.Value, "mcs51.store.edge");
+        }
+        Term->setSuccessor(JoinSuccessor, Edge.Dispatch);
+      }
+
+      Join->eraseFromParent();
+      for (StoreEdge &Edge : Edges)
+        if (Edge.Choice && Edge.Choice->use_empty())
+          Edge.Choice->eraseFromParent();
+      return true;
+    }
+    return false;
+  }
+};
+
+char MCS51SinkIdataConstantStore::ID = 0;
+
 class MCS51AccCopyHoisting final : public MachineFunctionPass {
 public:
   static char ID;
@@ -234,6 +788,38 @@ public:
 
 char MCS51AccCopyHoisting::ID = 0;
 
+class MCS51RedundantSpillCopyElimination final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51RedundantSpillCopyElimination() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    bool Changed = false;
+    for (MachineBasicBlock &MBB : MF) {
+      for (auto I = MBB.begin(); I != MBB.end();) {
+        MachineInstr *Load = &*I++;
+        if (Load->getOpcode() != MCS51::SPILL_LOAD16 || I == MBB.end())
+          continue;
+        MachineInstr *Store = &*I;
+        if (Store->getOpcode() != MCS51::SPILL_STORE16 ||
+            Load->getOperand(0).getReg() != Store->getOperand(2).getReg() ||
+            Load->getOperand(1).getIndex() !=
+                Store->getOperand(0).getIndex() ||
+            Load->getOperand(2).getImm() != Store->getOperand(1).getImm())
+          continue;
+        MachineInstr *Next = Store->getNextNode();
+        I = Next ? Next->getIterator() : MBB.end();
+        Store->eraseFromParent();
+        Load->eraseFromParent();
+        Changed = true;
+      }
+    }
+    return Changed;
+  }
+};
+
+char MCS51RedundantSpillCopyElimination::ID = 0;
+
 class MCS51PostRAPeephole final : public MachineFunctionPass {
 public:
   static char ID;
@@ -242,19 +828,45 @@ public:
   bool runOnMachineFunction(MachineFunction &MF) override {
     const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    MachineRegisterInfo &MRI = MF.getRegInfo();
     bool Changed = false;
     bool HasObservablePSWAccess = false;
+    bool HasObservableDPTRAccess = false;
     for (const MachineBasicBlock &MBB : MF)
       for (const MachineInstr &MI : MBB) {
         // The sign-extension fold below uses SUBB, which changes AC and OV.
         // Those flags can be observed through PSW SFR/bit accesses or inline
         // assembly, so keep the original rotates in functions that expose
         // machine state this way.
-        if (MI.isInlineAsm())
+        if (MI.isInlineAsm()) {
           HasObservablePSWAccess = true;
+          HasObservableDPTRAccess = true;
+        }
+        bool HasVolatileMMO = false;
+        for (const MachineMemOperand *MMO : MI.memoperands())
+          HasVolatileMMO |= MMO->isVolatile();
         for (const MachineOperand &MO : MI.operands())
-          if (MO.isImm() && MO.getImm() >= 0xD0 && MO.getImm() <= 0xD7)
-            HasObservablePSWAccess = true;
+          if (MO.isImm()) {
+            if (MO.getImm() >= 0xD0 && MO.getImm() <= 0xD7)
+              HasObservablePSWAccess = true;
+            if (HasVolatileMMO &&
+                (MO.getImm() == 0x82 || MO.getImm() == 0x83))
+              HasObservableDPTRAccess = true;
+          }
+      }
+    for (MachineBasicBlock &MBB : MF)
+      for (auto I = MBB.begin(); I != MBB.end();) {
+        MachineInstr *MI = &*I++;
+        if (MI->getOpcode() == MCS51::MOV_A_IMM &&
+            MI->getOperand(0).isDead()) {
+          MI->eraseFromParent();
+          Changed = true;
+          continue;
+        }
+        if (!MI->isDead(MRI))
+          continue;
+        MI->eraseFromParent();
+        Changed = true;
       }
     for (MachineBasicBlock &MBB : MF) {
       SmallVector<MachineInstr *, 4> Calls;
@@ -358,7 +970,7 @@ public:
             CopyAToR1->getOperand(0).getReg() == MCS51::R1) {
           BuildMI(MBB, CopySPToA, CopySPToA->getDebugLoc(),
                   TII->get(MCS51::MOV_RN_DIRECT))
-              .addReg(MCS51::R1)
+              .addReg(MCS51::R1, RegState::Define)
               .addImm(0x81);
           auto Next = CopyAToR1->getNextNode();
           CopySPToA->eraseFromParent();
@@ -735,6 +1347,11 @@ public:
             }
             auto AfterAddress = std::next(AddressMove);
             if (Delta >= -3 && Delta <= 3) {
+              // The previous SP-relative pointer value may have had its last
+              // use marked killed. Reusing that physical register extends
+              // its live range to the adjusted address, so remove stale kill
+              // flags before inserting the new use.
+              MRI.clearKillFlags(AddressReg);
               unsigned Opcode = Delta > 0 ? MCS51::INC_RN : MCS51::DEC_RN;
               int Steps = Delta > 0 ? Delta : -Delta;
               for (int Count = 0; Count < Steps; ++Count)
@@ -777,6 +1394,20 @@ public:
             PointerReg == MCS51::R0 ? &R0StackOffset
             : PointerReg == MCS51::R1 ? &R1StackOffset
                                       : nullptr;
+        Register StepReg = I->getNumOperands() && I->getOperand(0).isReg()
+                               ? I->getOperand(0).getReg()
+                               : Register();
+        std::optional<int> *StepOffset =
+            StepReg == MCS51::R0 ? &R0StackOffset
+            : StepReg == MCS51::R1 ? &R1StackOffset
+                                   : nullptr;
+        if (StepOffset && *StepOffset &&
+            (I->getOpcode() == MCS51::INC_RN ||
+             I->getOpcode() == MCS51::DEC_RN)) {
+          **StepOffset += I->getOpcode() == MCS51::INC_RN ? 1 : -1;
+          ++I;
+          continue;
+        }
         if (PointerOffset && *PointerOffset &&
             PointerStepMove != MBB.end() &&
             I->getOpcode() == MCS51::MOV_A_RN &&
@@ -924,7 +1555,267 @@ public:
 
         ++I;
       }
+      }
+
+    // Byte truncation can leave behind a zero-extension round trip through
+    // DPTR: copy a GPR byte into DPH, move it to DPL with DPH cleared, then
+    // copy DPL back to a GPR. The source byte already has the final value.
+    // Keep the accumulator result and destination copy, but drop the DPTR
+    // traffic when no source code can observe DPL/DPH.
+    if (!HasObservableDPTRAccess)
+      for (MachineBasicBlock &MBB : MF) {
+        for (auto I = MBB.begin(); I != MBB.end();) {
+          MachineInstr *CopyToA = &*I++;
+          if (CopyToA->getOpcode() != MCS51::MOV_A_RN)
+            continue;
+          auto At = I;
+          auto MatchDirectWrite = [&](MachineBasicBlock::iterator Pos,
+                                      int64_t Address) {
+            return Pos != MBB.end() &&
+                   Pos->getOpcode() == MCS51::MOV_DIRECT_A &&
+                   Pos->getNumOperands() >= 1 &&
+                   Pos->getOperand(0).isImm() &&
+                   Pos->getOperand(0).getImm() == Address &&
+                   Pos->memoperands_empty();
+          };
+          auto MatchDirectRead = [&](MachineBasicBlock::iterator Pos,
+                                     int64_t Address) {
+            return Pos != MBB.end() &&
+                   Pos->getOpcode() == MCS51::MOV_A_DIRECT &&
+                   Pos->getNumOperands() >= 2 &&
+                   Pos->getOperand(1).isImm() &&
+                   Pos->getOperand(1).getImm() == Address &&
+                   Pos->memoperands_empty();
+          };
+          if (!MatchDirectWrite(At, 0x83))
+            continue;
+          ++At;
+          if (!MatchDirectRead(At, 0x83))
+            continue;
+          ++At;
+          if (!MatchDirectWrite(At, 0x82))
+            continue;
+          ++At;
+          if (At == MBB.end() || At->getOpcode() != MCS51::CLR_A ||
+              !At->memoperands_empty())
+            continue;
+          ++At;
+          if (!MatchDirectWrite(At, 0x83))
+            continue;
+          ++At;
+          if (!MatchDirectRead(At, 0x82))
+            continue;
+          ++At;
+          if (At == MBB.end() || At->getOpcode() != MCS51::MOV_RN_A ||
+              At->getNumOperands() == 0 ||
+              !MCS51::MCS51GPR8RegClass.contains(
+                  At->getOperand(0).getReg()) ||
+              !At->memoperands_empty())
+            continue;
+
+          Register Src = CopyToA->getOperand(0).getReg();
+          Register Dst = At->getOperand(0).getReg();
+          MachineBasicBlock::iterator After = std::next(At);
+          bool AccumulatorDead = true;
+          for (MachineInstr *Next = After == MBB.end() ? nullptr : &*After;
+               Next;
+               Next = Next->getNextNode()) {
+            if (Next->readsRegister(MCS51::A, TRI)) {
+              AccumulatorDead = false;
+              break;
+            }
+            if (Next->modifiesRegister(MCS51::A, TRI))
+              break;
+          }
+          if (Src == Dst) {
+            if (AccumulatorDead)
+              CopyToA->eraseFromParent();
+            else
+              CopyToA->getOperand(0).setIsKill(false);
+          } else {
+            BuildMI(MBB, I, CopyToA->getDebugLoc(),
+                    TII->get(MCS51::MOV_RN_A), Dst);
+          }
+          while (I != After) {
+            MachineInstr *Drop = &*I++;
+            Drop->eraseFromParent();
+          }
+          Changed = true;
+        }
+      }
+
+    // A low/high DPTR byte store may become dead after the round-trip above is
+    // removed. Drop it when a full DPTR reload overwrites it before any use.
+    if (!HasObservableDPTRAccess)
+      for (MachineBasicBlock &MBB : MF) {
+        for (auto I = MBB.begin(); I != MBB.end();) {
+          MachineInstr *Write = &*I++;
+          if (Write->getOpcode() != MCS51::MOV_DIRECT_A ||
+              Write->getNumOperands() == 0 ||
+              !Write->getOperand(0).isImm() ||
+              (Write->getOperand(0).getImm() != 0x82 &&
+               Write->getOperand(0).getImm() != 0x83) ||
+              !Write->memoperands_empty())
+            continue;
+          bool Overwritten = false;
+          for (MachineInstr *Next = Write->getNextNode(); Next;
+               Next = Next->getNextNode()) {
+            if (Next->readsRegister(MCS51::DPTR, TRI))
+              break;
+            if (Next->getOpcode() == MCS51::MOV_DPTR_IMM) {
+              Overwritten = true;
+              break;
+            }
+            if ((Next->getOpcode() == MCS51::MOV_DIRECT_A ||
+                 Next->getOpcode() == MCS51::MOV_DIRECT_IMM) &&
+                Next->getNumOperands() > 0 && Next->getOperand(0).isImm() &&
+                Next->getOperand(0).getImm() ==
+                    Write->getOperand(0).getImm()) {
+              Overwritten = true;
+              break;
+            }
+            if (Next->isTerminator())
+              break;
+          }
+          if (Overwritten) {
+            Write->eraseFromParent();
+            Changed = true;
+          }
+        }
+      }
+
+    // Re-run the consecutive-global-address fold after removing dead DPL/DPH
+    // writes; they otherwise hide sequential XDATA stores from the earlier
+    // DPTR address tracking pass.
+    for (MachineBasicBlock &MBB : MF) {
+      const GlobalValue *KnownGlobal = nullptr;
+      int64_t KnownOffset = 0;
+      for (auto I = MBB.begin(); I != MBB.end();) {
+        if (I->getOpcode() == MCS51::MOV_DPTR_IMM &&
+            I->getNumOperands() > 1 && I->getOperand(1).isGlobal()) {
+          const MachineOperand &Address = I->getOperand(1);
+          const GlobalValue *Global = Address.getGlobal();
+          int64_t Offset = Address.getOffset();
+          if (KnownGlobal == Global && Offset == KnownOffset + 1) {
+            BuildMI(MBB, I, I->getDebugLoc(), TII->get(MCS51::INC_DPTR));
+            I = MBB.erase(I);
+            KnownOffset = Offset;
+            Changed = true;
+            continue;
+          }
+          KnownGlobal = Global;
+          KnownOffset = Offset;
+          ++I;
+          continue;
+        }
+        if (I->getOpcode() == MCS51::INC_DPTR && KnownGlobal) {
+          ++KnownOffset;
+          ++I;
+          continue;
+        }
+        if (I->modifiesRegister(MCS51::DPTR, TRI))
+          KnownGlobal = nullptr;
+        ++I;
+      }
     }
+
+    // A volatile byte increment can use the native read/modify/write
+    // instruction when the accumulator result is dead. Keep both memory
+    // operands on the replacement so alias and volatile information survives.
+    if (!HasObservablePSWAccess)
+      for (MachineBasicBlock &MBB : MF) {
+        for (auto I = MBB.begin(); I != MBB.end();) {
+          MachineInstr *Load = &*I++;
+          if (I == MBB.end() || I->getOpcode() != MCS51::INC_A)
+            continue;
+          MachineInstr *Increment = &*I++;
+          if (I == MBB.end())
+            continue;
+          MachineInstr *Store = &*I++;
+          unsigned ReplacementOpcode = 0;
+          unsigned AddressOperand = 0;
+          switch (Load->getOpcode()) {
+          case MCS51::MOV_A_DIRECT:
+            if (Store->getOpcode() == MCS51::MOV_DIRECT_A &&
+                Load->getNumOperands() >= 2 && Store->getNumOperands() >= 1 &&
+                Load->getOperand(1).isIdenticalTo(Store->getOperand(0))) {
+              ReplacementOpcode = MCS51::INC_DIRECT;
+              AddressOperand = 1;
+            }
+            break;
+          case MCS51::MOV_A_IND_RI:
+            if (Store->getOpcode() == MCS51::MOV_IND_RI_A &&
+                Load->getNumOperands() >= 2 && Store->getNumOperands() >= 2 &&
+                Load->getOperand(0).isIdenticalTo(Store->getOperand(0))) {
+              Register Ptr = Load->getOperand(0).getReg();
+              if (Ptr == MCS51::R0)
+                ReplacementOpcode = MCS51::INC_R0_IND;
+              else if (Ptr == MCS51::R1)
+                ReplacementOpcode = MCS51::INC_R1_IND;
+            }
+            break;
+          default:
+            break;
+          }
+          if (!ReplacementOpcode)
+            continue;
+
+          bool AccumulatorDead = true;
+          for (MachineInstr *Next = Store->getNextNode(); Next;
+               Next = Next->getNextNode()) {
+            if (Next->readsRegister(MCS51::A, TRI)) {
+              AccumulatorDead = false;
+              break;
+            }
+            if (Next->modifiesRegister(MCS51::A, TRI))
+              break;
+          }
+          if (!AccumulatorDead)
+            continue;
+          for (const MachineBasicBlock::RegisterMaskPair &LiveOut :
+               MBB.liveouts()) {
+            if (!TRI->regsOverlap(MCS51::A, LiveOut.PhysReg))
+              continue;
+            for (MachineBasicBlock *Succ : MBB.successors()) {
+              bool RedefinedBeforeUse = false;
+              for (MachineInstr &SuccMI : *Succ) {
+                if (SuccMI.isDebugInstr())
+                  continue;
+                if (SuccMI.readsRegister(MCS51::A, TRI))
+                  break;
+                if (SuccMI.modifiesRegister(MCS51::A, TRI)) {
+                  RedefinedBeforeUse = true;
+                  break;
+                }
+                if (SuccMI.isTerminator())
+                  break;
+              }
+              if (!RedefinedBeforeUse) {
+                AccumulatorDead = false;
+                break;
+              }
+            }
+            if (!AccumulatorDead)
+              break;
+          }
+          if (!AccumulatorDead)
+            continue;
+
+          MachineInstrBuilder DirectIncrement =
+              BuildMI(MBB, Load, Load->getDebugLoc(),
+                      TII->get(ReplacementOpcode));
+          if (ReplacementOpcode == MCS51::INC_DIRECT)
+            DirectIncrement.add(Load->getOperand(AddressOperand));
+          for (MachineMemOperand *MMO : Load->memoperands())
+            DirectIncrement.addMemOperand(MMO);
+          for (MachineMemOperand *MMO : Store->memoperands())
+            DirectIncrement.addMemOperand(MMO);
+          Load->eraseFromParent();
+          Increment->eraseFromParent();
+          Store->eraseFromParent();
+          Changed = true;
+        }
+      }
     return Changed;
   }
 };
@@ -993,6 +1884,7 @@ public:
   void addIRPasses() override {
     addPass(createMCS51OverlayPass());
     addPass(createMCS51StackAddressLoweringPass());
+    addPass(new MCS51SinkIdataConstantStore());
     TargetPassConfig::addIRPasses();
     if (getOptLevel() == CodeGenOptLevel::None) {
       addPass(new MCS51RemoveOptNone());
@@ -1007,8 +1899,24 @@ public:
 
   bool addPreISel() override {
     addPass(createMCS51GenericPointerLoweringPass());
+    addPass(new MCS51OutlineXDataI32Compare());
     addPass(new MCS51NarrowByteMaskTests());
     addPass(new MCS51FoldConditionalByteAdd());
+    if (getOptLevel() != CodeGenOptLevel::None) {
+      // The generic -Oz pipeline leaves tiny fixed-trip loops rolled when
+      // unrolling costs a few bytes. On MCS-51, the induction variable and
+      // loop control often need stack slots and indirect accesses, so unroll
+      // small loops whose trip counts can be proven before instruction
+      // selection.
+      addPass(createLoopSimplifyPass());
+      addPass(createLoopUnrollPass(/*OptLevel=*/3, /*OnlyWhenForced=*/false,
+                                   /*ForgetAllSCEV=*/false,
+                                   /*Threshold=*/200, /*Count=*/-1,
+                                   /*AllowPartial=*/0, /*Runtime=*/0,
+                                   /*UpperBound=*/0, /*AllowPeeling=*/0));
+      addPass(createCFGSimplificationPass());
+      addPass(createInstructionCombiningPass());
+    }
     if (getOptLevel() == CodeGenOptLevel::None) {
       addPass(createInstructionCombiningPass());
       addPass(createCFGSimplificationPass());
@@ -1017,6 +1925,10 @@ public:
   }
 
   void addPreRegAlloc() override { addPass(new MCS51AccCopyHoisting()); }
+
+  void addPostRewrite() override {
+    addPass(new MCS51RedundantSpillCopyElimination());
+  }
 
   void addPreEmitPass() override {
     addPass(new MCS51PostRAPeephole());
