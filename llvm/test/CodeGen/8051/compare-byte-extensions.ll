@@ -56,7 +56,7 @@ entry:
 ; CHECK: xrl a,
 ; CHECK: jnz
 ; CHECK: mov a, #1
-; CHECK: mov a, #0
+; CHECK: clr a
 ; CHECK-LABEL: unsigned_char_greater_from_stack:
 ; CHECK: subb a,
 ; CHECK: rlc a
