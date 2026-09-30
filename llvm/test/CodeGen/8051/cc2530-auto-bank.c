@@ -5,6 +5,11 @@
 // RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s %s -o %t.elf
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=LINK
 // RUN: llvm-readobj --sections %t.elf | FileCheck %s --check-prefix=MAP
+// RUN: clang -target mcs51 -mcpu=cc2530 -flto -c %s -o %t-lto.o
+// RUN: clang -target mcs51 -mcpu=cc2530 -flto -nostdlib \
+// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
+// RUN:   -Wl,--no-check-sections \
+// RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s %t-lto.o -o %t-lto.elf
 
 typedef unsigned char (*callback_t)(unsigned char);
 
@@ -20,6 +25,9 @@ unsigned char banked_xor(unsigned char value);
 __attribute__((noinline, section(".mcs51.autobank.banked_xor")))
 unsigned char banked_xor(unsigned char value) { return value ^ 0x5a; }
 
+__attribute__((noinline, section(".text.lto_internal.llvm.123")))
+unsigned char lto_internal(unsigned char value) { return value + 3; }
+
 callback_t volatile banked_callback = banked_add;
 
 __attribute__((noinline))
@@ -31,7 +39,7 @@ unsigned char call_other_bank(unsigned char value) {
 }
 
 int main(void) {
-  return call_banked(1) + call_other_bank(2);
+  return call_banked(1) + call_other_bank(2) + lto_internal(3);
 }
 
 // ASM: .section .mcs51.autobank.banked_add,"ax"
@@ -47,6 +55,10 @@ int main(void) {
 // ASM-LABEL: __mcs51_bankcall_banked_xor:
 // ASM: mov 159, #banked_xor
 // ASM: lcall banked_xor
+// ASM: .section .text.lto_internal.llvm.123,"ax"
+// ASM-LABEL: lto_internal:
+// ASM: .section .text.autobankthunks.
+// ASM-LABEL: __mcs51_bankcall_lto_internal:
 // ASM-LABEL: call_banked:
 // ASM: lcall __mcs51_bankcall_banked_add
 // ASM: .short __mcs51_bankcall_banked_add
