@@ -1,0 +1,65 @@
+// RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib \
+// RUN:   -S %s -o %t.s
+// RUN: FileCheck %s < %t.s
+// RUN: llvm-mc -triple=mcs51 -filetype=obj %t.s -o %t.o
+// RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib \
+// RUN:   -mllvm -verify-machineinstrs -S %s -o /dev/null
+
+volatile __xdata unsigned long lhs;
+volatile __xdata unsigned long rhs;
+volatile __xdata signed long signed_lhs;
+
+unsigned long add_words(void) { return lhs + rhs; }
+unsigned long subtract_words(void) { return lhs - rhs; }
+unsigned char equals_all_ones(void) { return lhs == 0xffffffffUL; }
+unsigned char less_than_word_pair(void) { return lhs < rhs; }
+unsigned char less_than_constant(void) { return lhs < 0x01020304UL; }
+unsigned char signed_less_than_constant(void) {
+  return signed_lhs < 0x01020304L;
+}
+
+// Snapshot each loaded word before the following XDATA load reuses DPTR.
+// CHECK-LABEL: add_words:
+// CHECK: mov dptr, #lhs+2
+// CHECK: mov a, 131
+// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov a, 130
+// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov dptr, #lhs
+// CHECK: mov a, 131
+// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov a, 130
+// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov dptr, #rhs+2
+// CHECK: mov a, 131
+// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov a, 130
+// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov dptr, #rhs
+// CHECK: add a, r{{[0-7]}}
+// CHECK-COUNT-3: addc a, r{{[0-7]}}
+// CHECK-LABEL: subtract_words:
+// CHECK: mov dptr, #lhs+2
+// CHECK: mov dptr, #lhs
+// CHECK: mov dptr, #rhs+2
+// CHECK: mov dptr, #rhs
+// CHECK: subb a, r{{[0-7]}}
+// CHECK-COUNT-3: subb a, r{{[0-7]}}
+// CHECK-LABEL: equals_all_ones:
+// CHECK-COUNT-4: cjne a, #255,
+// CHECK-LABEL: less_than_word_pair:
+// CHECK: lcall __mcs51_bankcall___mcs51_xdata_ult32
+// CHECK-LABEL: less_than_constant:
+// The constant bytes are consumed directly by SUBB without staging the
+// constant's words through DPTR or temporary registers.
+// CHECK: subb a, #4
+// CHECK: subb a, #3
+// CHECK: subb a, #2
+// CHECK: subb a, #1
+// CHECK-LABEL: signed_less_than_constant:
+// Signed ordering biases the most significant byte before the final compare.
+// CHECK: subb a, #4
+// CHECK: subb a, #3
+// CHECK: subb a, #2
+// CHECK: xrl a, #128
+// CHECK: subb a, #129
