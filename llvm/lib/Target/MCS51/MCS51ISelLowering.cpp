@@ -1425,7 +1425,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (!Reg.isVirtual())
       return nullptr;
     MachineInstr *Def = MRI.getVRegDef(Reg);
-    if (!Def)
+    // Accumulator-state scans below use MII as their endpoint. Keep their
+    // iterators in one block; LTO can leave the sole use in a different block
+    // from its accumulator-copy definition.
+    if (!Def || Def->getParent() != MBB)
       return nullptr;
     if (Def->getOpcode() == TargetOpcode::COPY &&
         Def->getOperand(1).getReg() == MCS51::A)
