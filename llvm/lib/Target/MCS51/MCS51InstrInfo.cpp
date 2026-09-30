@@ -46,9 +46,7 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   if (SrcReg == MCS51::DPTR &&
       MCS51::MCS51GPR8RegClass.contains(DestReg)) {
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82)
-        .addReg(MCS51::DPTR, RegState::Implicit);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_DPL), MCS51::A).addReg(SrcReg);
     BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
     return;
   }

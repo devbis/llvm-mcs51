@@ -40,17 +40,6 @@ BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(MCS51::PSW);
   // R1 is reserved as the indirect pointer for stack frame spill accesses.
   Reserved.set(MCS51::R1);
-  // Variable-width shifts keep their loop counter in R2. Reserve it while
-  // the shift pseudo is still present, before its custom inserter adds the
-  // loop and its fixed-register uses.
-  for (const MachineBasicBlock &MBB : MF)
-    for (const MachineInstr &MI : MBB)
-      if (MI.getOpcode() == MCS51::SRL16 || MI.getOpcode() == MCS51::SHL16 ||
-          MI.getOpcode() == MCS51::SRA16 ||
-          MI.getOpcode() == MCS51::DJNZ_RN) {
-        Reserved.set(MCS51::R2);
-        return Reserved;
-      }
   return Reserved;
 }
 
