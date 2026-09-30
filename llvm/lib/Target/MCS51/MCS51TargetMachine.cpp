@@ -1416,7 +1416,21 @@ public:
             PointerStepMove->getOpcode() == MCS51::MOV_RN_A &&
             PointerStepMove->getOperand(0).getReg() == PointerReg) {
           **PointerOffset += PointerStep->getOpcode() == MCS51::INC_A ? 1 : -1;
-          I = std::next(PointerStepMove);
+          // Keep stack cursor updates in the pointer register. The generic
+          // lowering uses MOV A,Rn / INC|DEC A / MOV Rn,A, but MCS-51 has
+          // single-instruction INC Rn and DEC Rn forms that preserve A.
+          MRI.clearKillFlags(PointerReg);
+          unsigned Opcode = PointerStep->getOpcode() == MCS51::INC_A
+                                ? MCS51::INC_RN
+                                : MCS51::DEC_RN;
+          BuildMI(MBB, I, I->getDebugLoc(), TII->get(Opcode), PointerReg)
+              .addReg(PointerReg);
+          auto AfterStep = std::next(PointerStepMove);
+          I->eraseFromParent();
+          PointerStep->eraseFromParent();
+          PointerStepMove->eraseFromParent();
+          I = AfterStep;
+          Changed = true;
           continue;
         }
 
