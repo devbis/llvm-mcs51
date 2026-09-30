@@ -857,6 +857,17 @@ public:
     for (MachineBasicBlock &MBB : MF)
       for (auto I = MBB.begin(); I != MBB.end();) {
         MachineInstr *MI = &*I++;
+        // XRL A,#0 preserves A, so it is redundant even when its result feeds
+        // a branch. Word-sized zero comparisons otherwise retain this no-op
+        // after lowering each byte independently.
+        if (MI->getOpcode() == MCS51::XRL_A_IMM &&
+            MI->getNumOperands() > 1 && MI->getOperand(1).isImm() &&
+            MI->getOperand(1).getImm() == 0) {
+          MRI.clearKillFlags(MCS51::A);
+          MI->eraseFromParent();
+          Changed = true;
+          continue;
+        }
         if (MI->getOpcode() == MCS51::MOV_A_IMM &&
             MI->getOperand(0).isDead()) {
           MI->eraseFromParent();
