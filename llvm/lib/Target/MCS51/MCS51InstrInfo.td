@@ -72,6 +72,14 @@ def SDT_MCS51Add32 : SDTypeProfile<2, 4, [SDTCisVT<0, i16>,
                                          SDTCisVT<3, i16>,
                                          SDTCisVT<4, i16>,
                                          SDTCisVT<5, i16>] >;
+def SDT_MCS51Add32Bytes : SDTypeProfile<4, 4, [SDTCisVT<0, i8>,
+                                               SDTCisVT<1, i8>,
+                                               SDTCisVT<2, i8>,
+                                               SDTCisVT<3, i8>,
+                                               SDTCisVT<4, i16>,
+                                               SDTCisVT<5, i16>,
+                                               SDTCisVT<6, i16>,
+                                               SDTCisVT<7, i16>] >;
 def SDT_MCS51Mul16 : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                           SDTCisVT<1, i16>,
                                           SDTCisVT<2, i16>] >;
@@ -111,6 +119,10 @@ def MCS51cmpeq8 : SDNode<"MCS51ISD::CMPEQ8", SDT_MCS51Cmp8>;
 def MCS51cmp32 : SDNode<"MCS51ISD::CMP32", SDT_MCS51Cmp32>;
 def MCS51add32 : SDNode<"MCS51ISD::ADD32", SDT_MCS51Add32>;
 def MCS51sub32 : SDNode<"MCS51ISD::SUB32", SDT_MCS51Add32>;
+def MCS51add32_bytes : SDNode<"MCS51ISD::ADD32_BYTES",
+                              SDT_MCS51Add32Bytes>;
+def MCS51sub32_bytes : SDNode<"MCS51ISD::SUB32_BYTES",
+                              SDT_MCS51Add32Bytes>;
 def SDT_MCS51Add16Imm : SDTypeProfile<1, 2, [SDTCisVT<0, i16>,
                                               SDTCisVT<1, i16>,
                                               SDTCisVT<2, i16>] >;
@@ -1943,6 +1955,46 @@ def SUB32rr : Instruction {
   let hasSideEffects = 1;
 }
 
+def ADD32_BYTESrr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst0, MCS51GPR8:$dst1,
+                             MCS51GPR8:$dst2, MCS51GPR8:$dst3);
+  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51GPR8:$dst0, MCS51GPR8:$dst1,
+                       MCS51GPR8:$dst2, MCS51GPR8:$dst3,
+                       (MCS51add32_bytes MCS51PTR:$lhslo,
+                                         MCS51PTR:$lhshi,
+                                         MCS51PTR:$rhslo,
+                                         MCS51PTR:$rhshi))];
+}
+
+def SUB32_BYTESrr : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst0, MCS51GPR8:$dst1,
+                             MCS51GPR8:$dst2, MCS51GPR8:$dst3);
+  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
+                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51GPR8:$dst0, MCS51GPR8:$dst1,
+                       MCS51GPR8:$dst2, MCS51GPR8:$dst3,
+                       (MCS51sub32_bytes MCS51PTR:$lhslo,
+                                         MCS51PTR:$lhshi,
+                                         MCS51PTR:$rhslo,
+                                         MCS51PTR:$rhshi))];
+}
+
 def CMP16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
@@ -2271,7 +2323,7 @@ def ANL_DIRECT_IMM : MCS51DirectImmInst<0x53, "anl"> { let mayLoad = 1; }
 def ORL_DIRECT_IMM : MCS51DirectImmInst<0x43, "orl"> { let mayLoad = 1; }
 def XRL_DIRECT_IMM : MCS51DirectImmInst<0x63, "xrl"> { let mayLoad = 1; }
 def PUSH_DIRECT : MCS51DirectInst<0xC0, "push"> {
-  let Defs = [SP]; let Uses = [SP, A];
+  let Defs = [SP]; let Uses = [SP];
 }
 def POP_DIRECT : MCS51DirectInst<0xD0, "pop"> {
   let Defs = [SP, A]; let Uses = [SP];
