@@ -15,13 +15,16 @@ void main(void) {
   result[3] = (uint8_t)(next >> 24);
 }
 
-// The byte loads used for the upper result bytes are overwritten while
-// extracting the value from DPTR. Keep the stores and skip the dead copies.
+// The byte results are consumed directly, and the four output bytes share a
+// single incrementing DPTR.
 // CHECK-LABEL: main:
 // CHECK: mov dptr, #result
-// CHECK: mov a, r{{[0-7]}}
 // CHECK: movx @dptr, a
-// CHECK-NEXT: mov a, 131
+// CHECK: add a, #1
+// CHECK-COUNT-3: addc a, #0
+// CHECK: inc dptr
 // CHECK: movx @dptr, a
+// CHECK: inc dptr
 // CHECK: movx @dptr, a
+// CHECK: inc dptr
 // CHECK: movx @dptr, a

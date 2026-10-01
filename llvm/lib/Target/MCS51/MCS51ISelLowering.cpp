@@ -1291,6 +1291,38 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() == ISD::SRL && N->getValueType(0) == MVT::i32 &&
+      N->hasOneUse() &&
+      N->use_begin()->getUser()->getOpcode() == ISD::TRUNCATE &&
+      N->use_begin()->getUser()->getValueType(0) == MVT::i8) {
+    auto *Amount = dyn_cast<ConstantSDNode>(N->getOperand(1));
+    SDValue Input = N->getOperand(0);
+    if (Amount && Amount->getZExtValue() <= 24 &&
+        Amount->getZExtValue() % 8 == 0 &&
+        (Input.getOpcode() == ISD::ADD || Input.getOpcode() == ISD::SUB) &&
+        Input.getValueType() == MVT::i32) {
+      SDLoc DL(N);
+      SDValue Zero = DCI.DAG.getConstant(0, DL, MVT::i16);
+      SDValue One = DCI.DAG.getConstant(1, DL, MVT::i16);
+      SDValue LHSLo = DCI.DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                      Input.getOperand(0), Zero);
+      SDValue LHSHi = DCI.DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                      Input.getOperand(0), One);
+      SDValue RHSLo = DCI.DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                      Input.getOperand(1), Zero);
+      SDValue RHSHi = DCI.DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16,
+                                      Input.getOperand(1), One);
+      SDVTList ResultVTs =
+          DCI.DAG.getVTList(MVT::i8, MVT::i8, MVT::i8, MVT::i8);
+      unsigned Opcode = Input.getOpcode() == ISD::ADD
+                            ? MCS51ISD::ADD32_BYTES
+                            : MCS51ISD::SUB32_BYTES;
+      SDValue Result = DCI.DAG.getNode(Opcode, DL, ResultVTs, LHSLo, LHSHi,
+                                       RHSLo, RHSHi);
+      return DCI.DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32,
+                             Result.getValue(Amount->getZExtValue() / 8));
+    }
+  }
   if (N->getOpcode() == ISD::SUB && N->getValueType(0) == MVT::i16) {
     if (auto *C = dyn_cast<ConstantSDNode>(N->getOperand(1))) {
       SDValue Base = N->getOperand(0);

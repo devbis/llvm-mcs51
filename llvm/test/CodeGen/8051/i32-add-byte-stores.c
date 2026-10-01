@@ -19,28 +19,21 @@ void main(void) {
   bytes[3] = (uint8_t)(next >> 24);
 }
 
-// The increment is propagated through all four bytes, and the byte stores do
-// not spill their 32-bit result words to the stack.
+// The increment propagates through all four bytes. Truncated byte extracts
+// use the byte results directly, so the stores share one incrementing DPTR.
 // CHECK-LABEL: main:
-// CHECK: mov dptr, #counter+2
 // CHECK: mov dptr, #counter
-// CHECK: add a, #1
-// CHECK: addc a, #0
-// CHECK: addc a, #0
-// CHECK: addc a, #0
+// CHECK: inc r3
+// CHECK: mov dptr, #counter+2
 // CHECK-NOT: mov @r1, a
 // CHECK-NOT: mov a, @r1
 // CHECK: mov dptr, #bytes
 // CHECK: movx @dptr, a
-// The upper result bytes are extracted through DPL/DPH, then the compiler
-// addresses the two output runs directly.
-// CHECK: mov a, 131
-// CHECK: mov 130, a
-// CHECK: clr a
-// CHECK: mov 131, a
-// CHECK: mov dptr, #bytes+1
+// CHECK: add a, #1
+// CHECK-COUNT-3: addc a, #0
+// CHECK: inc dptr
 // CHECK: movx @dptr, a
 // CHECK: inc dptr
 // CHECK: movx @dptr, a
-// CHECK: mov dptr, #bytes+3
+// CHECK: inc dptr
 // CHECK: movx @dptr, a
