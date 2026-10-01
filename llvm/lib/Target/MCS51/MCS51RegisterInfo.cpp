@@ -22,9 +22,18 @@ MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   // returns to a C caller. It does not need to preserve the normal callee-save
   // register bank around its body.
   static const MCPhysReg MainSaveList[] = {0};
+  static const MCPhysReg I32ReturnSaveList[] = {MCS51::R2, MCS51::R3, 0};
+  static const MCPhysReg I64ReturnSaveList[] = {0};
   if (MF && MF->getFunction().getName() == "main" &&
       MF->getTarget().getTargetCPU().equals_insensitive("cc2530"))
     return MainSaveList;
+  if (MF) {
+    const Type *RetTy = MF->getFunction().getReturnType();
+    if (RetTy->isIntegerTy(64))
+      return I64ReturnSaveList;
+    if (RetTy->isIntegerTy(32) || RetTy->isFloatTy())
+      return I32ReturnSaveList;
+  }
   return CSR_MCS51_SaveList;
 }
 

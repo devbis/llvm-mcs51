@@ -222,6 +222,26 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
   auto I = MBB.getFirstTerminator();
+  if (I != MBB.end() && I->getOpcode() == MCS51::RET_A &&
+      I->getNumOperands() && I->getOperand(0).isReg()) {
+    Register RetReg = I->getOperand(0).getReg();
+    bool IsSavedReturnReg = RetReg == MCS51::R2 || RetReg == MCS51::R3 ||
+                            RetReg == MCS51::R4 || RetReg == MCS51::R5 ||
+                            RetReg == MCS51::R6 || RetReg == MCS51::R7;
+    if (IsSavedReturnReg) {
+      MachineBasicBlock::iterator Restore = I;
+      for (auto It = MBB.begin(); It != I; ++It)
+        if (It->getFlag(MachineInstr::FrameDestroy)) {
+          Restore = It;
+          break;
+        }
+      BuildMI(MBB, Restore, I->getDebugLoc(), TII.get(MCS51::MOV_A_RN))
+          .addReg(RetReg);
+      BuildMI(MBB, Restore, I->getDebugLoc(), TII.get(MCS51::MOV_RN_A),
+              MCS51::R0);
+      I->getOperand(0).setReg(MCS51::R0);
+    }
+  }
   bool PreserveA = I != MBB.end() && I->getOpcode() == MCS51::RET_A &&
                    I->getNumOperands() && I->getOperand(0).isReg() &&
                    I->getOperand(0).getReg() == MCS51::A;

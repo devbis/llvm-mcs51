@@ -831,6 +831,15 @@ public:
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     MachineRegisterInfo &MRI = MF.getRegInfo();
     bool Changed = false;
+    // Lowering expands ADDDPTR16ri after SelectionDAG has marked the earlier
+    // MOVC use as the final DPTR use. That pseudo appends INC_DPTR, so those
+    // pre-existing kill flags are stale by the time register allocation ends.
+    for (MachineBasicBlock &MBB : MF)
+      for (MachineInstr &MI : MBB)
+        for (MachineOperand &MO : MI.operands())
+          if (MO.isReg() && MO.getReg() == MCS51::DPTR && MO.isUse())
+            MO.setIsKill(false);
+
     bool HasObservablePSWAccess = false;
     bool HasObservableDPTRAccess = false;
     for (const MachineBasicBlock &MBB : MF)
