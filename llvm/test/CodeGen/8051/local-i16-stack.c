@@ -7,7 +7,7 @@ void copy_local_words(void) {
 }
 
 // CHECK-LABEL: copy_local_words:
-// CHECK: mov @r1, a
-// CHECK: mov a, @r1
-// CHECK: mov 131, a
+// CHECK: mov @r1, 130
+// CHECK: mov 130, @r1
+// CHECK: mov 131, @r1
 // CHECK: ret
