@@ -1109,6 +1109,13 @@ SDValue MCS51TargetLowering::LowerCall(
     CallOpcode = MCS51ISD::ICALL;
   }
 
+  if (CLI.RetTy && (CLI.RetTy->isIntegerTy(32) || CLI.RetTy->isFloatTy()))
+    CallOpcode = CallOpcode == MCS51ISD::ICALL ? MCS51ISD::ICALL_I32
+                                                : MCS51ISD::CALL_I32;
+  else if (CLI.RetTy && CLI.RetTy->isIntegerTy(64))
+    CallOpcode = CallOpcode == MCS51ISD::ICALL ? MCS51ISD::ICALL_I64
+                                                : MCS51ISD::CALL_I64;
+
   SmallVector<SDValue, 12> Ops;
   Ops.push_back(Chain);
   Ops.push_back(Callee);
@@ -1794,7 +1801,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addReg(TrueCopy).addMBB(TrueBB).addReg(FalseCopy).addMBB(FalseBB);
     return Tail;
   }
-  if (MI.getOpcode() == MCS51::ICALL) {
+  unsigned CallOpcode = MI.getOpcode();
+  bool IsI32Call = CallOpcode == MCS51::ICALL_I32;
+  bool IsI64Call = CallOpcode == MCS51::ICALL_I64;
+  if (CallOpcode == MCS51::ICALL || IsI32Call || IsI64Call) {
     MachineFunction &MF = *MBB->getParent();
     MachineBasicBlock *ReturnBB = MBB->splitAt(MI);
     if (ReturnBB == MBB) {
@@ -1813,7 +1823,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MBB->addSuccessor(DispatchBB);
 
     MI.eraseFromParent();
-    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LCALL)).addMBB(DispatchBB);
+    MachineInstrBuilder Call =
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LCALL)).addMBB(DispatchBB);
+    if (IsI32Call)
+      for (Register Reg : {MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7})
+        Call.addReg(Reg, RegState::ImplicitDefine);
+    else if (IsI64Call)
+      for (Register Reg : {MCS51::R2, MCS51::R3, MCS51::R4, MCS51::R5,
+                           MCS51::R6, MCS51::R7})
+        Call.addReg(Reg, RegState::ImplicitDefine);
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(ReturnBB);
     BuildMI(*DispatchBB, DispatchBB->end(), DL, TII.get(MCS51::CLR_A));
     BuildMI(*DispatchBB, DispatchBB->end(), DL,
