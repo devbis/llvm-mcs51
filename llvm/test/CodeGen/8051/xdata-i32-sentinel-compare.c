@@ -16,7 +16,7 @@ void main(void) {
 // Keep the sentinel short circuit in a helper: stored_counter must not be
 // read when incoming_counter is UINT32_MAX.
 // CHECK-LABEL: main:
-// CHECK: lcall __mcs51_bankcall___mcs51_xdata_ult32_or_max
+// CHECK: lcall __mcs51_xdata_ult32_or_max
 // CHECK: .Lfunc_end
 // CHECK-LABEL: __mcs51_xdata_ult32_or_max:
 // CHECK: movx a, @dptr

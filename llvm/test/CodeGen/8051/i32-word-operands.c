@@ -48,7 +48,7 @@ unsigned char signed_less_than_constant(void) {
 // CHECK-LABEL: equals_all_ones:
 // CHECK-COUNT-4: cjne a, #255,
 // CHECK-LABEL: less_than_word_pair:
-// CHECK: lcall __mcs51_bankcall___mcs51_xdata_ult32
+// CHECK: lcall __mcs51_xdata_ult32
 // CHECK-LABEL: less_than_constant:
 // The constant bytes are consumed directly by SUBB without staging the
 // constant's words through DPTR or temporary registers.
