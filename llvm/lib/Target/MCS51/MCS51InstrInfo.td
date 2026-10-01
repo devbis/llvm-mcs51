@@ -167,9 +167,21 @@ def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                         SDNPVariadic]>;
+def MCS51call_i32 : SDNode<"MCS51ISD::CALL_I32", SDT_MCS51Call,
+                           [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                            SDNPVariadic]>;
+def MCS51call_i64 : SDNode<"MCS51ISD::CALL_I64", SDT_MCS51Call,
+                           [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                            SDNPVariadic]>;
 def MCS51icall : SDNode<"MCS51ISD::ICALL", SDT_MCS51Call,
                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                         SDNPVariadic]>;
+                        SDNPVariadic]>;
+def MCS51icall_i32 : SDNode<"MCS51ISD::ICALL_I32", SDT_MCS51Call,
+                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                             SDNPVariadic]>;
+def MCS51icall_i64 : SDNode<"MCS51ISD::ICALL_I64", SDT_MCS51Call,
+                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
+                             SDNPVariadic]>;
 def SDT_MCS51Br : SDTypeProfile<0, 3, [SDTCisVT<0, i8>,
                                        SDTCisSameAs<0, 1>,
                                        SDTCisVT<2, OtherVT>]>;
@@ -1397,14 +1409,10 @@ class MCS51Abs11Inst<bits<5> opcode, string mnemonic> : Instruction {
 def AJMP : MCS51Abs11Inst<0b00001, "ajmp"> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
-// The fixed-width return ABI uses R4-R7 for 32-bit values and R0-R7 for
-// 64-bit values. Mark all argument/result registers as call definitions so
-// SelectionDAG can copy returned values from them even when they are also
-// callee-saved for values that live across the call.
-let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+let Defs = [A, B, C, DPTR, SP, R0, R1],
     Uses = [SP], isCall = 1 in
 def ACALL : MCS51Abs11Inst<0b10001, "acall">;
-let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+let Defs = [A, B, C, DPTR, SP, R0, R1],
     Uses = [SP], isCall = 1 in
 def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
@@ -1413,11 +1421,27 @@ def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
 def : Pat<(MCS51call (i16 texternalsym:$addr)),
           (LCALL texternalsym:$addr)>;
 
+let Defs = [A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7],
+    Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
+def LCALL_I32 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
+  let Pattern = [(MCS51call_i32 (i16 tglobaladdr:$addr))];
+}
+def : Pat<(MCS51call_i32 (i16 texternalsym:$addr)),
+          (LCALL_I32 texternalsym:$addr)>;
+
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+    Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
+def LCALL_I64 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
+  let Pattern = [(MCS51call_i64 (i16 tglobaladdr:$addr))];
+}
+def : Pat<(MCS51call_i64 (i16 texternalsym:$addr)),
+          (LCALL_I64 texternalsym:$addr)>;
+
 // The 8051 has no indirect CALL instruction. The custom inserter expands this
 // pseudo to an LCALL of a local dispatch block and a continuation jump when
 // needed. The dispatcher clears A, then uses JMP @A+DPTR to tail-transfer to
 // the callee; its RET returns to the call site's continuation.
-let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+let Defs = [A, B, C, DPTR, SP, R0, R1],
     Uses = [SP, DPTR], isCall = 1 in
 def ICALL : Instruction {
   let Namespace = "MCS51";
@@ -1431,6 +1455,32 @@ def ICALL : Instruction {
 }
 
 def : Pat<(MCS51icall (i16 MCS51PTR:$target)), (ICALL MCS51PTR:$target)>;
+
+let Defs = [A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7],
+    Uses = [SP, DPTR], isCall = 1, isPseudo = 1, isCodeGenOnly = 1,
+    usesCustomInserter = 1 in
+def ICALL_I32 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51PTR:$target);
+  let AsmString = "";
+  let Size = 7;
+}
+def : Pat<(MCS51icall_i32 (i16 MCS51PTR:$target)),
+          (ICALL_I32 MCS51PTR:$target)>;
+
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+    Uses = [SP, DPTR], isCall = 1, isPseudo = 1, isCodeGenOnly = 1,
+    usesCustomInserter = 1 in
+def ICALL_I64 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51PTR:$target);
+  let AsmString = "";
+  let Size = 7;
+}
+def : Pat<(MCS51icall_i64 (i16 MCS51PTR:$target)),
+          (ICALL_I64 MCS51PTR:$target)>;
 
 def MOV_DPTR_IMM : Instruction {
   let Namespace = "MCS51";

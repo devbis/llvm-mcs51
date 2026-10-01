@@ -25,6 +25,16 @@
 using namespace llvm;
 
 namespace {
+static bool isMCS51LongCallOpcode(unsigned Opcode) {
+  return Opcode == MCS51::LCALL || Opcode == MCS51::LCALL_I32 ||
+         Opcode == MCS51::LCALL_I64;
+}
+
+static bool isMCS51IndirectCallOpcode(unsigned Opcode) {
+  return Opcode == MCS51::ICALL || Opcode == MCS51::ICALL_I32 ||
+         Opcode == MCS51::ICALL_I64;
+}
+
 static bool isAutoBankFunction(const Function &F, StringRef CPU,
                                bool FunctionSections) {
   if (F.hasSection() && isMCS51AutoBankSection(F.getSection()))
@@ -162,7 +172,7 @@ public:
     bool HasIndirectCall = false;
     for (const MachineBasicBlock &MBB : *MF)
       for (const MachineInstr &MI : MBB)
-        HasIndirectCall |= MI.getOpcode() == MCS51::ICALL;
+        HasIndirectCall |= isMCS51IndirectCallOpcode(MI.getOpcode());
     if (HasIndirectCall) {
       OutStreamer->emitLabel(getIndirectCallThunkSymbol(F));
       emitIndirectCallThunk();
@@ -235,7 +245,7 @@ public:
       return;
     }
 
-    if (MI->getOpcode() == MCS51::ICALL) {
+    if (isMCS51IndirectCallOpcode(MI->getOpcode())) {
       emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x82});
       emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x83});
       MCInst Call;
@@ -246,7 +256,7 @@ public:
       return;
     }
 
-    if (MI->getOpcode() == MCS51::LCALL &&
+    if (isMCS51LongCallOpcode(MI->getOpcode()) &&
         TM.getTargetCPU().equals_insensitive("cc2530")) {
       for (const MachineOperand &MO : MI->operands())
         if (MO.isSymbol()) {
@@ -295,7 +305,8 @@ public:
     }
 
     MCInst Inst;
-    Inst.setOpcode(MI->getOpcode());
+    Inst.setOpcode(isMCS51LongCallOpcode(MI->getOpcode()) ? MCS51::LCALL
+                                                          : MI->getOpcode());
     for (const MachineOperand &MO : MI->operands()) {
       if (MO.isReg())
         Inst.addOperand(MCOperand::createReg(MO.getReg()));
@@ -322,7 +333,8 @@ public:
           // Use its common-area trampoline whenever the address escapes as a
           // value. Direct calls within the same bank still target the body.
           if ((TargetBank &&
-               (MI->getOpcode() != MCS51::LCALL || TargetBank != CallerBank)) ||
+              (!isMCS51LongCallOpcode(MI->getOpcode()) ||
+               TargetBank != CallerBank)) ||
               TargetAutoBank)
             Symbol = getBankThunkSymbol(*Target);
           else if (Target->isDeclaration() &&
@@ -371,7 +383,7 @@ private:
     SmallVector<StringRef, 4> Targets;
     for (const MachineBasicBlock &MBB : *MF)
       for (const MachineInstr &MI : MBB) {
-        if (MI.getOpcode() != MCS51::LCALL)
+        if (!isMCS51LongCallOpcode(MI.getOpcode()))
           continue;
         for (const MachineOperand &MO : MI.operands()) {
           StringRef TargetName;
