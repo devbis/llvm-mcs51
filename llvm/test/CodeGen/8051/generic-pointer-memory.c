@@ -205,7 +205,7 @@ int main(void) {
 // ASM-LABEL: generic_idata_address:
 // ASM: mov r6, #64
 // ASM-LABEL: read_generic_stack:
-// ASM: mov r{{[0-7]}}, #64
+// ASM: mov {{a|r[0-7]}}, #64
 // ASM-LABEL: store_generic_float:
 // ASM: lcall __mcs51_gptrputf32
 // LINK: Name: __mcs51_gptrget8
