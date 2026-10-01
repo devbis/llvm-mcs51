@@ -927,6 +927,7 @@ void LinkerScript::distributeMCS51AutoBankSections() {
                         section->name != ".text.main" &&
                         !section->name.starts_with(".text.main.") &&
                         !section->name.starts_with(".text.startup") &&
+                        !section->name.starts_with(".text.__mcs51_") &&
                         !section->name.starts_with(".text.bankthunks.") &&
                         !section->name.starts_with(".text.autobankthunks.");
         if (!ExplicitAutoBank && !AutoText)

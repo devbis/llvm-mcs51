@@ -29,6 +29,10 @@ static bool isAutoBankFunction(const Function &F, StringRef CPU,
                                bool FunctionSections) {
   if (F.hasSection() && isMCS51AutoBankSection(F.getSection()))
     return true;
+  // Runtime helpers and startup support must stay in common flash so calls
+  // from any bank can reach them directly without another bank-call thunk.
+  if (F.getName().starts_with("__mcs51_"))
+    return false;
   if (!CPU.equals_insensitive("cc2530") || !FunctionSections ||
       F.getName() == "main" || F.hasFnAttribute("interrupt"))
     return false;
@@ -270,6 +274,16 @@ public:
           }
           if (Target && !Target->isDeclaration())
             break;
+          // Runtime support is kept in common flash. External calls to it do
+          // not need the fallback bank-call thunk used for unknown user code.
+          if (TargetName.starts_with("__mcs51_")) {
+            MCInst Call;
+            Call.setOpcode(MCS51::LCALL);
+            Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+                GetExternalSymbolSymbol(TargetName), OutContext)));
+            EmitToStreamer(*OutStreamer, Call);
+            return;
+          }
           MCInst Call;
           Call.setOpcode(MCS51::LCALL);
           Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
@@ -312,7 +326,8 @@ public:
               TargetAutoBank)
             Symbol = getBankThunkSymbol(*Target);
           else if (Target->isDeclaration() &&
-                   TM.getTargetCPU().equals_insensitive("cc2530"))
+                   TM.getTargetCPU().equals_insensitive("cc2530") &&
+                   !Target->getName().starts_with("__mcs51_"))
             Symbol = getExternalBankCallThunkSymbol(Target->getName());
         }
         const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, OutContext);
@@ -374,6 +389,8 @@ private:
           } else {
             continue;
           }
+          if (TargetName.starts_with("__mcs51_"))
+            continue;
           // Definitions emit their own strong trampoline (when banked) or
           // can be called directly. Only declarations and unresolved symbols
           // need a weak caller-side fallback.
