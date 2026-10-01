@@ -78,7 +78,20 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
         .addReg(MCS51::R1, RegState::Define);
   };
-  auto EmitAddress = [&]() { EmitAddressAtOffset(Offset); };
+  auto EmitAddress = [&]() {
+    if (Offset < -2 || Offset > 2) {
+      EmitAddressAtOffset(Offset);
+      return;
+    }
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_DIRECT), MCS51::R1)
+        .addImm(0x81);
+    for (int64_t N = Offset; N > 0; --N)
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+    for (int64_t N = Offset; N < 0; ++N)
+      BuildMI(MBB, I, DL, TII.get(MCS51::DEC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+  };
   auto OffsetAfterPush = [&](int64_t Count) {
     return static_cast<uint8_t>(Offset - Count);
   };
@@ -189,13 +202,17 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
           .addReg(MCS51::R1, RegState::Implicit)
           .addReg(MCS51::DPTR, RegState::Implicit);
     } else if (MI->getOpcode() == MCS51::SPILL_STORE_A8) {
-      // Save A and PSW while forming the address so the spill preserves both
-      // the accumulator value and live condition flags.
-      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
-      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
-      EmitAddressAtOffset(OffsetAfterPush(2));
-      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
-      BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
+      if (Offset >= -2 && Offset <= 2) {
+        EmitAddress();
+      } else {
+        // Save A and PSW while forming the address so the spill preserves
+        // both the accumulator value and live condition flags.
+        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+        EmitAddressAtOffset(OffsetAfterPush(2));
+        BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+        BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
+      }
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
     } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
         MI->getOpcode() == MCS51::SPILL_STORE_INDIRECT8 ||
