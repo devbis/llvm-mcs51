@@ -28,5 +28,5 @@ unsigned char accumulator_constant_cfg(unsigned char choose,
 
 // Rematerialize the constant into its GPR while keeping the A update.
 // CHECK-LABEL: accumulator_constant_cfg:
-// CHECK: mov a, #-1
-// CHECK: mov r{{[0-7]}}, #-1
+// CHECK: mov r0, #-1
+// CHECK: mov a, r0

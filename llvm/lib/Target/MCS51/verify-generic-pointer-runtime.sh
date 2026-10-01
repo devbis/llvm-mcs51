@@ -16,7 +16,7 @@ trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 "$CLANG" -target mcs51 -O2 -ffunction-sections -fdata-sections \
   -c "$SCRIPT_DIR/mcs51-runtime.c" -o "$WORK/runtime.o"
 "$CLANG" -target mcs51 -O2 -ffreestanding -fno-builtin \
-  -c "$SOURCE_ROOT/llvm/test/CodeGen/8051/generic-pointer-runtime.c" \
+  -c "$SOURCE_ROOT/llvm/test/CodeGen/8051/Inputs/generic-pointer-runtime.c" \
   -o "$WORK/test.o"
 "$LLD" -m elf32-mcs51 -T "$SCRIPT_DIR/test/mcs51-flat-sim.ld" \
   --gc-sections --no-check-sections -o "$WORK/test.elf" \

@@ -7,8 +7,12 @@ unsigned char local_array_index(unsigned char index, unsigned char value) {
 }
 
 // CHECK-LABEL: local_array_index:
-// CHECK: mov a, 130
-// CHECK: add a, r1
-// CHECK: mov @r1, a
-// CHECK: mov a, @r1
+// CHECK: mov a, 129
+// CHECK: add a, #4
+// CHECK: mov 129, a
+// CHECK: add a, r7
+// CHECK: mov r0, a
+// CHECK: mov a, r6
+// CHECK: mov @r0, a
+// CHECK: mov a, @r0
 // CHECK: ret

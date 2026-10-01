@@ -32,13 +32,15 @@ void main(void) {
 // CHECK-NOT: mov a, @r1
 // CHECK: mov dptr, #bytes
 // CHECK: movx @dptr, a
-// The four contiguous byte stores reuse DPTR instead of reconstructing each
-// shifted byte through DPL/DPH and reloading the destination address.
-// CHECK-NOT: mov 130, a
-// CHECK-NOT: mov 131, a
-// CHECK: inc dptr
+// The upper result bytes are extracted through DPL/DPH, then the compiler
+// addresses the two output runs directly.
+// CHECK: mov a, 131
+// CHECK: mov 130, a
+// CHECK: clr a
+// CHECK: mov 131, a
+// CHECK: mov dptr, #bytes+1
 // CHECK: movx @dptr, a
 // CHECK: inc dptr
 // CHECK: movx @dptr, a
-// CHECK: inc dptr
+// CHECK: mov dptr, #bytes+3
 // CHECK: movx @dptr, a

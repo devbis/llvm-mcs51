@@ -48,13 +48,11 @@ unsigned char signed_greater_equal(signed char lhs, signed char rhs) {
 // CHECK: xrl a,
 // CHECK: j{{n?z}}
 // CHECK-LABEL: equal_zero:
-// CHECK: mov a, r{{[0-7]}}
 // CHECK-NOT: xrl a, #0
-// CHECK: jnz
+// CHECK: cjne r7, #0,
 // CHECK-LABEL: not_equal_zero:
-// CHECK: mov a, r{{[0-7]}}
 // CHECK-NOT: xrl a, #0
-// CHECK: jnz
+// CHECK: cjne r7, #0,
 // CHECK-LABEL: unsigned_less_equal:
 // CHECK: subb a,
 // CHECK: cpl c
@@ -84,13 +82,11 @@ unsigned char signed_greater_equal(signed char lhs, signed char rhs) {
 // OPT: xrl a,
 // OPT: j{{n?z}}
 // OPT-LABEL: equal_zero:
-// OPT: mov a, r{{[0-7]}}
 // OPT-NOT: xrl a, #0
-// OPT: jnz
+// OPT: cjne r7, #0,
 // OPT-LABEL: not_equal_zero:
-// OPT: mov a, r{{[0-7]}}
 // OPT-NOT: xrl a, #0
-// OPT: jnz
+// OPT: cjne r7, #0,
 // OPT-LABEL: unsigned_less_equal:
 // OPT: subb a,
 // OPT: cpl c
