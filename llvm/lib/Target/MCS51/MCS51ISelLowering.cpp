@@ -1417,6 +1417,122 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
 
 MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MachineInstr &MI, MachineBasicBlock *MBB) const {
+  struct PhysicalLiveInLowering {
+    MachineFunction &MF;
+    const TargetInstrInfo &TII;
+    DebugLoc DL;
+
+    PhysicalLiveInLowering(MachineFunction &MF, const TargetInstrInfo &TII,
+                           const DebugLoc &DL)
+        : MF(MF), TII(TII), DL(DL) {}
+
+    ~PhysicalLiveInLowering() {
+      MachineRegisterInfo &MRI = MF.getRegInfo();
+      for (MachineBasicBlock &Block : MF) {
+        if (&Block == &MF.front())
+          continue;
+
+        SmallVector<MCPhysReg, 4> LiveIns;
+        for (const auto &LI : Block.liveins())
+          LiveIns.push_back(LI.PhysReg);
+        for (MCPhysReg PhysReg : LiveIns) {
+          const TargetRegisterClass *RC = nullptr;
+          if (PhysReg == MCS51::A)
+            RC = &MCS51::MCS51ARegRegClass;
+          else if (PhysReg == MCS51::DPTR)
+            RC = &MCS51::MCS51PTRRegClass;
+          else if (MCS51::MCS51GPR8RegClass.contains(PhysReg))
+            RC = &MCS51::MCS51GPR8RegClass;
+          if (!RC || Block.pred_empty())
+            continue;
+
+          Register Merged = MRI.createVirtualRegister(RC);
+          MachineInstrBuilder Phi =
+              BuildMI(Block, Block.begin(), DL, TII.get(TargetOpcode::PHI),
+                      Merged);
+          for (MachineBasicBlock *Pred : Block.predecessors()) {
+            Register EdgeValue = MRI.createVirtualRegister(RC);
+            BuildMI(*Pred, Pred->getFirstTerminator(), DL,
+                    TII.get(TargetOpcode::COPY), EdgeValue)
+                .addReg(PhysReg);
+            Phi.addReg(EdgeValue).addMBB(Pred);
+          }
+          BuildMI(Block, Block.getFirstNonPHI(), DL,
+                  TII.get(TargetOpcode::COPY), PhysReg)
+              .addReg(Merged);
+          Block.removeLiveIn(PhysReg);
+        }
+      }
+      for (MachineBasicBlock &Block : MF) {
+        if (&Block == &MF.front() || Block.pred_empty())
+          continue;
+        bool BIsLiveIn = false;
+        for (const auto &LI : Block.liveins())
+          BIsLiveIn |= LI.PhysReg == MCS51::B;
+        bool BDefined = false;
+        bool NeedsBLiveIn = false;
+        for (MachineInstr &Instr : Block) {
+          for (const MachineOperand &MO : Instr.operands())
+            if (MO.isReg() && MO.getReg() == MCS51::B && MO.isUse() &&
+                !BDefined)
+              NeedsBLiveIn = true;
+          for (const MachineOperand &MO : Instr.operands())
+            if (MO.isReg() && MO.getReg() == MCS51::B && MO.isDef())
+              BDefined = true;
+        }
+        if (NeedsBLiveIn && !BIsLiveIn)
+          Block.addLiveIn(MCS51::B);
+      }
+
+      bool Changed;
+      do {
+        Changed = false;
+        for (MachineBasicBlock &Block : MF) {
+          bool BIsLiveIn = false;
+          for (const auto &LI : Block.liveins())
+            BIsLiveIn |= LI.PhysReg == MCS51::B;
+          if (!BIsLiveIn)
+            continue;
+          for (MachineBasicBlock *Pred : Block.predecessors()) {
+            MachineBasicBlock::iterator Term = Pred->getFirstTerminator();
+            bool HasTermUse = false;
+            for (MachineInstr &Instr : *Pred) {
+              if (Instr.isTerminator())
+                for (const MachineOperand &MO : Instr.operands())
+                  HasTermUse |= MO.isReg() && MO.getReg() == MCS51::B &&
+                                MO.isUse();
+              if (Instr.isTerminator())
+                break;
+            }
+            if (Term != Pred->end() && !HasTermUse) {
+              Term->addOperand(MF, MachineOperand::CreateReg(
+                                       MCS51::B, false, true));
+              Changed = true;
+            }
+
+            if (Pred == &MF.front())
+              continue;
+            bool PredDefinesB = false;
+            for (MachineInstr &Instr : *Pred) {
+              for (const MachineOperand &MO : Instr.operands())
+                if (MO.isReg() && MO.getReg() == MCS51::B && MO.isDef())
+                  PredDefinesB = true;
+              if (Instr.isTerminator())
+                break;
+            }
+            bool PredHasB = false;
+            for (const auto &LI : Pred->liveins())
+              PredHasB |= LI.PhysReg == MCS51::B;
+            if (!PredDefinesB && !PredHasB) {
+              Pred->addLiveIn(MCS51::B);
+              Changed = true;
+            }
+          }
+        }
+      } while (Changed);
+    }
+  } LowerPhysicalLiveIns(*MBB->getParent(), *STI.getInstrInfo(), MI.getDebugLoc());
+
   const TargetInstrInfo &TII = *STI.getInstrInfo();
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
@@ -2954,7 +3070,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MachineBasicBlock *LoadCount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *Loop = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *Zero = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    Register InitialCount = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
     Register LoopCount = MF.getRegInfo().createVirtualRegister(
+        &MCS51::MCS51GPR8RegClass);
+    Register NextCount = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     MF.insert(Tail->getIterator(), CheckAmount);
     MF.insert(Tail->getIterator(), LoadCount);
@@ -3013,7 +3133,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
         .addImm(0x82);
     BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(LoopCount, RegState::Define);
+        .addReg(InitialCount, RegState::Define);
     BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::JZ))
         .addMBB(Tail);
     BuildMI(*LoadCount, LoadCount->end(), DL, TII.get(MCS51::LJMP))
@@ -3040,6 +3160,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
 
     BuildMI(*Loop, Loop->begin(), DL, TII.get(TargetOpcode::PHI), LoopHi)
         .addReg(InitialHi).addMBB(LoadCount).addReg(NextHi).addMBB(Loop);
+    BuildMI(*Loop, Loop->begin(), DL, TII.get(TargetOpcode::PHI), LoopCount)
+        .addReg(InitialCount).addMBB(LoadCount).addReg(NextCount).addMBB(Loop);
     BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::CLR_C));
     if (IsLeft) {
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_B), MCS51::A);
@@ -3062,9 +3184,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::RRC_A));
       BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_B_A));
     }
-    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DJNZ_RN), LoopCount)
-        .addReg(LoopCount)
-        .addMBB(Loop);
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LoopCount);
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::DEC_A));
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::MOV_RN_A))
+        .addReg(NextCount, RegState::Define);
+    BuildMI(*Loop, Loop->end(), DL, TII.get(MCS51::JNZ)).addMBB(Loop);
 
     BuildMI(*Zero, Zero->end(), DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
         .addImm(0);
