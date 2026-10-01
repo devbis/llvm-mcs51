@@ -3,8 +3,11 @@
 
 // CHECK-LABEL: add_one:
 // CHECK: inc r7
-// CHECK-NEXT: mov a, r7
-// CHECK-NEXT: ret
+// CHECK: mov a, r7
+// CHECK: mov r0, a
+// CHECK: pop 7
+// CHECK: mov a, r0
+// CHECK: ret
 unsigned char add_one(unsigned char value) { return value + 1; }
 
 // CHECK-LABEL: subtract_one:

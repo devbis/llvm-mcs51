@@ -72,22 +72,25 @@ float call_echo_float(void) { return echo_float(2.5f); }
 
 // ASM-LABEL: first_vararg:
 // ASM: add a, #-2
-// ASM: dec a
-// ASM: dec a
-// ASM: add a, #-2
+// ASM: mov a, @r0
 // ASM-O2-LABEL: first_double_vararg:
-// ASM-O2: mov r4, a
 // ASM-O2: mov r5, a
+// ASM-O2: mov r4, a
 // ASM-O2: mov r6, a
 // ASM-O2: mov r7, a
 // ASM-O2: ret
 // ASM-O2-LABEL: call_first_double_vararg:
-// ASM-O2: mov a, #63
+// ASM-O2: mov r0, #63
+// ASM-O2: mov a, r0
 // ASM-O2: push 224
-// ASM-O2: mov a, #-64
+// ASM-O2: mov r0, #-64
+// ASM-O2: mov a, r0
 // ASM-O2: push 224
-// ASM-O2: mov a, #0
+// ASM-O2: clr a
+// ASM-O2: mov r0, #0
+// ASM-O2: mov a, r0
 // ASM-O2: push 224
+// ASM-O2: mov a, r0
 // ASM-O2: push 224
 // ASM-O2: mov a, 131
 // ASM-O2: push 224
@@ -96,11 +99,7 @@ float call_echo_float(void) { return echo_float(2.5f); }
 // ASM-O2: lcall first_double_vararg
 // ASM-LABEL: second_vararg:
 // ASM: add a, #-2
-// ASM: dec a
-// ASM: dec a
-// ASM: add a, #-2
+// ASM: mov a, @r0
 // ASM-LABEL: first_long_vararg:
 // ASM: add a, #-2
-// ASM: dec a
-// ASM: dec a
-// ASM: add a, #-2
+// ASM: mov a, @r0

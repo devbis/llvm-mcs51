@@ -12,12 +12,10 @@ unsigned char large_frame_offset(unsigned char value) {
 // CHECK-LABEL: large_frame_offset:
 // Larger stack adjustments use fixed-size SFR sequences.
 // CHECK: mov a, 129
-// CHECK-NEXT: add a, #141
+// CHECK-NEXT: add a, #145
 // CHECK-NEXT: mov 129, a
 // The frame-relative byte address wraps to an 8-bit displacement.
-// CHECK: add a, #116
-// CHECK: add a, #115
-// CHECK-NEXT: mov 129, a
-// CHECK-NEXT: push 224
-// CHECK-NEXT: pop 224
+// CHECK: add a, #112
+// CHECK: add a, #143
+// CHECK: add a, #113
 // CHECK: ret

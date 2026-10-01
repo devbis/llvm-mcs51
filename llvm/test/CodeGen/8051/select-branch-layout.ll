@@ -27,9 +27,11 @@ join:
 
 ; CHECK-LABEL: select_after_branch:
 ; CHECK: jnc
-; CHECK: mov a, #1
+; CHECK: mov r0, #1
 ; CHECK: jz
-; CHECK: mov a, #2
-; CHECK: mov a, #3
+; CHECK: mov r0, #2
+; CHECK: sjmp
+; CHECK: mov r0, #3
+; CHECK: mov a, r0
 ; CHECK: mov result, a
 ; CHECK: ret

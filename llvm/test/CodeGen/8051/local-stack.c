@@ -7,7 +7,7 @@ unsigned char local_byte(unsigned char value) {
 }
 
 // CHECK-LABEL: local_byte:
-// CHECK: inc 129
+// CHECK: add a, #7
 // CHECK: mov @r1, a
 // CHECK: mov a, @r1
 // CHECK: ret

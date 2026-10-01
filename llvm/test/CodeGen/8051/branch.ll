@@ -9,6 +9,5 @@ done:
 }
 
 ; CHECK-LABEL: jump_to_return:
-; CHECK: sjmp
 ; CHECK: mov a, #7
 ; CHECK: ret

@@ -29,8 +29,8 @@ entry:
   ret i8 %load
 }
 
-; CHECK: .section .bss.mcs51.overlay
-; CHECK: __mcs51_overlay:
+; CHECK: .section .mcs51.data1.bss
+; CHECK: __mcs51_overlay_data:
 ; CHECK: .zero 2
 
 ; NO-OVERLAY-NOT: __mcs51_overlay

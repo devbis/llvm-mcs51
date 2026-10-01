@@ -83,9 +83,7 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: mov r0, a
 // CHECK: mov a, @r0
 // CHECK: mov 130, a
-// CHECK: mov a, r0
-// CHECK: dec a
-// CHECK: mov r0, a
+// CHECK: dec r0
 // CHECK: mov a, @r0
 // CHECK: mov 131, a
 // CHECK: inc 129
@@ -97,9 +95,7 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: mov r0, a
 // CHECK: mov a, @r0
 // CHECK: mov 130, a
-// CHECK: mov a, r0
-// CHECK: dec a
-// CHECK: mov r0, a
+// CHECK: dec r0
 // CHECK: mov a, @r0
 // CHECK: mov 131, a
 // CHECK: inc 129

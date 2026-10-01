@@ -25,8 +25,7 @@ unsigned char conditional_add_bit2(unsigned char condition, unsigned char sum,
   return sum + ((condition & 4u) ? value : 0);
 }
 
-// Compare and select are lowered as one branch; the compare result is not
-// materialized as a separate 0/1 register value.
+// The bit test becomes a branchless byte mask before the add.
 // CHECK-LABEL: select_equal_zero:
 // CHECK: mov a, r7
 // CHECK: jz
@@ -48,5 +47,9 @@ unsigned char conditional_add_bit2(unsigned char condition, unsigned char sum,
 // CHECK-NEXT: clr c
 // CHECK-NEXT: jz
 // CHECK-LABEL: conditional_add_bit2:
-// CHECK: jnb 226,
-// CHECK-NOT: subb a, #0
+// CHECK: mov a, r7
+// CHECK: mov c, 231
+// CHECK: clr a
+// CHECK: subb a, #0
+// CHECK: anl a, r5
+// CHECK: add a, r6

@@ -195,15 +195,15 @@ int main(void) {
 // ASM-LABEL: write_generic_pdata:
 // ASM: movx @r0, a
 // ASM-LABEL: write_generic_idata:
-// ASM: mov @r0, a
+// ASM: mov @r0, #83
 // ASM-LABEL: write_generic_code:
 // ASM: lcall __mcs51_gptrput8
 // ASM-LABEL: generic_code_address:
-// ASM: mov a, #-128
+// ASM: mov r6, #-128
 // ASM-LABEL: generic_pdata_address:
-// ASM: mov a, #96
+// ASM: mov r6, #96
 // ASM-LABEL: generic_idata_address:
-// ASM: mov a, #64
+// ASM: mov r6, #64
 // ASM-LABEL: read_generic_stack:
 // ASM: mov a, #64
 // ASM-LABEL: store_generic_float:

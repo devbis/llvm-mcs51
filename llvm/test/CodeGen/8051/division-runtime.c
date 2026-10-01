@@ -1,6 +1,7 @@
 // RUN: clang -target mcs51 -O2 -S %s -o - | FileCheck %s --check-prefix=CALL
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 %s -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
+// RUN: llvm-objcopy --output-target=ihex %t.elf %t.hex
 // RUN: FileCheck %s --check-prefix=IHEX < %t.hex
 
 unsigned int divide_unsigned_word(unsigned int Numerator,
