@@ -78,19 +78,22 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A))
         .addReg(MCS51::R1, RegState::Define);
   };
+  auto EmitDirectStackAddress = [&](int64_t AddressOffset) {
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_DIRECT), MCS51::R1)
+        .addImm(0x81);
+    for (int64_t N = AddressOffset; N > 0; --N)
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+    for (int64_t N = AddressOffset; N < 0; ++N)
+      BuildMI(MBB, I, DL, TII.get(MCS51::DEC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+  };
   auto EmitAddress = [&]() {
     if (Offset < -2 || Offset > 2) {
       EmitAddressAtOffset(Offset);
       return;
     }
-    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_DIRECT), MCS51::R1)
-        .addImm(0x81);
-    for (int64_t N = Offset; N > 0; --N)
-      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
-          .addReg(MCS51::R1);
-    for (int64_t N = Offset; N < 0; ++N)
-      BuildMI(MBB, I, DL, TII.get(MCS51::DEC_RN), MCS51::R1)
-          .addReg(MCS51::R1);
+    EmitDirectStackAddress(Offset);
   };
   auto OffsetAfterPush = [&](int64_t Count) {
     return static_cast<uint8_t>(Offset - Count);
@@ -149,9 +152,13 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       MI->getOpcode() == MCS51::LOAD_FRAME16) {
     Register Dst = MI->getOperand(0).getReg();
     if (MI->getOpcode() == MCS51::SPILL_LOAD_A8) {
-      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
-      EmitAddressAtOffset(OffsetAfterPush(1));
-      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+      if (Offset >= -4 && Offset <= 4) {
+        EmitDirectStackAddress(Offset);
+      } else {
+        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+        EmitAddressAtOffset(OffsetAfterPush(1));
+        BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+      }
     } else {
       EmitAddress();
     }
@@ -202,8 +209,8 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
           .addReg(MCS51::R1, RegState::Implicit)
           .addReg(MCS51::DPTR, RegState::Implicit);
     } else if (MI->getOpcode() == MCS51::SPILL_STORE_A8) {
-      if (Offset >= -2 && Offset <= 2) {
-        EmitAddress();
+      if (Offset >= -6 && Offset <= 6) {
+        EmitDirectStackAddress(Offset);
       } else {
         // Save A and PSW while forming the address so the spill preserves
         // both the accumulator value and live condition flags.
