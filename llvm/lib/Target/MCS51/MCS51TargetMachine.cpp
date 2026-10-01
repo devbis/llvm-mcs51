@@ -1851,6 +1851,28 @@ public:
           Changed = true;
         }
       }
+
+    // Late byte extraction can leave a GPR-to-A move immediately before
+    // reading DPH into A. DPH overwrites the accumulator without using it,
+    // so that first move is redundant. Keep this pattern narrow: other moves
+    // may feed values carried across basic-block boundaries.
+    for (MachineBasicBlock &MBB : MF) {
+      for (auto I = MBB.begin(); I != MBB.end();) {
+        MachineInstr *Move = &*I++;
+        if (Move->getOpcode() != MCS51::MOV_A_RN)
+          continue;
+        MachineInstr *ReadDPH = Move->getNextNode();
+        if (!ReadDPH || ReadDPH->getOpcode() != MCS51::MOV_A_DIRECT ||
+            ReadDPH->getNumOperands() < 2 ||
+            !ReadDPH->getOperand(1).isImm() ||
+            ReadDPH->getOperand(1).getImm() != 0x83 ||
+            !Move->memoperands_empty())
+          continue;
+        Move->eraseFromParent();
+        Changed = true;
+      }
+    }
+
     SmallVector<MachineBasicBlock *, 16> Blocks;
     for (MachineBasicBlock &MBB : MF)
       Blocks.push_back(&MBB);
