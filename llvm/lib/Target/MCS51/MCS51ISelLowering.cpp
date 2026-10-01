@@ -2598,6 +2598,60 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                                   ? static_cast<uint16_t>(
                                         RHSDef->getOperand(1).getImm())
                                   : 0;
+      if (RHSIsImmediate && RHSImmediate == 0) {
+        MachineBasicBlock *Tail = MBB->splitAt(MI);
+        if (Tail == MBB) {
+          Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+          MF.insert(std::next(MBB->getIterator()), Tail);
+          Tail->transferSuccessorsAndUpdatePHIs(MBB);
+          MBB->addSuccessor(Tail);
+        }
+        Tail->removeLiveIn(MCS51::DPTR);
+        MachineBasicBlock *EqualBB =
+            MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+        MachineBasicBlock *NotEqualBB =
+            MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+        MF.insert(Tail->getIterator(), EqualBB);
+        MF.insert(Tail->getIterator(), NotEqualBB);
+        while (!MBB->succ_empty())
+          MBB->removeSuccessor(MBB->succ_begin());
+        MBB->addSuccessor(EqualBB);
+        MBB->addSuccessor(NotEqualBB);
+        EqualBB->addSuccessor(Tail);
+        NotEqualBB->addSuccessor(Tail);
+        Register EqualResult = MF.getRegInfo().createVirtualRegister(
+            &MCS51::MCS51GPR8RegClass);
+        Register NotEqualResult = MF.getRegInfo().createVirtualRegister(
+            &MCS51::MCS51GPR8RegClass);
+        MI.eraseFromParent();
+
+        BuildMI(*MBB, MBB->end(), DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+            .addReg(LHS);
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+            .addImm(0x82);
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::ORL_A_DIRECT), MCS51::A)
+            .addImm(0x83);
+        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNZ)).addMBB(NotEqualBB);
+        BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(MCS51::MOV_A_IMM),
+                MCS51::A)
+            .addImm(1);
+        BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(TargetOpcode::COPY),
+                EqualResult)
+            .addReg(MCS51::A);
+        BuildMI(*EqualBB, EqualBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+        BuildMI(*NotEqualBB, NotEqualBB->end(), DL,
+                TII.get(MCS51::MOV_A_IMM), MCS51::A)
+            .addImm(0);
+        BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(TargetOpcode::COPY),
+                NotEqualResult)
+            .addReg(MCS51::A);
+        BuildMI(*NotEqualBB, NotEqualBB->end(), DL, TII.get(MCS51::LJMP))
+            .addMBB(Tail);
+        BuildMI(*Tail, Tail->begin(), DL, TII.get(TargetOpcode::PHI), Dst)
+            .addReg(EqualResult).addMBB(EqualBB)
+            .addReg(NotEqualResult).addMBB(NotEqualBB);
+        return Tail;
+      }
       MachineBasicBlock *Tail = MBB->splitAt(MI);
       if (Tail == MBB) {
         Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
