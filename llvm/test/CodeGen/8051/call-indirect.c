@@ -19,16 +19,12 @@ u8 call_indirect_with_stack_arg(u8 (*fn)(u8, u8, u8, u8, u8), u8 a, u8 b,
 }
 
 // The 8051 has no indirect CALL opcode. The backend calls a local thunk,
-// which restores an ordinary call frame before jumping through DPTR.
+// which tail-transfers through DPTR using the LCALL return address.
 // CHECK-LABEL: call_indirect:
-// CHECK: push 130
-// CHECK: push 131
 // CHECK: lcall .Lcall_indirect.mcs51.icall
 // CHECK-LABEL: .Lcall_indirect.mcs51.icall:
 // CHECK: jmp @a+dptr
 // CHECK-LABEL: call_indirect_with_arg:
-// CHECK: push 130
-// CHECK: push 131
 // CHECK: lcall .Lcall_indirect_with_arg.mcs51.icall
 // CHECK-LABEL: .Lcall_indirect_with_arg.mcs51.icall:
 // CHECK: jmp @a+dptr
@@ -40,10 +36,10 @@ u8 call_indirect_with_stack_arg(u8 (*fn)(u8, u8, u8, u8, u8), u8 a, u8 b,
 // DIS-LABEL: <call_indirect>:
 // DIS: lcall {{[0-9]+}}
 // DIS: ret
-// DIS: mov a, 129
+// DIS: clr a
 // DIS: jmp @a+dptr
 // DIS-LABEL: <call_indirect_with_arg>:
 // DIS: lcall {{[0-9]+}}
 // DIS: ret
-// DIS: mov a, 129
+// DIS: clr a
 // DIS: jmp @a+dptr

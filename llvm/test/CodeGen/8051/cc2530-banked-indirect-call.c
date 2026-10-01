@@ -51,11 +51,11 @@ int main(void) { return banked_global_pointer_caller(0); }
 // LINK-LABEL: <__mcs51_bankcall_banked_add>:
 // LINK: mov 159, #2
 // LINK: lcall 32768
-// LINK-LABEL: <invoke_function_pointer>:
-// LINK: lcall
-// LINK: jmp @a+dptr
 // LINK-LABEL: <banked_pointer_caller>:
 // LINK: mov dptr, #
 // LINK: lcall
+// LINK-LABEL: <invoke_function_pointer>:
+// LINK: lcall
+// LINK: jmp @a+dptr
 
 // HEX: :00000001FF

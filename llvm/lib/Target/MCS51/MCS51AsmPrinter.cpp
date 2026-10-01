@@ -246,8 +246,6 @@ public:
     }
 
     if (isMCS51IndirectCallOpcode(MI->getOpcode())) {
-      emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x82});
-      emitBankThunkInstruction(MCS51::PUSH_DIRECT, {0x83});
       MCInst Call;
       Call.setOpcode(MCS51::LCALL);
       Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
@@ -460,42 +458,9 @@ private:
   }
 
   void emitIndirectCallThunk() {
-    auto Reg = [](unsigned R) { return MCOperand::createReg(R); };
-    auto Imm = [](int64_t V) { return MCOperand::createImm(V); };
-
-    // The caller pushed DPL and DPH before LCALL. The helper's stack is:
-    // return-high, return-low, target-high, target-low, then stack arguments.
-    // Load the target, move the helper return address over the target bytes,
-    // and shrink SP so the indirect callee sees an ordinary call frame.
-    emitThunkInstruction(MCS51::MOV_A_DIRECT, {Reg(MCS51::A), Imm(0x81)});
-    emitThunkInstruction(MCS51::ADD_A_IMM, {Reg(MCS51::A), Imm(0xFE)});
-    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_DIRECT_A, {Imm(0x83)});
-    emitThunkInstruction(MCS51::DEC_RN,
-                         {Reg(MCS51::R0), Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_DIRECT_A, {Imm(0x82)});
-
-    emitThunkInstruction(MCS51::MOV_A_DIRECT, {Reg(MCS51::A), Imm(0x81)});
-    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R2)});
-    emitThunkInstruction(MCS51::DEC_RN,
-                         {Reg(MCS51::R0), Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_IND_RI, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_RN_A, {Reg(MCS51::R3)});
-    emitThunkInstruction(MCS51::DEC_RN,
-                         {Reg(MCS51::R0), Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_RN, {Reg(MCS51::R2)});
-    emitThunkInstruction(MCS51::MOV_IND_RI_A, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::DEC_RN,
-                         {Reg(MCS51::R0), Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_RN, {Reg(MCS51::R3)});
-    emitThunkInstruction(MCS51::MOV_IND_RI_A, {Reg(MCS51::R0)});
-    emitThunkInstruction(MCS51::MOV_A_DIRECT, {Reg(MCS51::A), Imm(0x81)});
-    emitThunkInstruction(MCS51::ADD_A_IMM, {Reg(MCS51::A), Imm(0xFE)});
-    emitThunkInstruction(MCS51::MOV_DIRECT_A, {Imm(0x81)});
+    // The caller already has the target in DPTR. LCALL pushes the ordinary
+    // return address, and the indirect callee's RET returns directly to it.
+    // DPTR survives LCALL and remains available for the tail transfer.
     emitThunkInstruction(MCS51::CLR_A, {});
     emitThunkInstruction(MCS51::JMP_ADPTR, {});
   }
