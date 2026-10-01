@@ -8,8 +8,8 @@ unsigned char local_byte(unsigned char value) {
 
 // CHECK-LABEL: local_byte:
 // CHECK: add a, #7
-// CHECK: mov @r1, a
-// CHECK: mov a, @r1
+// CHECK: mov @r1, 130
+// CHECK: mov 130, @r1
 // CHECK: ret
 
 unsigned char local_array_element(unsigned char value) {
@@ -19,6 +19,6 @@ unsigned char local_array_element(unsigned char value) {
 }
 
 // CHECK-LABEL: local_array_element:
-// CHECK: mov @r1, a
-// CHECK: mov a, @r1
+// CHECK: mov @r1, 130
+// CHECK: mov 130, @r1
 // CHECK: ret

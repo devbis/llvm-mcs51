@@ -66,6 +66,7 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                        ->getFrameIndexReference(MF, FI, FrameReg)
                        .getFixed();
   Offset += MI->getOperand(FIOperandNum + 1).getImm();
+  bool UsesDirectWordTransfer = false;
   if (Offset < -256 || Offset > 255)
     report_fatal_error("MCS-51 stack frame exceeds 256-byte displacement");
 
@@ -141,14 +142,26 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     } else {
       EmitAddress();
     }
-    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
+    if (MI->getOpcode() == MCS51::SPILL_LOAD16) {
+      UsesDirectWordTransfer = true;
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_R1_IND))
+          .addImm(0x82)
+          .addReg(MCS51::R1, RegState::Implicit);
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_R1_IND))
+          .addImm(0x83)
+          .addReg(MCS51::R1, RegState::Implicit);
+    } else {
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
+    }
     if (MI->getOpcode() == MCS51::SPILL_LOAD_A8) {
       // The load itself leaves the byte in the accumulator register class.
     } else if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
         MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8 ||
         MI->getOpcode() == MCS51::LOAD_FRAME8) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
-    } else {
+    } else if (MI->getOpcode() != MCS51::SPILL_LOAD16) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
       BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
           .addReg(MCS51::R1);
@@ -162,7 +175,20 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
              MI->getOpcode() == MCS51::SPILL_STORE_A8 ||
              MI->getOpcode() == MCS51::STORE_FRAME16) {
     Register Src = MI->getOperand(FIOperandNum + 2).getReg();
-    if (MI->getOpcode() == MCS51::SPILL_STORE_A8) {
+    if (MI->getOpcode() == MCS51::SPILL_STORE16) {
+      UsesDirectWordTransfer = true;
+      EmitAddress();
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_DIRECT))
+          .addImm(0x82)
+          .addReg(MCS51::R1, RegState::Implicit)
+          .addReg(MCS51::DPTR, RegState::Implicit);
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_DIRECT))
+          .addImm(0x83)
+          .addReg(MCS51::R1, RegState::Implicit)
+          .addReg(MCS51::DPTR, RegState::Implicit);
+    } else if (MI->getOpcode() == MCS51::SPILL_STORE_A8) {
       // Save A and PSW while forming the address so the spill preserves both
       // the accumulator value and live condition flags.
       BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
@@ -190,6 +216,12 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     }
   } else {
     llvm_unreachable("unexpected MCS-51 frame-index instruction");
+  }
+  // Frame-index expansion inserts scratch uses after register allocation. The
+  // kill flags computed for the spill pseudo no longer describe those uses.
+  if (UsesDirectWordTransfer) {
+    MF.getRegInfo().clearKillFlags(MCS51::A);
+    MF.getRegInfo().clearKillFlags(MCS51::C);
   }
   MI->eraseFromParent();
   return true;

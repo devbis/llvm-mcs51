@@ -28,16 +28,14 @@ void main(void) { result = copy_payload(); }
 // CHECK-LABEL: main:
 // CHECK: mov dptr, #packet+2
 // CHECK: mov r1, a
-// CHECK: mov @r1, a
+// CHECK: mov @r1, 130
 // CHECK: inc r1
-// CHECK: mov @r1, a
+// CHECK: mov @r1, 131
 // CHECK: movx a, @dptr
 // CHECK: inc r1
-// CHECK: mov a, @r1
-// CHECK: mov 130, a
+// CHECK: mov 130, @r1
 // CHECK: inc r1
-// CHECK: mov a, @r1
-// CHECK: mov 131, a
+// CHECK: mov 131, @r1
 // CHECK: movx @dptr, a
 // CHECK: dec r1
 // CHECK-COUNT-2: dec r1
