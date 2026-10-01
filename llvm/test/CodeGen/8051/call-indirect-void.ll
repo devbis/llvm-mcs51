@@ -12,19 +12,14 @@ entry:
 }
 
 ; CHECK-LABEL: call_void:
-; CHECK: push 130
-; CHECK: push 131
 ; CHECK: lcall .Lcall_void.mcs51.icall
 ; CHECK: ret
 ; CHECK-LABEL: .Lcall_void.mcs51.icall:
-; CHECK: mov a, 129
-; CHECK: mov 129, a
+; CHECK: clr a
 ; CHECK: jmp @a+dptr
 
 ; DIS-LABEL: <call_void>:
-; DIS: push 130
-; DIS: push 131
 ; DIS: lcall
 ; DIS: ret
-; DIS: mov a, 129
+; DIS: clr a
 ; DIS: jmp @a+dptr
