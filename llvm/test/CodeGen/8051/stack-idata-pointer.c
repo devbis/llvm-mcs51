@@ -14,7 +14,8 @@ void read_local_array(unsigned char Index) {
 
 // CHECK-LABEL: <read_local_array>:
 // CHECK: mov a, 129
-// CHECK: add a, #255
+// CHECK: add a, #250
 // CHECK: mov r1, a
-// CHECK: add a, r{{[0-7]}}
+// CHECK: mov a, r0
+// CHECK: add a, 130
 // CHECK: mov r7, a

@@ -5,7 +5,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -21,7 +20,6 @@ public:
   MCS51StackAddressLowering() : FunctionPass(ID) {}
 
   bool runOnFunction(Function &F) override {
-    LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     SmallVector<AllocaInst *, 8> Allocations;
     for (BasicBlock &BB : F)
       for (Instruction &I : BB)
@@ -30,16 +28,12 @@ public:
 
     bool Changed = false;
     for (AllocaInst *AI : Allocations)
-      Changed |= lowerIndexedStackObject(*AI, LI);
+      Changed |= lowerIndexedStackObject(*AI);
     return Changed;
   }
 
-  void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<LoopInfoWrapperPass>();
-  }
-
 private:
-  static bool lowerIndexedStackObject(AllocaInst &AI, LoopInfo &LI) {
+  static bool lowerIndexedStackObject(AllocaInst &AI) {
     SmallVector<Value *, 16> Worklist{&AI};
     SmallPtrSet<Value *, 16> Seen;
     SmallVector<GetElementPtrInst *, 8> GEPs;
@@ -52,13 +46,18 @@ private:
       for (User *U : Pointer->users()) {
         if (isa<DbgInfoIntrinsic>(U) || isa<LifetimeIntrinsic>(U))
           continue;
+        if (auto *Cast = dyn_cast<AddrSpaceCastInst>(U)) {
+          if (Cast->getPointerOperand() != Pointer)
+            return false;
+          Worklist.push_back(Cast);
+          continue;
+        }
         if (auto *GEP = dyn_cast<GetElementPtrInst>(U)) {
           if (GEP->getPointerOperand() != Pointer)
             return false;
           GEPs.push_back(GEP);
           for (Value *Index : GEP->indices())
-            HasVariableIndex |= !isa<ConstantInt>(Index) &&
-                                LI.getLoopFor(GEP->getParent());
+            HasVariableIndex |= !isa<ConstantInt>(Index);
           Worklist.push_back(GEP);
           continue;
         }
@@ -84,6 +83,10 @@ private:
         &AI, IDataPointerTy, AI.getName() + ".idata");
     DenseMap<Value *, Value *> Remapped;
     Remapped[&AI] = BaseCast;
+    for (Value *Pointer : Seen)
+      if (auto *Cast = dyn_cast<AddrSpaceCastInst>(Pointer))
+        if (Cast->getPointerOperand() == &AI)
+          Remapped[Cast] = BaseCast;
 
     for (GetElementPtrInst *GEP : GEPs) {
       Value *NewBase = Remapped.lookup(GEP->getPointerOperand());
@@ -102,11 +105,17 @@ private:
       Remapped[GEP] = NewGEP;
     }
 
+    for (Value *Pointer : Seen)
+      if (auto *Cast = dyn_cast<AddrSpaceCastInst>(Pointer))
+        if (Value *NewBase = Remapped.lookup(Cast->getPointerOperand()))
+          Remapped[Cast] = NewBase;
+
     for (Value *Pointer : Seen) {
       Value *NewPointer = Remapped.lookup(Pointer);
       if (!NewPointer)
         continue;
-      for (User *U : Pointer->users()) {
+      SmallVector<User *, 8> PointerUsers(Pointer->users());
+      for (User *U : PointerUsers) {
         if (auto *Load = dyn_cast<LoadInst>(U)) {
           if (Load->getPointerOperand() == Pointer)
             Load->setOperand(Load->getPointerOperandIndex(), NewPointer);
@@ -120,6 +129,10 @@ private:
     for (auto It = GEPs.rbegin(); It != GEPs.rend(); ++It)
       if ((*It)->use_empty())
         (*It)->eraseFromParent();
+    for (Value *Pointer : Seen)
+      if (auto *Cast = dyn_cast<AddrSpaceCastInst>(Pointer))
+        if (Cast->use_empty())
+          Cast->eraseFromParent();
     return true;
   }
 };

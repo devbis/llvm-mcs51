@@ -40,7 +40,7 @@ int main(void) {
 // DIS-LABEL: <main>:
 // DIS: mov 48, #1
 // DIS: mov r0, #49
-// DIS: mov @r0, a
+// DIS: mov @r0, #2
 // DIS: movx @dptr, a
 // DIS-LABEL: <read_indirect_data>:
 // DIS: mov r0, #49

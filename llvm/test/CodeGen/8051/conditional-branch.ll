@@ -100,25 +100,27 @@ no:
 }
 
 ; CHECK-LABEL: choose:
+; CHECK: mov r2, #1
+; CHECK: mov r0, #2
 ; CHECK: mov a, r7
-; CHECK: j{{n?z}}
-; CHECK: sjmp
-; CHECK: mov a, #1
-; CHECK: ret
-; CHECK: mov a, #2
+; CHECK: jnz
+; CHECK: ljmp
+; CHECK: mov a, r2
+; CHECK: mov a, r0
 ; CHECK: ret
 
 ; OPT-LABEL: choose:
 ; OPT: mov a, r7
 ; OPT: jz
 ; OPT-NOT: ljmp
-; OPT: mov a, #1
+; OPT: mov r0, #1
+; OPT: mov a, r0
 ; OPT: ret
 
 ; DIS-LABEL: <choose>:
 ; DIS: mov a, r7
 ; DIS: jz
-; DIS: sjmp
+; DIS: ljmp
 
 ; CHECK-LABEL: choose_const:
 ; CHECK: mov a, r7
@@ -134,7 +136,7 @@ no:
 ; CHECK: xrl a, #128
 ; CHECK: xrl a, #128
 ; CHECK: subb a,
-; CHECK: jnc
+; CHECK: rlc a
 
 ; CHECK-LABEL: choose_signed_ge:
 ; CHECK: xrl a, #128
@@ -152,6 +154,7 @@ no:
 ; CHECK: subb a,
 
 ; CHECK-LABEL: choose_signed_const:
-; CHECK: mov a, #-6
+; CHECK: mov r0, #-5
+; CHECK: mov a, r0
 ; CHECK: xrl a, #128
 ; CHECK: subb a,

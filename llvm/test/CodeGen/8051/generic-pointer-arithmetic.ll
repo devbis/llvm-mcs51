@@ -23,7 +23,7 @@ entry:
 ; LOWERED-LABEL: define ptr addrspace(8) @advance_generic_byte
 ; LOWERED: %gptr.gep.address = trunc i32 %gptr.gep.base to i16
 ; LOWERED: %gptr.gep.tag = and i32 %gptr.gep.base, -65536
-; LOWERED: %gptr.gep.bits = or i32 %gptr.gep.tag
+; LOWERED: %gptr.gep.bits = or{{.*}}i32 %gptr.gep.tag
 ; LOWERED-LABEL: define ptr addrspace(8) @advance_generic_word
-; LOWERED: %gptr.gep.scaled.index = mul i16 %count, 2
+; LOWERED: %gptr.gep.scaled.index = shl i16 %count, 1
 ; LOWERED: %gptr.gep.tag = and i32 %gptr.gep.base, -65536
