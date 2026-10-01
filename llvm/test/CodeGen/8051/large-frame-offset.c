@@ -16,6 +16,8 @@ unsigned char large_frame_offset(unsigned char value) {
 // CHECK-NEXT: mov 129, a
 // The frame-relative byte address wraps to an 8-bit displacement.
 // CHECK: add a, #112
-// CHECK: add a, #143
+// Small frame offsets copy SP directly to R1 and adjust it in place.
+// CHECK: mov r1, 129
+// CHECK-NEXT: dec r1
 // CHECK: add a, #113
 // CHECK: ret
