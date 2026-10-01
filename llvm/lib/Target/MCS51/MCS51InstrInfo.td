@@ -1397,10 +1397,14 @@ class MCS51Abs11Inst<bits<5> opcode, string mnemonic> : Instruction {
 def AJMP : MCS51Abs11Inst<0b00001, "ajmp"> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
-let Defs = [A, B, C, DPTR, SP, R0, R1],
+// The fixed-width return ABI uses R4-R7 for 32-bit values and R0-R7 for
+// 64-bit values. Mark all argument/result registers as call definitions so
+// SelectionDAG can copy returned values from them even when they are also
+// callee-saved for values that live across the call.
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
     Uses = [SP], isCall = 1 in
 def ACALL : MCS51Abs11Inst<0b10001, "acall">;
-let Defs = [A, B, C, DPTR, SP, R0, R1],
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
     Uses = [SP], isCall = 1 in
 def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
@@ -1413,7 +1417,7 @@ def : Pat<(MCS51call (i16 texternalsym:$addr)),
 // pseudo to an LCALL of a local dispatch block and a continuation jump when
 // needed. The dispatcher clears A, then uses JMP @A+DPTR to tail-transfer to
 // the callee; its RET returns to the call site's continuation.
-let Defs = [A, B, C, DPTR, SP, R0, R1],
+let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
     Uses = [SP, DPTR], isCall = 1 in
 def ICALL : Instruction {
   let Namespace = "MCS51";
