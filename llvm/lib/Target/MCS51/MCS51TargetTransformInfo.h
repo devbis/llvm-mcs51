@@ -11,6 +11,7 @@
 
 #include "MCS51TargetMachine.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
+#include "llvm/Support/MathExtras.h"
 
 namespace llvm {
 
@@ -35,6 +36,49 @@ public:
     // code on MCS-51. Keep only calls LLVM considers unconditionally
     // profitable; other optimization levels retain LLVM's normal heuristic.
     return MinSize ? 0 : 1;
+  }
+
+  // The generic cost model charges one unit for an i32 or i64 operation, but
+  // the 8-bit MCS-51 expands it into a sequence per byte, and shifts,
+  // multiplies and divisions into loops or runtime calls. Scale the costs so
+  // that loop unrolling does not replicate wide operations.
+  InstructionCost getArithmeticInstrCost(
+      unsigned Opcode, Type *Ty, TargetTransformInfo::TargetCostKind CostKind,
+      TargetTransformInfo::OperandValueInfo Opd1Info = {TargetTransformInfo::OK_AnyValue, TargetTransformInfo::OP_None},
+      TargetTransformInfo::OperandValueInfo Opd2Info = {TargetTransformInfo::OK_AnyValue, TargetTransformInfo::OP_None},
+      ArrayRef<const Value *> Args = {},
+      const Instruction *CxtI = nullptr) const override {
+    InstructionCost Cost = BaseT::getArithmeticInstrCost(
+        Opcode, Ty, CostKind, Opd1Info, Opd2Info, Args, CxtI);
+    if (!Ty->getScalarType()->isIntegerTy() || Ty->getScalarSizeInBits() <= 8)
+      return Cost;
+    unsigned Bytes = divideCeil(Ty->getScalarSizeInBits(), 8);
+    switch (Opcode) {
+    case Instruction::Mul:
+    case Instruction::UDiv:
+    case Instruction::SDiv:
+    case Instruction::URem:
+    case Instruction::SRem:
+    case Instruction::Shl:
+    case Instruction::LShr:
+    case Instruction::AShr:
+      return Cost * Bytes * Bytes;
+    default:
+      return Cost * Bytes;
+    }
+  }
+
+  InstructionCost getMemoryOpCost(
+      unsigned Opcode, Type *Src, Align Alignment, unsigned AddressSpace,
+      TargetTransformInfo::TargetCostKind CostKind,
+      TargetTransformInfo::OperandValueInfo OpInfo = {TargetTransformInfo::OK_AnyValue, TargetTransformInfo::OP_None},
+      const Instruction *I = nullptr) const override {
+    InstructionCost Cost = BaseT::getMemoryOpCost(
+        Opcode, Src, Alignment, AddressSpace, CostKind, OpInfo, I);
+    if (!Src->getScalarType()->isIntegerTy() ||
+        Src->getScalarSizeInBits() <= 8)
+      return Cost;
+    return Cost * divideCeil(Src->getScalarSizeInBits(), 8);
   }
 };
 
