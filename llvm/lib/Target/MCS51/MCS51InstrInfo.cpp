@@ -4,6 +4,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Support/MathExtras.h"
 
 #define GET_INSTRINFO_CTOR_DTOR
@@ -332,6 +334,11 @@ bool MCS51InstrInfo::reverseBranchCondition(
 }
 
 unsigned MCS51InstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  if (MI.isInlineAsm()) {
+    const MachineFunction *MF = MI.getParent()->getParent();
+    return getInlineAsmLength(MI.getOperand(0).getSymbolName(),
+                              MF->getTarget().getMCAsmInfo());
+  }
   return get(MI.getOpcode()).getSize();
 }
 
