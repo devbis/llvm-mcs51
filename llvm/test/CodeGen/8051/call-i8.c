@@ -99,10 +99,8 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: mov a, @r0
 // CHECK: mov 131, a
 // CHECK: inc 129
-// CHECK: mov a, 131
-// CHECK: push 224
-// CHECK: mov a, 130
-// CHECK: push 224
+// CHECK: push 131
+// CHECK: push 130
 // CHECK: mov dptr, #0
 // CHECK: lcall callee6_word
 // CHECK: pop 240
@@ -111,10 +109,8 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 
 // CHECK-LABEL: caller_mixed_stack:
 // CHECK: mov dptr, #4660
-// CHECK: mov a, 131
-// CHECK: push 224
-// CHECK: mov a, 130
-// CHECK: push 224
+// CHECK: push 131
+// CHECK: push 130
 // CHECK: mov 224, #0
 // CHECK: push 224
 // CHECK: mov a, r{{[0-7]}}
