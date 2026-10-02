@@ -92,10 +92,8 @@ float call_echo_float(void) { return echo_float(2.5f); }
 // ASM-O2: push 224
 // ASM-O2: mov a, r0
 // ASM-O2: push 224
-// ASM-O2: mov a, 131
-// ASM-O2: push 224
-// ASM-O2: mov a, 130
-// ASM-O2: push 224
+// ASM-O2: push 131
+// ASM-O2: push 130
 // ASM-O2: lcall first_double_vararg
 // ASM-LABEL: second_vararg:
 // ASM: add a, #-2
