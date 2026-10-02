@@ -4,6 +4,7 @@
 #include "MCS51InstrInfo.h"
 #include "MCS51.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -26,6 +27,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Utils.h"
@@ -1893,6 +1895,159 @@ public:
 
 char MCS51PostRAPeephole::ID = 0;
 
+class MCS51BranchIslandSharing final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51BranchIslandSharing() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    const auto &TII =
+        *static_cast<const MCS51InstrInfo *>(MF.getSubtarget().getInstrInfo());
+    DenseMap<MachineBasicBlock *, SmallVector<MachineBasicBlock *, 4>>
+        IslandsByTarget;
+    bool Changed = false;
+
+    for (auto I = MF.begin(); I != MF.end();) {
+      MachineBasicBlock *Island = &*I++;
+      MachineBasicBlock *Source = nullptr;
+      MachineBasicBlock *Fallthrough = nullptr;
+      MachineBasicBlock *Target = nullptr;
+      if (!isBranchIsland(*Island, TII, Source, Fallthrough, Target))
+        continue;
+
+      SmallVector<std::pair<MBBSectionID, uint64_t>, 4> SectionOffsets;
+      DenseMap<MachineBasicBlock *, uint64_t> BlockOffsets;
+      uint64_t Offset = 0;
+      for (MachineBasicBlock &MBB : MF) {
+        auto SectionOffset = llvm::find_if(
+            SectionOffsets, [&](const auto &Entry) {
+              return Entry.first == MBB.getSectionID();
+            });
+        if (SectionOffset == SectionOffsets.end()) {
+          SectionOffsets.emplace_back(MBB.getSectionID(), 0);
+          SectionOffset = std::prev(SectionOffsets.end());
+        }
+        Offset = alignTo(SectionOffset->second, MBB.getAlignment());
+        BlockOffsets[&MBB] = Offset;
+        for (const MachineInstr &MI : MBB)
+          Offset += TII.getInstSizeInBytes(MI);
+        SectionOffset->second = Offset;
+      }
+
+      MachineInstr *Branch = &*Source->getLastNonDebugInstr();
+      uint64_t BranchOffset = BlockOffsets.lookup(Source);
+      for (MachineInstr &MI : *Source) {
+        if (&MI == Branch)
+          break;
+        BranchOffset += TII.getInstSizeInBytes(MI);
+      }
+
+      MachineBasicBlock *SharedIsland = nullptr;
+      for (MachineBasicBlock *Candidate : IslandsByTarget[Target]) {
+        if (!Candidate->sameSection(Source) ||
+            !haveSameLiveIns(*Island, *Candidate))
+          continue;
+        int64_t BranchOffsetToIsland =
+            static_cast<int64_t>(BlockOffsets.lookup(Candidate)) -
+            static_cast<int64_t>(BranchOffset);
+        if (TII.isBranchOffsetInRange(
+                Branch->getOpcode(), BranchOffsetToIsland)) {
+          SharedIsland = Candidate;
+          break;
+        }
+      }
+
+      if (!SharedIsland) {
+        IslandsByTarget[Target].push_back(Island);
+        continue;
+      }
+
+      SmallVector<MachineOperand, 1> Condition;
+      Condition.push_back(MachineOperand::CreateImm(Branch->getOpcode()));
+      if (TII.reverseBranchCondition(Condition)) {
+        IslandsByTarget[Target].push_back(Island);
+        continue;
+      }
+
+      DebugLoc DL = Branch->getDebugLoc();
+      TII.removeBranch(*Source);
+      TII.insertBranch(*Source, SharedIsland, nullptr, Condition, DL);
+      Source->replaceSuccessor(Island, SharedIsland);
+      Island->removeSuccessor(Target);
+      Island->eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
+  }
+
+private:
+  static bool haveSameLiveIns(const MachineBasicBlock &A,
+                              const MachineBasicBlock &B) {
+    if (std::distance(A.liveins().begin(), A.liveins().end()) !=
+        std::distance(B.liveins().begin(), B.liveins().end()))
+      return false;
+    for (const MachineBasicBlock::RegisterMaskPair &LiveInA : A.liveins()) {
+      bool Found = false;
+      for (const MachineBasicBlock::RegisterMaskPair &LiveInB : B.liveins())
+        if (LiveInA.PhysReg == LiveInB.PhysReg &&
+            LiveInA.LaneMask == LiveInB.LaneMask) {
+          Found = true;
+          break;
+        }
+      if (!Found)
+        return false;
+    }
+    return true;
+  }
+
+  static bool isBranchIsland(MachineBasicBlock &Island,
+                             const MCS51InstrInfo &TII,
+                             MachineBasicBlock *&Source,
+                             MachineBasicBlock *&Fallthrough,
+                             MachineBasicBlock *&Target) {
+    if (Island.hasAddressTaken() || Island.pred_size() != 1 ||
+        Island.succ_size() != 1)
+      return false;
+
+    MachineInstr *Jump = nullptr;
+    for (MachineInstr &MI : Island) {
+      if (MI.isDebugInstr())
+        continue;
+      if (Jump)
+        return false;
+      Jump = &MI;
+    }
+    if (!Jump || Jump->getOpcode() != MCS51::LJMP)
+      return false;
+
+    Source = *Island.pred_begin();
+    if (Source->getNextNode() != &Island ||
+        !Source->getLastNonDebugInstr().isValid() ||
+        Source->succ_size() != 2)
+      return false;
+
+    MachineInstr &Branch = *Source->getLastNonDebugInstr();
+    Fallthrough = Island.getNextNode();
+    Target = TII.getBranchDestBlock(*Jump);
+    if (!Fallthrough || !Target ||
+        TII.getBranchDestBlock(Branch) != Fallthrough ||
+        *Island.succ_begin() != Target ||
+        !Source->sameSection(&Island) ||
+        !Island.sameSection(Fallthrough))
+      return false;
+
+    bool HasIslandEdge = false;
+    bool HasFallthroughEdge = false;
+    for (MachineBasicBlock *Succ : Source->successors()) {
+      HasIslandEdge |= Succ == &Island;
+      HasFallthroughEdge |= Succ == Fallthrough;
+    }
+    return HasIslandEdge && HasFallthroughEdge;
+  }
+};
+
+char MCS51BranchIslandSharing::ID = 0;
+
 class MCS51TargetObjectFile final : public TargetLoweringObjectFileELF {
 public:
   MCSection *SelectSectionForGlobal(const GlobalObject *GO, SectionKind Kind,
@@ -2004,6 +2159,7 @@ public:
   void addPreEmitPass() override {
     addPass(new MCS51PostRAPeephole());
     addPass(&BranchRelaxationPassID);
+    addPass(new MCS51BranchIslandSharing());
   }
 };
 } // namespace
