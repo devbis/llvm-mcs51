@@ -3433,17 +3433,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::PUSHARG16) {
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .addReg(MI.getOperand(0).getReg());
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
         .addImm(0x83)
-        .addReg(MI.getOperand(0).getReg(), RegState::Implicit);
+        .addReg(MCS51::DPTR, RegState::Implicit);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
-        .addImm(0xE0)
-        .addReg(MCS51::A, RegState::Implicit);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
-        .addImm(0xE0)
-        .addReg(MCS51::A, RegState::Implicit);
+        .addImm(0x82)
+        .addReg(MCS51::DPTR, RegState::Implicit);
     MI.eraseFromParent();
     return MBB;
   }
