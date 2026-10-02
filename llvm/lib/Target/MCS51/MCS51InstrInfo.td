@@ -1551,7 +1551,7 @@ def PUSHARG16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Defs = [A, SP];
+  let Defs = [SP];
   let Uses = [DPTR, SP];
 }
 
