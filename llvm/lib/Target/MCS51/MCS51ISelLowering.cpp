@@ -1162,10 +1162,11 @@ SDValue MCS51TargetLowering::LowerCall(
   CCState RetInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
   RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_MCS51);
   for (const CCValAssign &VA : RetLocs) {
-    Chain = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT(),
-                               InGlue);
-    InGlue = Chain.getValue(2);
-    InVals.push_back(Chain.getValue(0));
+    SDValue Copy = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT(),
+                                      InGlue);
+    Chain = Copy.getValue(1);
+    InGlue = Copy.getValue(2);
+    InVals.push_back(Copy.getValue(0));
   }
   PopStackArguments();
   return Chain;
