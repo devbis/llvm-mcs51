@@ -2054,16 +2054,23 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     } else {
       uint8_t Low = static_cast<uint8_t>(Amount);
       uint8_t High = static_cast<uint8_t>(Amount >> 8);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(0x82);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
-          .addImm(Low);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(0x83);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IMM), MCS51::A)
-          .addImm(High);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+      if (High <= 3 && Low <= 3) {
+        for (unsigned I = 0; I < High; ++I)
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DIRECT)).addImm(0x83);
+        for (unsigned I = 0; I < Low; ++I)
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_DPTR));
+      } else {
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+            .addImm(0x82);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
+            .addImm(Low);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+            .addImm(0x83);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IMM), MCS51::A)
+            .addImm(High);
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
+      }
     }
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::DPTR);
