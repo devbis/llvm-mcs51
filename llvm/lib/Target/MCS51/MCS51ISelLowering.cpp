@@ -3413,10 +3413,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)))
         .addReg(MCS51::R0);
     Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A))).addImm(0x82);
-    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))).addReg(MCS51::R0);
-    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_A)));
-    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A)))
-        .addReg(MCS51::R0, RegState::Define);
+    Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_RN), MCS51::R0)
+              .addReg(MCS51::R0));
     Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IND_RI)))
         .addReg(MCS51::R0);
     Setup(BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A))).addImm(0x83);
