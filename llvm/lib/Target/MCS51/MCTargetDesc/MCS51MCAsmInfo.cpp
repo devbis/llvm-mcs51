@@ -11,6 +11,7 @@ MCS51MCAsmInfo::MCS51MCAsmInfo(const Triple &, const MCTargetOptions &Options)
   CodePointerSize = 2;
   CalleeSaveStackSlotSize = 1;
   CommentString = ";";
+  MaxInstLength = 3;
   AlignmentIsInBytes = true;
   SupportsDebugInformation = true;
   ExceptionsType = ExceptionHandling::None;
