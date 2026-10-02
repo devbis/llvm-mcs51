@@ -1,4 +1,5 @@
 #include "MCS51TargetMachine.h"
+#include "MCS51TargetTransformInfo.h"
 #include "MCS51MachineFunctionInfo.h"
 #include "MCS51InstrInfo.h"
 #include "MCS51.h"
@@ -2026,6 +2027,11 @@ bool MCS51TargetMachine::addPassesToEmitFile(
     MachineModuleInfoWrapperPass *MMIWP) {
   return CodeGenTargetMachineImpl::addPassesToEmitFile(
       PM, Out, DwoOut, FileType, DisableVerify, MMIWP);
+}
+
+TargetTransformInfo
+MCS51TargetMachine::getTargetTransformInfo(const Function &F) const {
+  return TargetTransformInfo(std::make_unique<MCS51TTIImpl>(this, F));
 }
 
 TargetPassConfig *MCS51TargetMachine::createPassConfig(PassManagerBase &PM) {

@@ -2,6 +2,7 @@
 #define LLVM_LIB_TARGET_MCS51_MCS51TARGETMACHINE_H
 
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "MCS51Subtarget.h"
 #include <memory>
 #include <optional>
@@ -25,6 +26,8 @@ public:
   }
 
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
+
+  TargetTransformInfo getTargetTransformInfo(const Function &F) const override;
 
   MachineFunctionInfo *
   createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,
