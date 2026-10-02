@@ -14,10 +14,10 @@ and ABI examples only; it is not the code-quality target.
 ## Build directory
 
 Keep build products outside the source tree, in the sibling directory
-`../llvm-8051-build`. Configure from this checkout's root when needed:
+`../llvm-mcs51-build`. Configure from this checkout's root when needed:
 
 ```sh
-cmake -G Ninja -S . -B ../llvm-8051-build \
+cmake -G Ninja -S . -B ../llvm-mcs51-build \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_ENABLE_PROJECTS="clang;lld" \
   -DLLVM_TARGETS_TO_BUILD=MCS51
@@ -26,7 +26,7 @@ cmake -G Ninja -S . -B ../llvm-8051-build \
 Build the compiler and core code-generation tools with:
 
 ```sh
-cmake --build ../llvm-8051-build \
+cmake --build ../llvm-mcs51-build \
   --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj \
   FileCheck lld mcs51-runtime -j 10
 ```
@@ -34,14 +34,14 @@ cmake --build ../llvm-8051-build \
 ## Verification
 
 After changing the backend, build the compiler and tools from the sibling build
-directory, then run the focused MCS-51 tests. From the `llvm-8051` source root:
+directory, then run the focused MCS-51 tests. From the `llvm-mcs51` source root:
 
 ```sh
-cmake --build ../llvm-8051-build \
+cmake --build ../llvm-mcs51-build \
   --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj FileCheck lld \
   mcs51-runtime -j 10
 
-../llvm-8051-build/bin/llvm-lit -q \
+../llvm-mcs51-build/bin/llvm-lit -q \
   llvm/test/CodeGen/8051 \
   llvm/test/MC/MCS51 \
   lld/test/ELF/mcs51-relocations.s \
@@ -84,8 +84,8 @@ Run `make short` there and point it at this checkout's sibling build:
 ```sh
 cd /Users/ivan.belokobylskiy/projects/ti/mcs51-bench
 make short \
-  LLVM_BUILD=/Users/ivan.belokobylskiy/projects/telink/llvm-tc32-arm-based/llvm-8051-build \
-  LLVM_SRC=/Users/ivan.belokobylskiy/projects/telink/llvm-tc32-arm-based/llvm-8051
+  LLVM_BUILD=/Users/ivan.belokobylskiy/projects/ti/llvm-mcs51-build \
+  LLVM_SRC=/Users/ivan.belokobylskiy/projects/ti/llvm-mcs51
 ```
 
 Keep the benchmark's normal `build` output path under that checkout because
