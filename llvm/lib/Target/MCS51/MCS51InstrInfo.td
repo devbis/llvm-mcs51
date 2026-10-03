@@ -1882,6 +1882,21 @@ def STORE_FRAME8_INDEX : Instruction {
 // the two bytes of the pair: INC lo; MOV A,lo; JNZ skip; INC hi.
 let Constraints = "$dst = $src", isPseudo = 1, isCodeGenOnly = 1,
     hasSideEffects = 0, Defs = [A, C] in {
+// Exchange the two bytes of a word in place through A. Expanded after
+// register allocation over the direct addresses of the pair's bytes.
+let Defs = [A] in
+def BSWAP16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
+  let AsmString = "";
+  let Size = 6;
+  let Constraints = "$dst = $src";
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 0;
+  let Pattern = [(set MCS51GPR16:$dst, (bswap MCS51GPR16:$src))];
+}
 def INC16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR16:$dst);
@@ -3143,6 +3158,21 @@ def ADD_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51add_sext8_16>;
 def SUB_ZEXT8_16 : MCS51AddExtendedBytePseudo<MCS51sub_zext8_16>;
 def SUB_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51sub_sext8_16>;
 
+// The high byte of a word.
+def TRUNC16HI8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+}
+// A byte taken from x >> 8 is the high byte; no need to build the shifted word.
+def : Pat<(i8 (trunc (MCS51srl16_8 MCS51GPR16:$src))),
+          (TRUNC16HI8 MCS51GPR16:$src)>;
 def TRUNC16TO8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);

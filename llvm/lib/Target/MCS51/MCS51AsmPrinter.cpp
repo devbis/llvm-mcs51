@@ -347,6 +347,25 @@ public:
       break;
     }
 
+    if (MI->getOpcode() == MCS51::BSWAP16) {
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      Register Pair = MI->getOperand(0).getReg();
+      int64_t Lo = TRI->getEncodingValue(TRI->getSubReg(Pair, MCS51::sub_lo));
+      int64_t Hi = TRI->getEncodingValue(TRI->getSubReg(Pair, MCS51::sub_hi));
+      auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
+        MCInst Inst;
+        Inst.setOpcode(Opcode);
+        for (const MCOperand &Operand : Operands)
+          Inst.addOperand(Operand);
+        EmitToStreamer(*OutStreamer, Inst);
+      };
+      Emit(MCS51::MOV_A_DIRECT,
+           {MCOperand::createReg(MCS51::A), MCOperand::createImm(Lo)});
+      Emit(MCS51::XCH_A_DIRECT,
+           {MCOperand::createReg(MCS51::A), MCOperand::createImm(Hi)});
+      Emit(MCS51::MOV_DIRECT_A, {MCOperand::createImm(Lo)});
+      return;
+    }
     if (MI->getOpcode() == MCS51::INC16 || MI->getOpcode() == MCS51::DEC16) {
       // Expanded over the direct addresses of the pair's two bytes.
       auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
