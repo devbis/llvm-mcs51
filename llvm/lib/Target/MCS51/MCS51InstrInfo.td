@@ -1625,8 +1625,8 @@ def PUSHPAD8 : Instruction {
   let Defs = [A, SP];
 }
 
-// These pseudos form SP-relative addresses with ADD, so their expansions
-// clobber the carry flag as well as A and R1.
+// The expansions keep A and the carry flag intact: they either walk R1 with
+// INC/DEC or save and restore them around forming the address.
 def SPILL_LOAD8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
@@ -1636,7 +1636,7 @@ def SPILL_LOAD8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1, C];
+  let Defs = [R1];
   let Uses = [SP];
 }
 
@@ -1650,7 +1650,33 @@ def SPILL_STORE8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1, C];
+  let Defs = [R1];
+  let Uses = [SP];
+}
+
+def SPILL_LOAD_IM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51Imag8:$dst);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayLoad = 1;
+  let Defs = [R1];
+  let Uses = [SP];
+}
+def SPILL_STORE_IM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
+                           MCS51Imag8:$src);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let mayStore = 1;
+  let Defs = [R1];
   let Uses = [SP];
 }
 
@@ -1663,7 +1689,7 @@ def SPILL_LOAD_INDIRECT8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1, C];
+  let Defs = [R1];
   let Uses = [SP];
 }
 
@@ -1677,7 +1703,7 @@ def SPILL_STORE_INDIRECT8 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1, C];
+  let Defs = [R1];
   let Uses = [SP];
 }
 
@@ -1690,7 +1716,7 @@ def SPILL_LOAD16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayLoad = 1;
-  let Defs = [A, R1, C];
+  let Defs = [R1];
   let Uses = [SP];
 }
 
@@ -1717,7 +1743,7 @@ def SPILL_STORE16 : Instruction {
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let mayStore = 1;
-  let Defs = [A, R1, C];
+  let Defs = [R1];
   let Uses = [SP];
 }
 
@@ -1858,16 +1884,67 @@ def STORE_FRAME8_INDEX : Instruction {
 }
 
 
-def INCDPTR16 : Instruction {
+// In-place word increment and decrement. The AsmPrinter expands them over
+// the two bytes of the pair: INC lo; MOV A,lo; JNZ skip; INC hi.
+let Constraints = "$dst = $src", isPseudo = 1, isCodeGenOnly = 1,
+    hasSideEffects = 0, Defs = [A, C] in {
+def INC16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
-  let Size = 0;
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
+  let Size = 8;
   let Pattern = [(set MCS51GPR16:$dst, (add MCS51GPR16:$src, (i16 1)))];
+}
+def DEC16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
+  let AsmString = "";
+  let Size = 9;
+  let Pattern = [(set MCS51GPR16:$dst, (MCS51sub16_dec MCS51GPR16:$src))];
+}
+}
+
+// Counted shift loops, expanded by the AsmPrinter over the direct addresses of
+// the operand bytes: L: shift; DJNZ count,L. The value and the counter are
+// updated in place.
+let isPseudo = 1, isCodeGenOnly = 1, hasSideEffects = 0, Defs = [A, C] in {
+class MCS51ShiftLoop16<int size> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR16:$dst, MCS51GPR8:$cntout);
+  let InOperandList = (ins MCS51GPR16:$src, MCS51GPR8:$cnt);
+  let AsmString = "";
+  let Size = size;
+  let Constraints = "$dst = $src, $cntout = $cnt";
+}
+class MCS51ShiftLoop8<int size> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51Imag8:$dst, MCS51GPR8:$cntout);
+  let InOperandList = (ins MCS51Imag8:$src, MCS51GPR8:$cnt);
+  let AsmString = "";
+  let Size = size;
+  let Constraints = "$dst = $src, $cntout = $cnt";
+}
+class MCS51ShiftLoop32<int size> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR16:$dlo, MCS51GPR16:$dhi,
+                             MCS51GPR8:$cntout);
+  let InOperandList = (ins MCS51GPR16:$slo, MCS51GPR16:$shi,
+                           MCS51GPR8:$cnt);
+  let AsmString = "";
+  let Size = size;
+  let Constraints = "$dlo = $slo, $dhi = $shi, $cntout = $cnt";
+}
+def SHL32_LOOP : MCS51ShiftLoop32<23>;
+def SRL32_LOOP : MCS51ShiftLoop32<23>;
+def SRA32_LOOP : MCS51ShiftLoop32<24>;
+def SHL16_LOOP : MCS51ShiftLoop16<13>;
+def SRL16_LOOP : MCS51ShiftLoop16<13>;
+def SRA16_LOOP : MCS51ShiftLoop16<14>;
+def SHL8_LOOP : MCS51ShiftLoop8<8>;
+def SRL8_LOOP : MCS51ShiftLoop8<8>;
+def SRA8_LOOP : MCS51ShiftLoop8<9>;
 }
 
 def ADDDPTR16ri : Instruction {
@@ -1927,32 +2004,6 @@ def ADD16ri : Instruction {
   let hasSideEffects = 1;
   let Pattern = [(set MCS51GPR16:$dst,
                       (MCS51add16_imm MCS51GPR16:$src, MCS51Imm16:$imm))];
-}
-def SUB16DEC : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51GPR16:$dst);
-  let InOperandList = (ins MCS51GPR16:$src);
-  let AsmString = "";
-  let Size = 0;
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
-  let hasSideEffects = 1;
-  let Pattern = [(set MCS51GPR16:$dst,
-                      (MCS51sub16_dec MCS51GPR16:$src))];
-}
-// DPTR - 1. The AsmPrinter emits MOV A,82; JNZ skip; DEC 83; skip: DEC 82.
-def DEC_DPTR16 : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs);
-  let InOperandList = (ins);
-  let AsmString = "";
-  let Size = 8;
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
-  let hasSideEffects = 1;
-  let Defs = [DPTR, A];
-  let Uses = [DPTR];
 }
 let Pattern = [(set MCS51GPR16:$dst, (sub MCS51GPR16:$lhs, MCS51GPR16:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
@@ -2699,6 +2750,24 @@ def MOV_R1_IND_RN : MCS51ImagMove<(outs), (ins MCS51GPR8:$src), "mov @r1, $src",
   let Inst{7-0} = 0xA7;
   let Inst{15-8} = src;
 }
+def PUSH_IM : MCS51ImagMove<(outs), (ins MCS51Imag8:$src), "push $src", 2> {
+  let hasSideEffects = 1;
+  let mayStore = 1;
+  let Defs = [SP];
+  let Uses = [SP];
+  bits<8> src; bits<16> Inst;
+  let Inst{7-0} = 0xC0;
+  let Inst{15-8} = src;
+}
+def POP_IM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins), "pop $dst", 2> {
+  let hasSideEffects = 1;
+  let mayLoad = 1;
+  let Defs = [SP];
+  let Uses = [SP];
+  bits<8> dst; bits<16> Inst;
+  let Inst{7-0} = 0xD0;
+  let Inst{15-8} = dst;
+}
 def MOV_IM_IMM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51Imm8:$imm),
                                "mov $dst, #$imm", 3> {
   bits<8> dst; bits<8> imm; bits<24> Inst;
@@ -3062,7 +3131,7 @@ def SUB_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51sub_sext8_16>;
 
 def TRUNC16TO8 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51AReg:$dst);
+  let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
@@ -3070,5 +3139,5 @@ def TRUNC16TO8 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst, (trunc MCS51GPR16:$src))];
+  let Pattern = [(set MCS51GPR8:$dst, (trunc MCS51GPR16:$src))];
 }

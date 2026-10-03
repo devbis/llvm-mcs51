@@ -1,7 +1,7 @@
 def CC_MCS51 : CallingConv<[
   CCIfVarArg<CCIfType<[i8], CCAssignToStack<1, 1>>>,
   CCIfVarArg<CCIfType<[i16], CCAssignToStack<2, 1>>>,
-  CCIfType<[i16], CCAssignToReg<[DPTR]>>,
+  CCIfType<[i16], CCAssignToReg<[IP0, IP1, IP2, IP3]>>,
   CCIf<"OrigTy->isIntegerTy(64)",
        CCIfType<[i8], CCAssignToStack<1, 1>>>,
   CCIf<"OrigTy->isIntegerTy(32)",
@@ -18,7 +18,7 @@ def RetCC_MCS51 : CallingConv<[
   CCIf<"OrigTy->isFloatTy()",
        CCIfType<[i8], CCAssignToReg<[R4, R5, R6, R7]>>>,
   CCIfType<[i8], CCAssignToReg<[A]>>,
-  CCIfType<[i16], CCAssignToReg<[DPTR]>>
+  CCIfType<[i16], CCAssignToReg<[IP0]>>
 ]>;
 
 // R2-R7 are callee-saved. This lets values remain in registers across calls
