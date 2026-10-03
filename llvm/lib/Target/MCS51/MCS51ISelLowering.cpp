@@ -2598,81 +2598,50 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       MI.getOpcode() == MCS51::SUB32_BYTESrr ||
       MI.getOpcode() == MCS51::ADD32rr ||
       MI.getOpcode() == MCS51::SUB32rr) {
-    MachineFunction &MF = *MBB->getParent();
-    MachineRegisterInfo &MRI = MF.getRegInfo();
+    // 32-bit addition or subtraction, byte by byte over the operand pairs.
+    // The result is four bytes or two words depending on the pseudo.
+    MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
     bool IsByteResult = MI.getOpcode() == MCS51::ADD32_BYTESrr ||
                         MI.getOpcode() == MCS51::SUB32_BYTESrr;
     bool IsAdd = MI.getOpcode() == MCS51::ADD32_BYTESrr ||
                  MI.getOpcode() == MCS51::ADD32rr;
     unsigned InputBase = IsByteResult ? 4 : 2;
-    Register DstLo = IsByteResult ? Register() : MI.getOperand(0).getReg();
-    Register DstHi = IsByteResult ? Register() : MI.getOperand(1).getReg();
-    Register DstBytes[4] = {};
-    if (IsByteResult)
-      for (unsigned I = 0; I != 4; ++I)
-        DstBytes[I] = MI.getOperand(I).getReg();
-    Register Operands[] = {MI.getOperand(InputBase).getReg(),
-                           MI.getOperand(InputBase + 1).getReg(),
-                           MI.getOperand(InputBase + 2).getReg(),
-                           MI.getOperand(InputBase + 3).getReg()};
-
-    Register InputBytes[4][2] = {};
-    bool RHSIsImmediate[2] = {false, false};
-    uint16_t RHSImmediate[2] = {0, 0};
-    for (unsigned I = 2; I != 4; ++I) {
-      MachineInstr *Def = MRI.getVRegDef(Operands[I]);
-      if (Def && isWordImmediate(*Def)) {
-        RHSIsImmediate[I - 2] = true;
-        RHSImmediate[I - 2] =
-            static_cast<uint16_t>(Def->getOperand(1).getImm());
-      }
-    }
-    for (unsigned I = 0; I != 4; ++I) {
-      if (I >= 2 && RHSIsImmediate[I - 2])
-        continue;
-      for (unsigned Byte = 0; Byte != 2; ++Byte)
-        InputBytes[I][Byte] =
-            extractWordByte(*MBB, MII, DL, TII, MRI, Operands[I], Byte != 0);
-    }
-
+    SmallVector<WordByte, 4> L, R;
+    describeWord(MRI, MI.getOperand(InputBase).getReg(), L);
+    describeWord(MRI, MI.getOperand(InputBase + 1).getReg(), L);
+    describeWord(MRI, MI.getOperand(InputBase + 2).getReg(), R);
+    describeWord(MRI, MI.getOperand(InputBase + 3).getReg(), R);
+    if (!IsAdd)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
     Register Sum[4];
-    for (unsigned I = 0; I != 4; ++I)
-      Sum[I] = IsByteResult ? DstBytes[I]
-                            : MF.getRegInfo().createVirtualRegister(
-                                  &MCS51::MCS51GPR8RegClass);
-
     for (unsigned I = 0; I != 4; ++I) {
-      unsigned Word = I < 2 ? 0 : 1;
-      unsigned Byte = I & 1;
-      Register LHS = InputBytes[Word][Byte];
-      unsigned RHSWord = I < 2 ? 0 : 1;
-      Register RHS = InputBytes[2 + RHSWord][Byte];
-      if (RHSIsImmediate[RHSWord]) {
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-        if (!IsAdd && I == 0)
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-        uint8_t Imm = (RHSImmediate[RHSWord] >> (Byte * 8)) & 0xff;
-        unsigned Opcode = IsAdd
-                             ? (I == 0 ? MCS51::ADD_A_IMM
-                                       : MCS51::ADDC_A_IMM)
-                             : MCS51::SUBB_A_IMM;
-        BuildMI(*MBB, MII, DL, TII.get(Opcode), MCS51::A).addImm(Imm);
+      if (L[I].IsImm)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+            .addImm(L[I].Imm);
+      else
+        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
+            .addReg(L[I].Reg, RegState{}, L[I].Sub);
+      unsigned ImOpcode = IsAdd ? (I == 0 ? MCS51::ADD_A_IM : MCS51::ADDC_A_IM)
+                                : MCS51::SUBB_A_IM;
+      unsigned ImmOpcode = IsAdd
+                               ? (I == 0 ? MCS51::ADD_A_IMM : MCS51::ADDC_A_IMM)
+                               : MCS51::SUBB_A_IMM;
+      if (R[I].IsImm)
+        BuildMI(*MBB, MII, DL, TII.get(ImmOpcode), MCS51::A).addImm(R[I].Imm);
+      else
+        BuildMI(*MBB, MII, DL, TII.get(ImOpcode))
+            .addReg(R[I].Reg, RegState{}, R[I].Sub);
+      if (IsByteResult) {
+        Sum[I] = MI.getOperand(I).getReg();
+        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Sum[I])
+            .addReg(MCS51::A);
       } else {
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-        if (!IsAdd && I == 0)
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-        unsigned Opcode = IsAdd
-                             ? (I == 0 ? MCS51::ADD_A_RN : MCS51::ADDC_A_RN)
-                             : MCS51::SUBB_A_RN;
-        BuildMI(*MBB, MII, DL, TII.get(Opcode)).addReg(RHS);
+        Sum[I] = saveAToImag(*MBB, MII, DL, TII, MRI);
       }
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Sum[I])
-          .addReg(MCS51::A);
     }
-
     if (!IsByteResult) {
-      buildWord(*MBB, MII, DL, TII, DstLo, Sum[0], Sum[1]);
-      buildWord(*MBB, MII, DL, TII, DstHi, Sum[2], Sum[3]);
+      buildWord(*MBB, MII, DL, TII, MI.getOperand(0).getReg(), Sum[0], Sum[1]);
+      buildWord(*MBB, MII, DL, TII, MI.getOperand(1).getReg(), Sum[2], Sum[3]);
     }
     MI.eraseFromParent();
     return MBB;
