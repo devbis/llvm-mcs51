@@ -26,16 +26,15 @@ auto_gamma:
   nop
   ret
 
+# The sections are packed into the first bank.
 # CHECK: Name: .bank1
-# CHECK: Size: 2
+# CHECK: Size: 6
 # CHECK: Name: .bank2
-# CHECK: Size: 2
-# CHECK: Name: .bank3
-# CHECK: Size: 2
+# CHECK: Size: 0
 # CHECK: Name: auto_alpha
 # CHECK: Value: 0x8000
 # CHECK: Name: auto_beta
-# CHECK: Value: 0x8000
+# CHECK: Value: 0x8002
 # CHECK: Name: auto_gamma
-# CHECK: Value: 0x8000
+# CHECK: Value: 0x8004
 # CHECK-NOT: Name: .mcs51.autobank.
