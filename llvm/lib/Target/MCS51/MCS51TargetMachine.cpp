@@ -2193,6 +2193,20 @@ public:
             continue;
           }
         }
+        // MOV Rn,#imm followed by MOV A,Rn with Rn dead: load A directly.
+        if (Prev && Prev->getOpcode() == MCS51::MOV_RN_IMM &&
+            Opc == MCS51::MOV_A_RN && Prev->getOperand(1).isImm() &&
+            Prev->getOperand(0).getReg() == MI.getOperand(0).getReg() &&
+            MI.getOperand(0).isKill()) {
+          BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(MCS51::MOV_A_IMM),
+                  MCS51::A)
+              .addImm(Prev->getOperand(1).getImm());
+          MI.eraseFromParent();
+          Prev->eraseFromParent();
+          Changed = true;
+          Prev = nullptr;
+          continue;
+        }
         Prev = &MI;
       }
     }
