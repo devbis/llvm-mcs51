@@ -973,7 +973,14 @@ void LinkerScript::distributeMCS51AutoBankSections() {
   });
 
   for (const Candidate &candidate : candidates) {
-    unsigned bank = llvm::min_element(bankSizes) - bankSizes.begin();
+    // Fill the banks in order, so the image uses as few as possible: the
+    // first bank with room takes the section (largest sections first).
+    // Every bank is a 32 KiB window.
+    constexpr uint64_t bankCapacity = 0x8000;
+    unsigned bank = 0;
+    while (bank + 1 != bankSizes.size() &&
+           bankSizes[bank] + candidate.section->getSize() > bankCapacity)
+      ++bank;
     bankDescriptions[bank]->sectionBases.push_back(candidate.section);
     candidate.section->parent = banks[bank];
     bankSizes[bank] += candidate.section->getSize();
