@@ -113,8 +113,7 @@ no:
 ; OPT: mov a, r7
 ; OPT: jz
 ; OPT-NOT: ljmp
-; OPT: mov r0, #1
-; OPT: mov a, r0
+; OPT: mov a, #1
 ; OPT: ret
 
 ; DIS-LABEL: <choose>:
