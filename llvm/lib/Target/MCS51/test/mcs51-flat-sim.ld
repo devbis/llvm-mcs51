@@ -12,8 +12,8 @@ SECTIONS {
   .bss (NOLOAD) : { *(.bss .bss.*) *(COMMON) } > XRAM
   .mcs51_pdata 0 : { *(.mcs51.pdata) } > XRAM AT> CODE
   .mcs51_pdata_bss (NOLOAD) : { *(.mcs51.pdata.bss) } > XRAM
-  .mcs51_data1 0x30 : { *(.mcs51.data1) } > XRAM AT> CODE
-  .mcs51_data1_bss 0x30 (NOLOAD) : { *(.mcs51.data1.bss) } > XRAM
+  .mcs51_data1 0x48 : { *(.mcs51.data1) } > XRAM AT> CODE
+  .mcs51_data1_bss 0x48 (NOLOAD) : { *(.mcs51.data1.bss) } > XRAM
   .mcs51_data2 0x80 : { *(.mcs51.data2) } > XRAM AT> CODE
   .mcs51_data2_bss 0x80 (NOLOAD) : { *(.mcs51.data2.bss) } > XRAM
   .mcs51_bit 0 : { *(.mcs51.bit) } > XRAM AT> CODE
