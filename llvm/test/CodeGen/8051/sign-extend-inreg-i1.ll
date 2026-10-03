@@ -10,6 +10,6 @@ entry:
 }
 
 ; CHECK-LABEL: sign_extend_boolean_bit:
-; CHECK: subb a, 130
-; CHECK: subb a, 131
+; CHECK: subb a, 48
+; CHECK: subb a, 49
 ; CHECK: ret

@@ -4,11 +4,7 @@
 // RUN:   -c %s -o %t.caller.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -O0 -ffreestanding -fno-builtin \
 // RUN:   -DDEFINE_HELPER -c %s -o %t.helper.o
-// RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
-// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
-// RUN:   -Wl,--no-check-sections \
-// RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s \
-// RUN:   %t.caller.o %t.helper.o -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 %t.caller.o %t.helper.o -o %t.elf
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=LINK
 
 #ifdef DEFINE_HELPER
@@ -45,7 +41,16 @@ int main(void) { return (int)forward64(0x123456789abcdef0ull, 0x2345); }
 // CHECK-NOT: .weak __mcs51_bankcall_helper
 
 // LINK-LABEL: <helper>:
-// LINK: ret
-// LINK-LABEL: <forward64>:
-// LINK-COUNT-8: push 224
 // LINK: lcall
+// LINK: ljmp
+// LINK-LABEL: <forward64>:
+// LINK: mov 57, r2
+// LINK: push 57
+// LINK-NEXT: push 56
+// LINK-NEXT: push 55
+// LINK-NEXT: push 54
+// LINK-NEXT: push 53
+// LINK-NEXT: push 52
+// LINK-NEXT: push 51
+// LINK-NEXT: push 50
+// LINK-NEXT: lcall

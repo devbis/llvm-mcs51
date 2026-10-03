@@ -37,6 +37,9 @@ private:
     SmallVector<Value *, 16> Worklist{&AI};
     SmallPtrSet<Value *, 16> Seen;
     SmallPtrSet<MemIntrinsic *, 4> MemCalls;
+    SmallPtrSet<VAStartInst *, 2> VAStarts;
+    SmallPtrSet<VAEndInst *, 2> VAEnds;
+    SmallVector<VAArgInst *, 2> VAArgs;
     SmallVector<AddrSpaceCastInst *, 4> BackCasts;
     SmallVector<GetElementPtrInst *, 8> GEPs;
     bool HasVariableIndex = false;
@@ -57,7 +60,10 @@ private:
             BackCasts.push_back(Cast);
             continue;
           }
-          Worklist.push_back(Cast);
+          // Only the default address space is an access to the local; other
+          // casts are escapes and keep their meaning.
+          if (Cast->getDestAddressSpace() == MCS51::Default)
+            Worklist.push_back(Cast);
           continue;
         }
         if (auto *GEP = dyn_cast<GetElementPtrInst>(U)) {
@@ -76,6 +82,24 @@ private:
         if (auto *Store = dyn_cast<StoreInst>(U))
           if (Store->getPointerOperand() == Pointer)
             continue;
+        if (auto *VA = dyn_cast<VAStartInst>(U)) {
+          if (VA->getArgList() == Pointer) {
+            VAStarts.insert(VA);
+            continue;
+          }
+        }
+        if (auto *VA = dyn_cast<VAArgInst>(U)) {
+          if (VA->getPointerOperand() == Pointer) {
+            VAArgs.push_back(VA);
+            continue;
+          }
+        }
+        if (auto *VA = dyn_cast<VAEndInst>(U)) {
+          if (VA->getArgList() == Pointer) {
+            VAEnds.insert(VA);
+            continue;
+          }
+        }
         if (auto *Mem = dyn_cast<MemIntrinsic>(U)) {
           // Block copies and fills accept pointers of any address space.
           bool OtherIsPointer = false;
@@ -87,9 +111,9 @@ private:
             continue;
           }
         }
-        // Keeping pointer escapes and other pointer operations in their
-        // original address space avoids changing their observable behavior.
-        return false;
+        // Pointer escapes and other pointer operations keep using the
+        // original pointer, which preserves their observable behavior; only
+        // the accesses recognized above are redirected to IDATA.
       }
     }
     // Locals reached through casts to the default address space would be
@@ -153,6 +177,33 @@ private:
         Cast->replaceAllUsesWith(New);
         Cast->eraseFromParent();
       }
+    for (VAArgInst *VA : VAArgs) {
+      Value *New = Remapped.lookup(VA->getPointerOperand());
+      if (!New)
+        continue;
+      auto *NewVA = new VAArgInst(New, VA->getType(), VA->getName(), VA->getIterator());
+      NewVA->setDebugLoc(VA->getDebugLoc());
+      VA->replaceAllUsesWith(NewVA);
+      VA->eraseFromParent();
+    }
+    for (VAStartInst *VA : VAStarts) {
+      Value *New = Remapped.lookup(VA->getArgList());
+      if (!New)
+        continue;
+      IRBuilder<> CallBuilder(VA);
+      CallBuilder.SetCurrentDebugLocation(VA->getDebugLoc());
+      CallBuilder.CreateIntrinsic(Intrinsic::vastart, {New->getType()}, {New});
+      VA->eraseFromParent();
+    }
+    for (VAEndInst *VA : VAEnds) {
+      Value *New = Remapped.lookup(VA->getArgList());
+      if (!New)
+        continue;
+      IRBuilder<> CallBuilder(VA);
+      CallBuilder.SetCurrentDebugLocation(VA->getDebugLoc());
+      CallBuilder.CreateIntrinsic(Intrinsic::vaend, {New->getType()}, {New});
+      VA->eraseFromParent();
+    }
     for (MemIntrinsic *Mem : MemCalls) {
       auto Remap = [&](Value *V) {
         Value *New = Remapped.lookup(V);

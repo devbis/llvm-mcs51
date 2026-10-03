@@ -44,66 +44,48 @@ short subtract_volatile_signed_byte(short base) {
 }
 
 // CHECK-LABEL: zero_extend_byte:
-// CHECK: mov 130, a
-// CHECK: mov 131, #0
+// CHECK: mov 48, r7
+// CHECK: mov 49, #0
+// CHECK: ret
 // CHECK-LABEL: zero_extend_plain_char:
-// CHECK: mov 130, a
-// CHECK: mov 131, #0
+// CHECK: mov 48, r7
+// CHECK: mov 49, #0
+// CHECK: ret
 // CHECK-LABEL: sign_extend_byte:
-// CHECK: mov 130, a
+// CHECK: mov 48, r7
 // CHECK: mov c, 231
 // CHECK: clr a
 // CHECK: subb a, #0
-// CHECK: mov 131, a
+// CHECK: mov 49, a
+// CHECK: ret
 // CHECK-LABEL: zero_extend_bool:
-// CHECK: mov 131, #0
-
-// OPT-LABEL: zero_extend_byte:
-// OPT: mov 130, a
-// OPT: mov 131, #0
-// OPT-LABEL: zero_extend_plain_char:
-// OPT: mov 130, a
-// OPT: mov 131, #0
-// OPT-LABEL: sign_extend_byte:
-// OPT: mov 130, a
-// OPT: mov c, 231
-// OPT: clr a
-// OPT: subb a, #0
-// OPT: mov 131, a
-// OPT-LABEL: zero_extend_bool:
-// OPT: mov 131, #0
+// CHECK: mov 49, #0
+// CHECK: ret
 // CHECK-LABEL: sign_extend_before_add:
 // CHECK: mov c, 231
 // CHECK: clr a
 // CHECK: subb a, #0
-// CHECK: mov 131, a
-// CHECK: inc dptr
+// CHECK: add a, #1
+// CHECK: addc a, #0
+// CHECK: mov 49, a
 // CHECK: ret
 // CHECK-LABEL: zero_extend_before_add:
-// CHECK: mov 131, #0
-// CHECK: inc dptr
+// CHECK: add a, #1
+// CHECK: addc a, #0
 // CHECK: ret
 // CHECK-LABEL: zero_extend_plus_constant:
 // CHECK: add a, #254
 // CHECK: addc a, #18
-// CHECK: mov 131, a
+// CHECK: mov 49, a
 // CHECK: ret
-// OPT-LABEL: sign_extend_before_add:
-// OPT: mov c, 231
-// OPT: clr a
-// OPT: subb a, #0
-// OPT: mov 131, a
-// OPT: inc dptr
-// OPT: ret
 // CHECK-LABEL: add_unsigned_byte:
-// CHECK: add a, 130
+// CHECK: add a, 48
 // CHECK: addc a, #0
 // CHECK: ret
 // CHECK-LABEL: add_signed_byte:
-// CHECK: add a, 130
-// CHECK: addc a, #0
-// CHECK: jnc
-// CHECK: add a, #255
+// CHECK: mov c, 231
+// CHECK: add a, 48
+// CHECK: addc a, 240
 // CHECK: ret
 // CHECK-LABEL: subtract_unsigned_byte:
 // CHECK: clr c
@@ -111,42 +93,73 @@ short subtract_volatile_signed_byte(short base) {
 // CHECK: subb a, #0
 // CHECK: ret
 // CHECK-LABEL: subtract_signed_byte:
+// CHECK: mov c, 231
+// CHECK: subb a, r
+// CHECK: subb a, 240
+// CHECK: ret
+// CHECK-LABEL: subtract_volatile_byte:
 // CHECK: clr c
 // CHECK: subb a, r
 // CHECK: subb a, #0
-// CHECK: jnc
-// CHECK: add a, #1
 // CHECK: ret
+// CHECK-LABEL: subtract_volatile_signed_byte:
+// CHECK: mov c, 231
+// CHECK: subb a, r
+// CHECK: subb a, 240
+// CHECK: ret
+// OPT-LABEL: zero_extend_byte:
+// OPT: mov 48, r7
+// OPT: mov 49, #0
+// OPT: ret
+// OPT-LABEL: zero_extend_plain_char:
+// OPT: mov 48, r7
+// OPT: mov 49, #0
+// OPT: ret
+// OPT-LABEL: sign_extend_byte:
+// OPT: mov 48, r7
+// OPT: mov c, 231
+// OPT: clr a
+// OPT: subb a, #0
+// OPT: mov 49, a
+// OPT: ret
+// OPT-LABEL: zero_extend_bool:
+// OPT: mov 49, #0
+// OPT: ret
+// OPT-LABEL: sign_extend_before_add:
+// OPT: mov c, 231
+// OPT: clr a
+// OPT: subb a, #0
+// OPT: add a, #1
+// OPT: addc a, #0
+// OPT: mov 49, a
+// OPT: ret
 // OPT-LABEL: zero_extend_before_add:
-// OPT: mov 131, #0
-// OPT: inc dptr
+// OPT: add a, #1
+// OPT: addc a, #0
 // OPT: ret
 // OPT-LABEL: zero_extend_plus_constant:
 // OPT: add a, #254
 // OPT: addc a, #18
-// OPT: mov 131, a
+// OPT: mov 49, a
 // OPT: ret
 // OPT-LABEL: add_unsigned_byte:
-// OPT: add a, 130
+// OPT: add a, 48
 // OPT: addc a, #0
 // OPT: ret
 // OPT-LABEL: add_signed_byte:
-// OPT: add a, 130
-// OPT: addc a, #0
-// OPT: jnc
-// OPT: add a, #255
+// OPT: mov c, 231
+// OPT: add a, 48
+// OPT: addc a, 240
 // OPT: ret
 // OPT-LABEL: subtract_unsigned_byte:
 // OPT: clr c
-// OPT: subb a, r7
+// OPT: subb a, r
 // OPT: subb a, #0
 // OPT: ret
 // OPT-LABEL: subtract_signed_byte:
-// OPT: clr c
-// OPT: subb a, r7
-// OPT: subb a, #0
-// OPT: jnc
-// OPT: add a, #1
+// OPT: mov c, 231
+// OPT: subb a, r
+// OPT: subb a, 240
 // OPT: ret
 // OPT-LABEL: subtract_volatile_byte:
 // OPT: clr c
@@ -154,9 +167,7 @@ short subtract_volatile_signed_byte(short base) {
 // OPT: subb a, #0
 // OPT: ret
 // OPT-LABEL: subtract_volatile_signed_byte:
-// OPT: clr c
+// OPT: mov c, 231
 // OPT: subb a, r
-// OPT: subb a, #0
-// OPT: jnc
-// OPT: add a, #1
+// OPT: subb a, 240
 // OPT: ret
