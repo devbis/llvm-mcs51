@@ -15,33 +15,23 @@ void copy_data_to_data(void) { DataDestination = DataSource; }
 void copy_pdata_to_pdata(void) { PDataDestination = PDataSource; }
 
 // CHECK-LABEL: copy_data_to_data:
-// CHECK: mov a, DataSource
-// CHECK: mov r0, a
-// CHECK: mov a, DataSource+1
-// CHECK: mov 131, a
-// CHECK: mov a, r0
-// CHECK: mov 130, a
-// CHECK: mov a, 130
-// CHECK: mov r0, a
-// CHECK: mov a, 131
-// CHECK: mov r2, a
-// CHECK: mov a, r0
-// CHECK: mov DataDestination, a
-// CHECK: mov a, r2
-// CHECK: mov DataDestination+1, a
+// CHECK: mov {{[0-9]+}}, DataSource
+// CHECK: mov {{[0-9]+}}, DataSource+1
+// CHECK: mov DataDestination, {{[0-9]+}}
+// CHECK: mov DataDestination+1, {{[0-9]+}}
 // CHECK-NOT: lcall memcpy
 
 // CHECK-LABEL: copy_pdata_to_pdata:
 // CHECK: mov r0, #PDataSource
 // CHECK: movx a, @r0
-// CHECK: mov 130, a
+// CHECK: mov [[LO:[0-9]+]], a
 // CHECK: inc r0
 // CHECK: movx a, @r0
-// CHECK: mov 131, a
-// CHECK: mov a, 130
+// CHECK: mov [[HI:[0-9]+]], a
+// CHECK: mov a, [[LO]]
 // CHECK: mov r0, #PDataDestination
 // CHECK: movx @r0, a
 // CHECK: inc r0
-// CHECK: mov a, 131
+// CHECK: mov a, [[HI]]
 // CHECK: movx @r0, a
 // CHECK-NOT: lcall memcpy

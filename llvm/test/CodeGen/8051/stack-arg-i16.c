@@ -1,15 +1,16 @@
 // RUN: clang -target mcs51 -Oz -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
 
 __attribute__((noinline)) unsigned short
-sum4(unsigned short a, unsigned short b, unsigned short c, unsigned short d) {
-  return a + b + c + d;
+sum4(unsigned short a, unsigned short b, unsigned short c, unsigned short d,
+     unsigned short e) {
+  return a + b + c + d + e;
 }
 
 volatile unsigned short result;
 
 void call_sum4(unsigned short a, unsigned short b,
-               unsigned short c, unsigned short d) {
-  result = sum4(a, b, c, d);
+               unsigned short c, unsigned short d, unsigned short e) {
+  result = sum4(a, b, c, d, e);
 }
 
 // Loading a 16-bit stack argument steps from its high byte to its low byte.

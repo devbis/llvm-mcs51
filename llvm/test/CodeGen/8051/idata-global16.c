@@ -11,14 +11,14 @@ void store_word(unsigned short value) { shared_word = value; }
 // CHECK-LABEL: load_word:
 // CHECK: mov r0, #shared_word
 // CHECK: mov a, @r0
-// CHECK: mov 130, a
+// CHECK: mov 48, a
 // CHECK: inc r0
 // CHECK: mov a, @r0
-// CHECK: mov 131, a
+// CHECK: mov 49, a
 // CHECK-LABEL: store_word:
-// CHECK: mov a, 130
+// CHECK: mov a, 48
 // CHECK: mov r0, #shared_word
 // CHECK: mov @r0, a
 // CHECK: inc r0
-// CHECK: mov a, 131
+// CHECK: mov a, 49
 // CHECK: mov @r0, a

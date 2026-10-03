@@ -14,52 +14,68 @@ unsigned short add_51416(unsigned short value) { return value + 514; }
 unsigned short add_large16(unsigned short value) { return value + 60000; }
 
 // CHECK-LABEL: add_one16:
-// CHECK: inc dptr
+// CHECK: inc 48
+// CHECK-NEXT: mov a, 48
+// CHECK-NEXT: jnz .Lmcs51_word_skip{{[0-9]+}}
+// CHECK-NEXT: inc 49
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_two16:
-// CHECK: inc dptr
-// CHECK-NEXT: inc dptr
+// CHECK: mov a, 48
+// CHECK-NEXT: add a, #2
+// CHECK-NEXT: mov 48, a
+// CHECK-NEXT: mov a, 49
+// CHECK-NEXT: addc a, #0
+// CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: subtract_one16:
-// CHECK: mov a, 130
-// CHECK-NEXT: jnz .Lmcs51_sub16_skip_high{{[0-9]+}}
-// CHECK: dec 131
-// CHECK: dec 130
+// CHECK: dec 48
+// CHECK-NEXT: mov a, 48
+// CHECK-NEXT: cjne a, #255, .Lmcs51_word_skip{{[0-9]+}}
+// CHECK-NEXT: dec 49
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_negative_one16:
-// CHECK: mov a, 130
-// CHECK-NEXT: jnz .Lmcs51_sub16_skip_high{{[0-9]+}}
-// CHECK: dec 131
-// CHECK: dec 130
+// CHECK: dec 48
+// CHECK-NEXT: mov a, 48
+// CHECK-NEXT: cjne a, #255, .Lmcs51_word_skip{{[0-9]+}}
+// CHECK-NEXT: dec 49
 // CHECK-NEXT: ret
 // CHECK-LABEL: subtract_one_signed16:
-// CHECK: mov a, 130
-// CHECK-NEXT: jnz .Lmcs51_sub16_skip_high{{[0-9]+}}
-// CHECK: dec 131
-// CHECK: dec 130
+// CHECK: dec 48
+// CHECK-NEXT: mov a, 48
+// CHECK-NEXT: cjne a, #255, .Lmcs51_word_skip{{[0-9]+}}
+// CHECK-NEXT: dec 49
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_25616:
-// CHECK: inc 131
+// CHECK: mov a, 49
+// CHECK-NEXT: add a, #1
+// CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_51216:
-// CHECK: inc 131
-// CHECK-NEXT: inc 131
+// CHECK: mov a, 49
+// CHECK-NEXT: add a, #2
+// CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_25716:
-// CHECK: inc 131
-// CHECK-NEXT: inc dptr
+// CHECK: mov a, 48
+// CHECK-NEXT: add a, #1
+// CHECK-NEXT: mov 48, a
+// CHECK-NEXT: mov a, 49
+// CHECK-NEXT: addc a, #1
+// CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_51416:
-// CHECK: inc 131
-// CHECK-NEXT: inc 131
-// CHECK-NEXT: inc dptr
-// CHECK-NEXT: inc dptr
+// CHECK: mov a, 48
+// CHECK-NEXT: add a, #2
+// CHECK-NEXT: mov 48, a
+// CHECK-NEXT: mov a, 49
+// CHECK-NEXT: addc a, #2
+// CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: add_large16:
-// CHECK: mov a, 130
+// CHECK: mov a, 48
 // CHECK-NEXT: add a, #96
-// CHECK-NEXT: mov 130, a
-// CHECK-NEXT: mov a, 131
+// CHECK-NEXT: mov 48, a
+// CHECK-NEXT: mov a, 49
 // CHECK-NEXT: addc a, #234
-// CHECK-NEXT: mov 131, a
+// CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret

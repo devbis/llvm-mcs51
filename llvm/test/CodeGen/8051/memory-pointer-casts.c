@@ -12,10 +12,9 @@ __idata byte *xdata_to_idata(__xdata byte *Pointer) {
 
 // CHECK-LABEL: idata_to_xdata:
 // CHECK: mov r0, #0
-// CHECK: mov 130, a
-// CHECK: mov a, r0
-// CHECK: mov 131, a
+// CHECK: mov 48, r7
 // CHECK: ret
 // CHECK-LABEL: xdata_to_idata:
-// CHECK: mov a, 130
+// CHECK: mov r0, 48
+// CHECK: mov a, r0
 // CHECK: ret
