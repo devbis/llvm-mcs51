@@ -502,24 +502,6 @@ EVT MCS51TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
   return MVT::i8;
 }
 
-MVT MCS51TargetLowering::getRegisterTypeForCallingConv(
-    LLVMContext &Context, CallingConv::ID CC, EVT VT) const {
-  if (VT == MVT::i32 || VT == MVT::i64 || VT == MVT::f32)
-    return MVT::i8;
-  return TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT);
-}
-
-unsigned MCS51TargetLowering::getNumRegistersForCallingConv(
-    LLVMContext &Context, CallingConv::ID CC, EVT VT) const {
-  if (VT == MVT::i32)
-    return 4;
-  if (VT == MVT::i64)
-    return 8;
-  if (VT == MVT::f32)
-    return 4;
-  return TargetLowering::getNumRegistersForCallingConv(Context, CC, VT);
-}
-
 std::pair<unsigned, const TargetRegisterClass *>
 MCS51TargetLowering::getRegForInlineAsmConstraint(
     const TargetRegisterInfo *TRI, StringRef Constraint, MVT VT) const {
@@ -1397,13 +1379,6 @@ SDValue MCS51TargetLowering::LowerCall(
     CallOpcode = MCS51ISD::ICALL;
   }
 
-  if (CLI.RetTy && (CLI.RetTy->isIntegerTy(32) || CLI.RetTy->isFloatTy()))
-    CallOpcode = CallOpcode == MCS51ISD::ICALL ? MCS51ISD::ICALL_I32
-                                                : MCS51ISD::CALL_I32;
-  else if (CLI.RetTy && CLI.RetTy->isIntegerTy(64))
-    CallOpcode = CallOpcode == MCS51ISD::ICALL ? MCS51ISD::ICALL_I64
-                                                : MCS51ISD::CALL_I64;
-
   SmallVector<SDValue, 12> Ops;
   Ops.push_back(Chain);
   Ops.push_back(Callee);
@@ -1428,31 +1403,6 @@ SDValue MCS51TargetLowering::LowerCall(
   Chain = DAG.getCALLSEQ_END(Chain, CallFrameSize, 0, InGlue, DL);
   InGlue = Chain.getValue(1);
 
-  if (CLI.RetTy && (CLI.RetTy->isIntegerTy(32) ||
-                    CLI.RetTy->isIntegerTy(64) ||
-                    CLI.RetTy->isFloatTy())) {
-    bool IsI64 = CLI.RetTy->isIntegerTy(64);
-    unsigned NumParts = IsI64 ? 8 : 4;
-    if (CLI.Ins.size() != NumParts)
-      report_fatal_error(IsI64 ? "unexpected MCS-51 i64 return parts"
-                               : "unexpected MCS-51 32-bit return parts");
-    static constexpr Register I32ReturnRegs[] = {MCS51::R4, MCS51::R5,
-                                                  MCS51::R6, MCS51::R7};
-    static constexpr Register I64ReturnRegs[] = {
-        MCS51::R0, MCS51::R1, MCS51::R2, MCS51::R3,
-        MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7};
-    ArrayRef<Register> ReturnRegs =
-        IsI64 ? ArrayRef<Register>(I64ReturnRegs)
-              : ArrayRef<Register>(I32ReturnRegs);
-    for (Register Reg : ReturnRegs) {
-      SDValue Part = DAG.getCopyFromReg(Chain, DL, Reg, MVT::i8, InGlue);
-      Chain = Part.getValue(1);
-      InGlue = Part.getValue(2);
-      InVals.push_back(Part.getValue(0));
-    }
-    return Chain;
-  }
-
   SmallVector<CCValAssign, 2> RetLocs;
   CCState RetInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
   RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_MCS51);
@@ -1470,19 +1420,15 @@ bool MCS51TargetLowering::CanLowerReturn(
     CallingConv::ID, MachineFunction &, bool,
     const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &,
     const Type *) const {
-  return Outs.empty() ||
-         (Outs.size() == 1 &&
-          (Outs.front().VT == MVT::i8 || Outs.front().VT == MVT::i16)) ||
-         (Outs.size() == 4 &&
-          (Outs.front().ArgVT == MVT::i32 ||
-           Outs.front().ArgVT == MVT::f32) &&
-          llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
-            return Arg.VT == MVT::i8;
-          })) ||
-         (Outs.size() == 8 && Outs.front().ArgVT == MVT::i64 &&
-          llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
-            return Arg.VT == MVT::i8;
-          }));
+  // A byte comes back in A, a value of up to four words in IP0-IP3.
+  if (Outs.empty())
+    return true;
+  if (Outs.size() == 1 && Outs.front().VT == MVT::i8)
+    return true;
+  return Outs.size() <= 4 &&
+         llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
+           return Arg.VT == MVT::i16;
+         });
 }
 
 SDValue MCS51TargetLowering::LowerReturn(
@@ -1497,35 +1443,14 @@ SDValue MCS51TargetLowering::LowerReturn(
       report_fatal_error("MCS-51 interrupt handlers must return void");
     return DAG.getNode(MCS51ISD::RET_INTERRUPT, DL, MVT::Other, Chain);
   }
-  if (Outs.size() == 4 &&
-      (Outs.front().ArgVT == MVT::i32 || Outs.front().ArgVT == MVT::f32)) {
-    bool AllConstant = llvm::all_of(OutVals, [](SDValue Value) {
-      return isa<ConstantSDNode>(Value);
-    });
-    if (AllConstant) {
-      SmallVector<SDValue, 5> Ops{Chain};
-      for (SDValue Value : OutVals)
-        Ops.push_back(DAG.getConstant(
-            cast<ConstantSDNode>(Value)->getZExtValue(), DL, MVT::i8));
-      return DAG.getNode(MCS51ISD::RET_I32_IMM, DL, MVT::Other, Ops);
-    }
-    MachineFunction &MF = DAG.getMachineFunction();
-    SmallVector<SDValue, 4> ReturnParts;
-    for (SDValue Value : OutVals) {
-      Register Temp = MF.getRegInfo().createVirtualRegister(
-          &MCS51::MCS51GPR8RegClass);
-      Chain = DAG.getCopyToReg(Chain, DL, Temp, Value);
-      SDValue Copy = DAG.getCopyFromReg(Chain, DL, Temp, MVT::i8);
-      ReturnParts.push_back(Copy);
-      Chain = Copy.getValue(1);
-    }
-    SDValue Ops[] = {Chain, ReturnParts[0], ReturnParts[1], ReturnParts[2],
-                     ReturnParts[3]};
-    return DAG.getNode(MCS51ISD::RET_I32, DL, MVT::Other, Ops);
-  } else if (Outs.size() == 8 && Outs.front().ArgVT == MVT::i64) {
-    SmallVector<SDValue, 9> Ops{Chain};
-    Ops.append(OutVals.begin(), OutVals.end());
-    return DAG.getNode(MCS51ISD::RET_I64, DL, MVT::Other, Ops);
+  if (Outs.size() > 1) {
+    // A value of several words: low word first, in IP0 upwards.
+    static constexpr MCRegister WordRegs[] = {MCS51::IP0, MCS51::IP1,
+                                              MCS51::IP2, MCS51::IP3};
+    for (unsigned I = 0; I != Outs.size(); ++I)
+      Chain = DAG.getCopyToReg(Chain, DL, WordRegs[I], OutVals[I]);
+    return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain,
+                       DAG.getTargetConstant(Outs.size(), DL, MVT::i8));
   } else if (!OutVals.empty() &&
              (Outs.front().VT == MVT::i8 ||
               DAG.getMachineFunction().getFunction().getReturnType()
@@ -1580,7 +1505,8 @@ SDValue MCS51TargetLowering::LowerReturn(
     Chain = DAG.getCopyToReg(Chain, DL, MCS51::IP0, RetVal);
   }
   if (!Outs.empty() && Outs.front().VT == MVT::i16)
-    return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain);
+    return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain,
+                       DAG.getTargetConstant(1, DL, MVT::i8));
   return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
 }
 
@@ -2261,8 +2187,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return Tail;
   }
   unsigned CallOpcode = MI.getOpcode();
-  bool IsI32Call = CallOpcode == MCS51::ICALL_I32;
-  bool IsI64Call = CallOpcode == MCS51::ICALL_I64;
   if (CallOpcode == MCS51::ICALL_W) {
     Register Target = MI.getOperand(0).getReg();
     BuildMI(*MBB, MI, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
@@ -2270,43 +2194,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MI, DL, TII.get(MCS51::ICALL));
     MI.eraseFromParent();
     return MBB;
-  }
-  if (IsI32Call || IsI64Call) {
-    MachineFunction &MF = *MBB->getParent();
-    MachineBasicBlock *ReturnBB = MBB->splitAt(MI);
-    if (ReturnBB == MBB) {
-      ReturnBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
-      MF.insert(++MBB->getIterator(), ReturnBB);
-      MBB->addSuccessor(ReturnBB);
-    }
-
-    MachineBasicBlock *DispatchBB =
-        MF.CreateMachineBasicBlock(MBB->getBasicBlock());
-    MF.insert(ReturnBB->getIterator(), DispatchBB);
-    DispatchBB->setMachineBlockAddressTaken();
-    DispatchBB->addLiveIn(MCS51::A);
-    DispatchBB->addLiveIn(MCS51::DPTR);
-    // Keep the locally-called dispatcher reachable to machine CFG cleanup.
-    MBB->addSuccessor(DispatchBB);
-
-    Register Target = MI.getOperand(0).getReg();
-    MI.eraseFromParent();
-    BuildMI(*MBB, MBB->end(), DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .addReg(Target);
-    MachineInstrBuilder Call =
-        BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LCALL)).addMBB(DispatchBB);
-    if (IsI32Call)
-      for (Register Reg : {MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7})
-        Call.addReg(Reg, RegState::ImplicitDefine);
-    else if (IsI64Call)
-      for (Register Reg : {MCS51::R2, MCS51::R3, MCS51::R4, MCS51::R5,
-                           MCS51::R6, MCS51::R7})
-        Call.addReg(Reg, RegState::ImplicitDefine);
-    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(ReturnBB);
-    BuildMI(*DispatchBB, DispatchBB->end(), DL, TII.get(MCS51::CLR_A));
-    BuildMI(*DispatchBB, DispatchBB->end(), DL,
-            TII.get(MCS51::JMP_ADPTR));
-    return ReturnBB;
   }
   if (MI.getOpcode() == MCS51::LOADIDATA_GLOBAL8) {
     Register Dst = MI.getOperand(0).getReg();
@@ -3112,47 +2999,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MI.eraseFromParent();
     return MBB;
   }
-  if (MI.getOpcode() == MCS51::RET_I32) {
-    static constexpr Register ReturnRegs[] = {MCS51::R4, MCS51::R5,
-                                               MCS51::R6, MCS51::R7};
-    for (unsigned I = 0; I != 4; ++I)
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ReturnRegs[I])
-          .add(MI.getOperand(I));
-    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
-    for (Register Reg : ReturnRegs)
-      Ret.addReg(Reg, RegState::Implicit);
-    MI.eraseFromParent();
-    return MBB;
-  }
-  if (MI.getOpcode() == MCS51::RET_I64) {
-    static constexpr Register ReturnRegs[] = {
-        MCS51::R0, MCS51::R1, MCS51::R2, MCS51::R3,
-        MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7};
-    for (unsigned I = 0; I != 8; ++I) {
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ReturnRegs[I])
-          .add(MI.getOperand(I));
-    }
-    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
-    for (Register Reg : ReturnRegs)
-      Ret.addReg(Reg, RegState::Implicit);
-    MI.eraseFromParent();
-    return MBB;
-  }
-  if (MI.getOpcode() == MCS51::RET_I32_IMM) {
-    static constexpr Register ReturnRegs[] = {MCS51::R4, MCS51::R5,
-                                               MCS51::R6, MCS51::R7};
-    for (unsigned I = 0; I != 4; ++I)
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_IMM), ReturnRegs[I])
-          .add(MI.getOperand(I));
-    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
-    for (Register Reg : ReturnRegs)
-      Ret.addReg(Reg, RegState::Implicit);
-    MI.eraseFromParent();
-    return MBB;
-  }
   if (MI.getOpcode() == MCS51::RET16) {
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA))
-        .addReg(MCS51::IP0, RegState::Implicit);
+    MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
+    static constexpr MCRegister WordRegs[] = {MCS51::IP0, MCS51::IP1,
+                                              MCS51::IP2, MCS51::IP3};
+    for (int64_t I = 0; I != MI.getOperand(0).getImm(); ++I)
+      Ret.addReg(WordRegs[I], RegState::Implicit);
     MI.eraseFromParent();
     return MBB;
   }

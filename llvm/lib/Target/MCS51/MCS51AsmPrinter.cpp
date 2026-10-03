@@ -28,13 +28,11 @@ using namespace llvm;
 
 namespace {
 static bool isMCS51LongCallOpcode(unsigned Opcode) {
-  return Opcode == MCS51::LCALL || Opcode == MCS51::LCALL_I32 ||
-         Opcode == MCS51::LCALL_I64;
+  return Opcode == MCS51::LCALL;
 }
 
 static bool isMCS51IndirectCallOpcode(unsigned Opcode) {
-  return Opcode == MCS51::ICALL || Opcode == MCS51::ICALL_I32 ||
-         Opcode == MCS51::ICALL_I64;
+  return Opcode == MCS51::ICALL;
 }
 
 static bool isAutoBankFunction(const Function &F, StringRef CPU,

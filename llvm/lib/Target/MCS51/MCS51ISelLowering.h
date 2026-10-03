@@ -17,13 +17,6 @@ public:
   EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                          EVT VT) const override;
 
-  MVT getRegisterTypeForCallingConv(LLVMContext &Context,
-                                    CallingConv::ID CC,
-                                    EVT VT) const override;
-  unsigned getNumRegistersForCallingConv(LLVMContext &Context,
-                                        CallingConv::ID CC,
-                                        EVT VT) const override;
-
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;

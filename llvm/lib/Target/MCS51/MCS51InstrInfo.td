@@ -10,27 +10,11 @@ def MCS51ret_zext8 : SDNode<"MCS51ISD::RET_ZEXT8", SDT_MCS51RetA,
                              [SDNPHasChain]>;
 def MCS51ret_sext8 : SDNode<"MCS51ISD::RET_SEXT8", SDT_MCS51RetA,
                              [SDNPHasChain]>;
+def SDT_MCS51RetWord : SDTypeProfile<0, 1, [SDTCisVT<0, i8>]>;
+def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDT_MCS51RetWord,
+                          [SDNPHasChain]>;
 def MCS51retinterrupt : SDNode<"MCS51ISD::RET_INTERRUPT", SDTNone,
                                [SDNPHasChain]>;
-def MCS51retword : SDNode<"MCS51ISD::RET_WORD", SDTNone, [SDNPHasChain]>;
-def SDT_MCS51RetI32 : SDTypeProfile<0, 4, [SDTCisVT<0, i8>,
-                                           SDTCisVT<1, i8>,
-                                           SDTCisVT<2, i8>,
-                                           SDTCisVT<3, i8>] >;
-def MCS51ret_i32 : SDNode<"MCS51ISD::RET_I32", SDT_MCS51RetI32,
-                          [SDNPHasChain]>;
-def MCS51ret_i32_imm : SDNode<"MCS51ISD::RET_I32_IMM", SDT_MCS51RetI32,
-                              [SDNPHasChain]>;
-def SDT_MCS51RetI64 : SDTypeProfile<0, 8, [SDTCisVT<0, i8>,
-                                          SDTCisVT<1, i8>,
-                                          SDTCisVT<2, i8>,
-                                          SDTCisVT<3, i8>,
-                                          SDTCisVT<4, i8>,
-                                          SDTCisVT<5, i8>,
-                                          SDTCisVT<6, i8>,
-                                          SDTCisVT<7, i8>] >;
-def MCS51ret_i64 : SDNode<"MCS51ISD::RET_I64", SDT_MCS51RetI64,
-                          [SDNPHasChain]>;
 def SDT_MCS51ShiftWord8 : SDTypeProfile<1, 1, [SDTCisVT<0, i16>,
                                               SDTCisVT<1, i16>] >;
 def SDT_MCS51ShiftByteImm : SDTypeProfile<1, 2, [SDTCisVT<0, i8>,
@@ -167,21 +151,9 @@ def SDT_MCS51Call : SDTypeProfile<0, -1, [SDTCisVT<0, i16>]>;
 def MCS51call : SDNode<"MCS51ISD::CALL", SDT_MCS51Call,
                        [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                         SDNPVariadic]>;
-def MCS51call_i32 : SDNode<"MCS51ISD::CALL_I32", SDT_MCS51Call,
-                           [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                            SDNPVariadic]>;
-def MCS51call_i64 : SDNode<"MCS51ISD::CALL_I64", SDT_MCS51Call,
-                           [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                            SDNPVariadic]>;
 def MCS51icall : SDNode<"MCS51ISD::ICALL", SDT_MCS51Call,
                         [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
                         SDNPVariadic]>;
-def MCS51icall_i32 : SDNode<"MCS51ISD::ICALL_I32", SDT_MCS51Call,
-                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                             SDNPVariadic]>;
-def MCS51icall_i64 : SDNode<"MCS51ISD::ICALL_I64", SDT_MCS51Call,
-                            [SDNPHasChain, SDNPOutGlue, SDNPOptInGlue,
-                             SDNPVariadic]>;
 def SDT_MCS51Br : SDTypeProfile<0, 3, [SDTCisVT<0, i8>,
                                        SDTCisSameAs<0, 1>,
                                        SDTCisVT<2, OtherVT>]>;
@@ -326,7 +298,7 @@ def MOVX_DPTRA : MCS51Inst<0xF0, "movx @dptr, a"> {
 def RET16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins);
+  let InOperandList = (ins i8imm:$n);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -456,19 +428,6 @@ def SELECT16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
 }
-def RET_I32 : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs);
-  let InOperandList = (ins MCS51GPR8:$b0, MCS51GPR8:$b1,
-                           MCS51GPR8:$b2, MCS51GPR8:$b3);
-  let AsmString = "";
-  let Size = 0;
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
-  let isReturn = 1;
-  let isTerminator = 1;
-}
 def MOVX_R0A : MCS51Inst<0xF2, "movx @r0, a"> {
   let Uses = [A, R0]; let mayStore = 1;
 }
@@ -557,34 +516,7 @@ def : Pat<(MCS51ret_zext8 MCS51GPR8:$value),
 def : Pat<(MCS51ret_sext8 MCS51GPR8:$value),
           (RET_SEXT8 MCS51GPR8:$value)>;
 def : Pat<(MCS51retinterrupt), (RETI)>;
-def : Pat<(MCS51retword), (RET16)>;
-def : Pat<(MCS51ret_i32 MCS51GPR8:$b0, MCS51GPR8:$b1,
-                         MCS51GPR8:$b2, MCS51GPR8:$b3),
-          (RET_I32 MCS51GPR8:$b0, MCS51GPR8:$b1,
-                   MCS51GPR8:$b2, MCS51GPR8:$b3)>;
-def RET_I64 : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs);
-  let InOperandList = (ins MCS51GPR8:$b0, MCS51GPR8:$b1,
-                           MCS51GPR8:$b2, MCS51GPR8:$b3,
-                           MCS51GPR8:$b4, MCS51GPR8:$b5,
-                           MCS51GPR8:$b6, MCS51GPR8:$b7);
-  let AsmString = "";
-  let Size = 0;
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
-  let isReturn = 1;
-  let isTerminator = 1;
-}
-def : Pat<(MCS51ret_i64 MCS51GPR8:$b0, MCS51GPR8:$b1,
-                        MCS51GPR8:$b2, MCS51GPR8:$b3,
-                        MCS51GPR8:$b4, MCS51GPR8:$b5,
-                        MCS51GPR8:$b6, MCS51GPR8:$b7),
-          (RET_I64 MCS51GPR8:$b0, MCS51GPR8:$b1,
-                   MCS51GPR8:$b2, MCS51GPR8:$b3,
-                   MCS51GPR8:$b4, MCS51GPR8:$b5,
-                   MCS51GPR8:$b6, MCS51GPR8:$b7)>;
+def : Pat<(MCS51retword timm:$n), (RET16 timm:$n)>;
 def : Pat<(MCS51srl16_8 MCS51GPR16:$src), (SRL16_8 MCS51GPR16:$src)>;
 def : Pat<(MCS51shl16_8 MCS51GPR16:$src), (SHL16_8 MCS51GPR16:$src)>;
 def : Pat<(MCS51srl16 MCS51GPR16:$src, MCS51GPR16:$amount),
@@ -655,24 +587,7 @@ def : Pat<(MCS51selectsign8 MCS51GPR8:$lhs, MCS51GPR8:$tv,
           (SELECT_SIGN8 MCS51GPR8:$lhs, MCS51GPR8:$tv,
                         MCS51GPR8:$fv)>;
 
-def RET_I32_IMM : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs);
-  let InOperandList = (ins MCS51Imm8:$b0, MCS51Imm8:$b1,
-                           MCS51Imm8:$b2, MCS51Imm8:$b3);
-  let AsmString = "";
-  let Size = 0;
-  let isPseudo = 1;
-  let isCodeGenOnly = 1;
-  let usesCustomInserter = 1;
-  let isReturn = 1;
-  let isTerminator = 1;
-}
 
-def : Pat<(MCS51ret_i32_imm MCS51Imm8:$b0, MCS51Imm8:$b1,
-                             MCS51Imm8:$b2, MCS51Imm8:$b3),
-          (RET_I32_IMM MCS51Imm8:$b0, MCS51Imm8:$b1,
-                       MCS51Imm8:$b2, MCS51Imm8:$b3)>;
 
 def MCS51FrameIndex : Operand<i16>;
 
@@ -1510,22 +1425,6 @@ def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
 def : Pat<(MCS51call (i16 texternalsym:$addr)),
           (LCALL texternalsym:$addr)>;
 
-let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7], ImagRegs),
-    Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
-def LCALL_I32 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
-  let Pattern = [(MCS51call_i32 (i16 tglobaladdr:$addr))];
-}
-def : Pat<(MCS51call_i32 (i16 texternalsym:$addr)),
-          (LCALL_I32 texternalsym:$addr)>;
-
-let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7], ImagRegs),
-    Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
-def LCALL_I64 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
-  let Pattern = [(MCS51call_i64 (i16 tglobaladdr:$addr))];
-}
-def : Pat<(MCS51call_i64 (i16 texternalsym:$addr)),
-          (LCALL_I64 texternalsym:$addr)>;
-
 // The 8051 has no indirect CALL instruction. The custom inserter expands this
 // pseudo to an LCALL of a local dispatch block and a continuation jump when
 // needed. The dispatcher clears A, then uses JMP @A+DPTR to tail-transfer to
@@ -1555,32 +1454,6 @@ def ICALL_W : Instruction {
   let Size = 7;
 }
 def : Pat<(MCS51icall (i16 MCS51GPR16:$target)), (ICALL_W MCS51GPR16:$target)>;
-
-let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7], ImagRegs),
-    Uses = [SP, DPTR], isCall = 1, isPseudo = 1, isCodeGenOnly = 1,
-    usesCustomInserter = 1 in
-def ICALL_I32 : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs);
-  let InOperandList = (ins MCS51GPR16:$target);
-  let AsmString = "";
-  let Size = 7;
-}
-def : Pat<(MCS51icall_i32 (i16 MCS51GPR16:$target)),
-          (ICALL_I32 MCS51GPR16:$target)>;
-
-let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7], ImagRegs),
-    Uses = [SP, DPTR], isCall = 1, isPseudo = 1, isCodeGenOnly = 1,
-    usesCustomInserter = 1 in
-def ICALL_I64 : Instruction {
-  let Namespace = "MCS51";
-  let OutOperandList = (outs);
-  let InOperandList = (ins MCS51GPR16:$target);
-  let AsmString = "";
-  let Size = 7;
-}
-def : Pat<(MCS51icall_i64 (i16 MCS51GPR16:$target)),
-          (ICALL_I64 MCS51GPR16:$target)>;
 
 def MOV_DPTR_IMM : Instruction {
   let Namespace = "MCS51";
