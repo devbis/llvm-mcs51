@@ -31,11 +31,11 @@ bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
 
 bool MCS51FrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
-    ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *) const {
+    ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   for (const CalleeSavedInfo &CS : CSI) {
     Register Reg = CS.getReg();
-    unsigned Direct = Reg.id() - MCS51::R0;
+    unsigned Direct = TRI->getEncodingValue(Reg);
     MBB.addLiveIn(Reg);
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
         .addImm(Direct)
@@ -49,11 +49,11 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
 
 bool MCS51FrameLowering::restoreCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
-    MutableArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *) const {
+    MutableArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   for (CalleeSavedInfo &CS : llvm::reverse(CSI)) {
     Register Reg = CS.getReg();
-    unsigned Direct = Reg.id() - MCS51::R0;
+    unsigned Direct = TRI->getEncodingValue(Reg);
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::POP_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::ImplicitDefine)
