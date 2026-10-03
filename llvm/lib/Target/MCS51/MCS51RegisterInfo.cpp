@@ -25,11 +25,11 @@ MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   // that is called; only the freestanding entry point is exempt.
   static const MCPhysReg MainSaveList[] = {0};
   static const MCPhysReg I32ReturnSaveList[] = {
-      MCS51::R2,  MCS51::R3,  MCS51::IM12, MCS51::IM13, MCS51::IM14,
+      MCS51::R2,  MCS51::R3,  MCS51::IM8, MCS51::IM9, MCS51::IM10, MCS51::IM11, MCS51::IM12, MCS51::IM13, MCS51::IM14,
       MCS51::IM15, MCS51::IM16, MCS51::IM17, MCS51::IM18, MCS51::IM19,
       MCS51::IM20, MCS51::IM21, MCS51::IM22, MCS51::IM23, 0};
   static const MCPhysReg I64ReturnSaveList[] = {
-      MCS51::IM12, MCS51::IM13, MCS51::IM14, MCS51::IM15, MCS51::IM16,
+      MCS51::IM8, MCS51::IM9, MCS51::IM10, MCS51::IM11, MCS51::IM12, MCS51::IM13, MCS51::IM14, MCS51::IM15, MCS51::IM16,
       MCS51::IM17, MCS51::IM18, MCS51::IM19, MCS51::IM20, MCS51::IM21,
       MCS51::IM22, MCS51::IM23, 0};
   if (MF && MF->getFunction().getName() == "main" &&

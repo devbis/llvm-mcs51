@@ -1469,7 +1469,7 @@ def ADJCALLSTACKUP : Instruction {
 
 // A call may change the caller-saved imaginary registers IM0-IM11; IM12-IM23
 // are preserved by callees.
-defvar ImagRegs = !foreach(i, !range(12), !cast<Register>("IM" # i));
+defvar ImagRegs = !foreach(i, !range(8), !cast<Register>("IM" # i));
 let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1], ImagRegs),
     Uses = [SP], isCall = 1 in
 def ACALL : MCS51Abs11Inst<0b10001, "acall">;
