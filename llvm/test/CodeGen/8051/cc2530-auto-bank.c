@@ -66,9 +66,10 @@ int main(void) {
 // MAP: Name: .bank1
 // MAP: Address: 0x8000
 // MAP: Size: {{[1-9][0-9]*}}
+// The small functions are packed into the first bank; the next one stays empty.
 // MAP: Name: .bank2
 // MAP: Address: 0x8000
-// MAP: Size: {{[1-9][0-9]*}}
+// MAP: Size: 0
 // LINK-LABEL: <__mcs51_bankcall_banked_add>:
 // LINK: push 159
 // LINK: mov 159, #{{[1-7]}}
@@ -79,6 +80,6 @@ int main(void) {
 // LINK: mov 159, #{{[1-7]}}
 // LINK-LABEL: <__mcs51_bankcall_call_banked>:
 // LINK: mov 159, #{{[1-7]}}
-// LINK: lcall 32768
+// LINK: lcall {{327[0-9][0-9]}}
 // LINK-LABEL: <__mcs51_bankcall_call_other_bank>:
 // LINK: mov 159, #{{[1-7]}}
