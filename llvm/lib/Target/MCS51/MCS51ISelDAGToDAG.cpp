@@ -534,7 +534,10 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     } else if (LD->getMemoryVT() == MVT::i16 && AS == MCS51::Code) {
       Opcode = MCS51::LOADCODE16;
     } else {
-      report_fatal_error("unsupported MCS-51 memory load width/address space");
+      report_fatal_error(
+          Twine("unsupported MCS-51 memory load width/address space: ") +
+          Twine(LD->getMemoryVT().getSizeInBits()) + " bits in address space " +
+          Twine(AS) + " in function '" + MF->getName() + "'");
     }
     SDValue Ops[] = {LD->getBasePtr(), LD->getChain()};
     SDNode *Res = CurDAG->getMachineNode(Opcode, DL, N->getVTList(), Ops);
@@ -813,8 +816,13 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     Opcode = MCS51::STOREI16;
   else if (ST->getMemoryVT() == MVT::i16 && AS == MCS51::PData)
     Opcode = MCS51::STOREP16;
+  else if (ST->getMemoryVT() == MVT::i16 && AS == MCS51::XData)
+    Opcode = MCS51::STOREX16;
   else
-    report_fatal_error("unsupported MCS-51 data memory store width");
+    report_fatal_error(
+        Twine("unsupported MCS-51 data memory store width: ") +
+        Twine(ST->getMemoryVT().getSizeInBits()) + " bits in address space " +
+        Twine(AS) + " in function '" + MF->getName() + "'");
   if (AS == MCS51::XData) {
     SDValue Ops[] = {ST->getBasePtr(), ST->getValue(), ST->getChain()};
     SDNode *Res = CurDAG->getMachineNode(Opcode, DL, MVT::Other, Ops);
