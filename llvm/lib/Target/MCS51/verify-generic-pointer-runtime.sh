@@ -3,7 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SOURCE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../../.." && pwd)
-BUILD_ROOT=$(CDPATH= cd -- "$SOURCE_ROOT/../llvm-8051-build" && pwd)
+BUILD_ROOT=$(CDPATH= cd -- "$SOURCE_ROOT/../llvm-mcs51-build" && pwd)
 
 CLANG=${MCS51_CLANG:-$BUILD_ROOT/bin/clang}
 LLD=${MCS51_LLD:-$BUILD_ROOT/bin/ld.lld}
