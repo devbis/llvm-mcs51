@@ -14,7 +14,8 @@
 using namespace llvm;
 
 MCS51InstrInfo::MCS51InstrInfo(const MCS51Subtarget &STI)
-    : MCS51GenInstrInfo(STI, RI, ~0u, ~0u, ~0u, MCS51::RET), RI() {}
+    : MCS51GenInstrInfo(STI, RI, MCS51::ADJCALLSTACKDOWN,
+                      MCS51::ADJCALLSTACKUP, ~0u, MCS51::RET), RI() {}
 
 void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator MI,
@@ -39,6 +40,80 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   auto IsHalf = [](Register Reg) {
     return Reg == MCS51::DPL || Reg == MCS51::DPH;
   };
+  // Imaginary registers are bytes of direct RAM, so they move with ordinary
+  // direct-addressed instructions.
+  auto IsImag8 = [](Register Reg) {
+    return MCS51::MCS51Imag8RegClass.contains(Reg);
+  };
+  auto IsImagPair = [](Register Reg) {
+    return MCS51::MCS51GPR16RegClass.contains(Reg);
+  };
+  auto ImagLo = [&](Register Pair) {
+    return RI.getSubReg(Pair, MCS51::sub_lo);
+  };
+  auto ImagHi = [&](Register Pair) {
+    return RI.getSubReg(Pair, MCS51::sub_hi);
+  };
+  auto MoveImagByte = [&](Register Dst, Register Src, bool Kill) {
+    if (IsImag8(Dst) && IsImag8(Src))
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_IM), Dst)
+          .addReg(Src, getKillRegState(Kill));
+    else if (IsImag8(Dst) && IsHalf(Src))
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_DIRECT), Dst)
+          .addImm(Src == MCS51::DPL ? 0x82 : 0x83)
+          .addReg(Src, RegState::Implicit);
+    else if (IsImag8(Src) && IsHalf(Dst))
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_IM))
+          .addImm(Dst == MCS51::DPL ? 0x82 : 0x83)
+          .addReg(Src, getKillRegState(Kill))
+          .addReg(Dst, RegState::ImplicitDefine);
+    else if (IsImag8(Dst) && Src == MCS51::A)
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_A), Dst)
+          .addReg(Src, getKillRegState(Kill));
+    else if (IsImag8(Dst) && MCS51::MCS51GPR8RegClass.contains(Src))
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_RN), Dst)
+          .addReg(Src, getKillRegState(Kill));
+    else if (IsImag8(Src) && Dst == MCS51::A)
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_A_IM), Dst)
+          .addReg(Src, getKillRegState(Kill));
+    else if (IsImag8(Src) && MCS51::MCS51GPR8RegClass.contains(Dst))
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_IM), Dst)
+          .addReg(Src, getKillRegState(Kill));
+    else
+      llvm_unreachable("unsupported imaginary byte copy");
+  };
+  if (IsImag8(DestReg) || IsImag8(SrcReg)) {
+    MoveImagByte(DestReg, SrcReg, KillSrc);
+    return;
+  }
+  if (IsImagPair(DestReg) && IsImagPair(SrcReg)) {
+    MoveImagByte(ImagLo(DestReg), ImagLo(SrcReg), KillSrc);
+    MoveImagByte(ImagHi(DestReg), ImagHi(SrcReg), KillSrc);
+    return;
+  }
+  if (DestReg == MCS51::DPTR && IsImagPair(SrcReg)) {
+    MoveImagByte(MCS51::DPL, ImagLo(SrcReg), KillSrc);
+    MoveImagByte(MCS51::DPH, ImagHi(SrcReg), KillSrc);
+    return;
+  }
+  if (IsImagPair(DestReg) && SrcReg == MCS51::DPTR) {
+    MoveImagByte(ImagLo(DestReg), MCS51::DPL, false);
+    MoveImagByte(ImagHi(DestReg), MCS51::DPH, false);
+    return;
+  }
+  // A byte copied into a word register zero-extends; out of one it takes the
+  // low byte.
+  if (IsImagPair(DestReg) &&
+      (SrcReg == MCS51::A || MCS51::MCS51GPR8RegClass.contains(SrcReg))) {
+    MoveImagByte(ImagLo(DestReg), SrcReg, KillSrc);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_IMM), ImagHi(DestReg)).addImm(0);
+    return;
+  }
+  if (IsImagPair(SrcReg) && (DestReg == MCS51::A ||
+                             MCS51::MCS51GPR8RegClass.contains(DestReg))) {
+    MoveImagByte(DestReg, ImagLo(SrcReg), KillSrc);
+    return;
+  }
   if (IsHalf(SrcReg) && MCS51::MCS51GPR8RegClass.contains(DestReg)) {
     BuildMI(MBB, MI, DL,
             get(SrcReg == MCS51::DPL ? MCS51::MOV_RN_DPL : MCS51::MOV_RN_DPH),
@@ -210,18 +285,25 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MachineBasicBlock &MBB = *MI.getParent();
     const DebugLoc &DL = MI.getDebugLoc();
     Register Dst = MI.getOperand(0).getReg();
-    int64_t Imm = MI.getOperand(1).getImm() & 0xffff;
+    const MachineOperand &Src = MI.getOperand(1);
+    if (!Src.isImm()) {
+      // A symbol address needs the 16-bit relocation that only MOV DPTR has.
+      MachineInstrBuilder Load =
+          BuildMI(MBB, MI, DL, get(MCS51::MOV_DPTR_IMM), MCS51::DPTR);
+      Load.add(Src);
+      if (Dst != MCS51::DPTR)
+        copyPhysReg(MBB, MI, DL, Dst, MCS51::DPTR, false, false, false);
+      MI.eraseFromParent();
+      return true;
+    }
+    int64_t Imm = Src.getImm() & 0xffff;
     if (Dst == MCS51::DPTR) {
       BuildMI(MBB, MI, DL, get(MCS51::MOV_DPTR_IMM), MCS51::DPTR).addImm(Imm);
     } else {
-      Register Lo = Dst == MCS51::R2R3 ? MCS51::R2
-                                       : Dst == MCS51::R4R5 ? MCS51::R4
-                                                            : MCS51::R6;
-      Register Hi = Dst == MCS51::R2R3 ? MCS51::R3
-                                       : Dst == MCS51::R4R5 ? MCS51::R5
-                                                            : MCS51::R7;
-      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_IMM), Lo).addImm(Imm & 0xff);
-      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_IMM), Hi).addImm(Imm >> 8);
+      Register Lo = RI.getSubReg(Dst, MCS51::sub_lo);
+      Register Hi = RI.getSubReg(Dst, MCS51::sub_hi);
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_IMM), Lo).addImm(Imm & 0xff);
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_IMM), Hi).addImm(Imm >> 8);
     }
     MI.eraseFromParent();
     return true;
