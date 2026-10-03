@@ -444,6 +444,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   // The 8051 has no indirect branch instruction; avoid jump-table lowering.
   setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
+  setTargetDAGCombine(ISD::ADD);
   setTargetDAGCombine(ISD::SUB);
   setTargetDAGCombine(ISD::SHL);
   setTargetDAGCombine(ISD::SRL);
@@ -1512,6 +1513,26 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  // A constant added to a symbol address that was cast between memory spaces
+  // is one relocated address: (symbol + C) cast.
+  if (N->getOpcode() == ISD::ADD && N->getValueType(0) == MVT::i16 &&
+      N->getOperand(0).getOpcode() == ISD::ADDRSPACECAST &&
+      N->getOperand(0).getOperand(0).getOpcode() == ISD::GlobalAddress &&
+      N->getOperand(0).getOperand(0).getValueType() == MVT::i16 &&
+      isa<ConstantSDNode>(N->getOperand(1))) {
+    SelectionDAG &DAG = DCI.DAG;
+    SDLoc DL(N);
+    auto *Cast = cast<AddrSpaceCastSDNode>(N->getOperand(0));
+    auto *GA = cast<GlobalAddressSDNode>(Cast->getOperand(0));
+    int64_t Offset =
+        GA->getOffset() + cast<ConstantSDNode>(N->getOperand(1))->getSExtValue();
+    if (!isInt<16>(Offset) || !isUInt<16>(Offset))
+      return SDValue();
+    SDValue Addr = DAG.getGlobalAddress(GA->getGlobal(), DL, MVT::i16, Offset,
+                                        false, GA->getTargetFlags());
+    return DAG.getAddrSpaceCast(DL, MVT::i16, Addr, Cast->getSrcAddressSpace(),
+                                Cast->getDestAddressSpace());
+  }
   // Shifting a value assembled from two bytes by eight bits only moves a byte.
   if ((N->getOpcode() == MCS51ISD::SRL16_8 ||
        N->getOpcode() == MCS51ISD::SHL16_8) &&
