@@ -16,9 +16,54 @@ using namespace llvm;
 MCS51FrameLowering::MCS51FrameLowering()
     : TargetFrameLowering(StackGrowsUp, Align(1), 1) {}
 
+// Callee-saved registers fall into two groups that the runtime can save and
+// restore with shared routines: R2.. and IM8... A group uses the routines
+// when it is a prefix of its register range with at least three members.
+enum { CSRGroupR, CSRGroupIM, NumCSRGroups };
+
+static int getCSRGroup(const TargetRegisterInfo *TRI, MCRegister Reg,
+                       unsigned &Index) {
+  unsigned Enc = TRI->getEncodingValue(Reg);
+  if (Enc >= 2 && Enc <= 7) {
+    Index = Enc - 2;
+    return CSRGroupR;
+  }
+  if (MCS51::MCS51Imag8RegClass.contains(Reg) && Enc >= 56 && Enc <= 71) {
+    Index = Enc - 56;
+    return CSRGroupIM;
+  }
+  return -1;
+}
+
+static MCRegister getCSRGroupReg(int Group, unsigned Index) {
+  return Group == CSRGroupR ? MCRegister(MCS51::R2 + Index)
+                            : MCRegister(MCS51::IM8 + Index);
+}
+
+// Number of registers of each group handled by the shared routines (0 if the
+// group is saved inline).
+static void getCSRHelperCounts(const TargetRegisterInfo *TRI,
+                               ArrayRef<CalleeSavedInfo> CSI,
+                               unsigned (&Counts)[NumCSRGroups]) {
+  unsigned Members[NumCSRGroups] = {};
+  unsigned Mask[NumCSRGroups] = {};
+  for (const CalleeSavedInfo &CS : CSI) {
+    unsigned Index;
+    int Group = getCSRGroup(TRI, CS.getReg(), Index);
+    if (Group < 0)
+      continue;
+    ++Members[Group];
+    Mask[Group] |= 1u << Index;
+  }
+  for (int G = 0; G != NumCSRGroups; ++G) {
+    bool Prefix = (Mask[G] & (Mask[G] + 1)) == 0;
+    Counts[G] = Prefix && Members[G] >= 3 ? Members[G] : 0;
+  }
+}
+
 bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
-    MachineFunction &MF, const TargetRegisterInfo *,
-    std::vector<CalleeSavedInfo> &) const {
+    MachineFunction &MF, const TargetRegisterInfo *TRI,
+    std::vector<CalleeSavedInfo> &CSI) const {
   // Frame objects are plain bytes on the 8-bit stack. Source alignments of 2
   // for 16-bit objects would only add padding to the 255-byte stack window.
   MachineFrameInfo &MFI = MF.getFrameInfo();
@@ -26,6 +71,31 @@ bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
     if (!MFI.isDeadObjectIndex(I))
       MFI.setObjectAlignment(I, Align(1));
   // Callee-saved R registers are pushed directly; they do not need frame slots.
+  if (MF.getFunction().hasFnAttribute("interrupt"))
+    return true;
+  // Round a group up to a prefix of its range so that one shared routine can
+  // save it, when only a couple of unused registers have to be added.
+  unsigned Members[NumCSRGroups] = {};
+  unsigned Top[NumCSRGroups] = {};
+  for (const CalleeSavedInfo &CS : CSI) {
+    unsigned Index;
+    int Group = getCSRGroup(TRI, CS.getReg(), Index);
+    if (Group < 0)
+      continue;
+    ++Members[Group];
+    Top[Group] = std::max(Top[Group], Index + 1);
+  }
+  for (int G = 0; G != NumCSRGroups; ++G) {
+    if (Members[G] < 3 || Top[G] - Members[G] > 2)
+      continue;
+    for (unsigned Index = 0; Index != Top[G]; ++Index) {
+      MCRegister Reg = getCSRGroupReg(G, Index);
+      if (llvm::none_of(CSI, [&](const CalleeSavedInfo &CS) {
+            return CS.getReg() == Reg;
+          }))
+        CSI.push_back(CalleeSavedInfo(Reg));
+    }
+  }
   return true;
 }
 
@@ -33,10 +103,27 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
+  unsigned Counts[NumCSRGroups];
+  getCSRHelperCounts(TRI, CSI, Counts);
+  bool Called[NumCSRGroups] = {};
   for (const CalleeSavedInfo &CS : CSI) {
     Register Reg = CS.getReg();
     unsigned Direct = TRI->getEncodingValue(Reg);
     MBB.addLiveIn(Reg);
+    unsigned Index;
+    int Group = getCSRGroup(TRI, Reg, Index);
+    if (Group >= 0 && Counts[Group]) {
+      if (Called[Group])
+        continue;
+      Called[Group] = true;
+      auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::CSR_SAVE))
+                     .addImm(Group)
+                     .addImm(Counts[Group]);
+      for (unsigned I = 0; I != Counts[Group]; ++I)
+        MIB.addReg(getCSRGroupReg(Group, I), RegState::Implicit);
+      MIB.setMIFlag(MachineInstr::FrameSetup);
+      continue;
+    }
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::Implicit)
@@ -51,9 +138,26 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     MutableArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
+  unsigned Counts[NumCSRGroups];
+  getCSRHelperCounts(TRI, CSI, Counts);
+  bool Called[NumCSRGroups] = {};
   for (CalleeSavedInfo &CS : llvm::reverse(CSI)) {
     Register Reg = CS.getReg();
     unsigned Direct = TRI->getEncodingValue(Reg);
+    unsigned Index;
+    int Group = getCSRGroup(TRI, Reg, Index);
+    if (Group >= 0 && Counts[Group]) {
+      if (Called[Group])
+        continue;
+      Called[Group] = true;
+      auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::CSR_RESTORE))
+                     .addImm(Group)
+                     .addImm(Counts[Group]);
+      for (unsigned I = 0; I != Counts[Group]; ++I)
+        MIB.addReg(getCSRGroupReg(Group, I), RegState::ImplicitDefine);
+      MIB.setMIFlag(MachineInstr::FrameDestroy);
+      continue;
+    }
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::POP_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::ImplicitDefine)

@@ -223,8 +223,43 @@ public:
     OutStreamer->switchSection(SavedSection);
   }
 
+  // Set when a callee-saved restore routine was reached with LJMP, so that the
+  // RET that follows it is not emitted.
+  bool SkipNextReturn = false;
+
   void emitInstruction(const MachineInstr *MI) override {
+    if (SkipNextReturn) {
+      SkipNextReturn = false;
+      assert(MI->getOpcode() == MCS51::RET || MI->getOpcode() == MCS51::RET_NOA);
+      return;
+    }
     switch (MI->getOpcode()) {
+    case MCS51::CSR_SAVE:
+    case MCS51::CSR_RESTORE: {
+      bool IsSave = MI->getOpcode() == MCS51::CSR_SAVE;
+      // A restore that is followed by RET jumps to a routine that pops the
+      // registers and returns itself.
+      bool IsReturn = false;
+      if (!IsSave) {
+        auto Next = std::next(MI->getIterator());
+        IsReturn = Next != MI->getParent()->end() &&
+                   (Next->getOpcode() == MCS51::RET ||
+                    Next->getOpcode() == MCS51::RET_NOA);
+      }
+      SmallString<32> Name;
+      raw_svector_ostream(Name)
+          << (IsSave ? "__mcs51_save_"
+                     : IsReturn ? "__mcs51_return_" : "__mcs51_restore_")
+          << (MI->getOperand(0).getImm() ? "im" : "r")
+          << MI->getOperand(1).getImm();
+      MCInst Inst;
+      Inst.setOpcode(IsReturn ? MCS51::LJMP : MCS51::LCALL);
+      SkipNextReturn = IsReturn;
+      Inst.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
+          OutContext.getOrCreateSymbol(Name), OutContext)));
+      EmitToStreamer(*OutStreamer, Inst);
+      return;
+    }
     case MCS51::SHL16_LOOP:
     case MCS51::SRL16_LOOP:
     case MCS51::SRA16_LOOP:
