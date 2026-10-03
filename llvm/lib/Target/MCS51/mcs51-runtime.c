@@ -582,6 +582,138 @@ float __divsf3(float LHS, float RHS) {
 
 /* The MCS-51 backend has no native 64-bit multiply. Multiply bytes and carry
  * row by row so signed and unsigned callers share modulo-2^64 semantics. */
+#ifdef __mcs51__
+/* Variable 32-bit shifts take the value in R7:R4 (R4 is the low byte) and the
+   count in DPTR, and return the result in R7:R4. They use only R0, A and C. */
+__asm__(
+    ".section .text.__ashlsi3,\"ax\",@progbits\n"
+    ".globl __ashlsi3\n"
+    ".type __ashlsi3,@function\n"
+    "__ashlsi3:\n"
+    "  mov a, dph\n"
+    "  jnz .Lashlsi3_zero\n"
+    "  mov a, dpl\n"
+    "  clr c\n"
+    "  subb a, #32\n"
+    "  jnc .Lashlsi3_zero\n"
+    "  mov a, dpl\n"
+    "  jz .Lashlsi3_done\n"
+    "  mov r0, a\n"
+    ".Lashlsi3_loop:\n"
+    "  clr c\n"
+    "  mov a, r4\n"
+    "  rlc a\n"
+    "  mov r4, a\n"
+    "  mov a, r5\n"
+    "  rlc a\n"
+    "  mov r5, a\n"
+    "  mov a, r6\n"
+    "  rlc a\n"
+    "  mov r6, a\n"
+    "  mov a, r7\n"
+    "  rlc a\n"
+    "  mov r7, a\n"
+    "  djnz r0, .Lashlsi3_loop\n"
+    ".Lashlsi3_done:\n"
+    "  ret\n"
+    ".Lashlsi3_zero:\n"
+    "  clr a\n"
+    "  mov r4, a\n"
+    "  mov r5, a\n"
+    "  mov r6, a\n"
+    "  mov r7, a\n"
+    "  ret\n"
+    ".size __ashlsi3, .-__ashlsi3\n"
+
+    ".section .text.__lshrsi3,\"ax\",@progbits\n"
+    ".globl __lshrsi3\n"
+    ".type __lshrsi3,@function\n"
+    "__lshrsi3:\n"
+    "  mov a, dph\n"
+    "  jnz .Llshrsi3_zero\n"
+    "  mov a, dpl\n"
+    "  clr c\n"
+    "  subb a, #32\n"
+    "  jnc .Llshrsi3_zero\n"
+    "  mov a, dpl\n"
+    "  jz .Llshrsi3_done\n"
+    "  mov r0, a\n"
+    ".Llshrsi3_loop:\n"
+    "  clr c\n"
+    "  mov a, r7\n"
+    "  rrc a\n"
+    "  mov r7, a\n"
+    "  mov a, r6\n"
+    "  rrc a\n"
+    "  mov r6, a\n"
+    "  mov a, r5\n"
+    "  rrc a\n"
+    "  mov r5, a\n"
+    "  mov a, r4\n"
+    "  rrc a\n"
+    "  mov r4, a\n"
+    "  djnz r0, .Llshrsi3_loop\n"
+    ".Llshrsi3_done:\n"
+    "  ret\n"
+    ".Llshrsi3_zero:\n"
+    "  clr a\n"
+    "  mov r4, a\n"
+    "  mov r5, a\n"
+    "  mov r6, a\n"
+    "  mov r7, a\n"
+    "  ret\n"
+    ".size __lshrsi3, .-__lshrsi3\n"
+
+    ".section .text.__ashrsi3,\"ax\",@progbits\n"
+    ".globl __ashrsi3\n"
+    ".type __ashrsi3,@function\n"
+    "__ashrsi3:\n"
+    "  mov a, dph\n"
+    "  jnz .Lashrsi3_max\n"
+    "  mov a, dpl\n"
+    "  clr c\n"
+    "  subb a, #32\n"
+    "  jnc .Lashrsi3_max\n"
+    "  mov a, dpl\n"
+    "  sjmp .Lashrsi3_count\n"
+    ".Lashrsi3_max:\n"
+    "  mov a, #31\n"
+    ".Lashrsi3_count:\n"
+    "  jz .Lashrsi3_done\n"
+    "  mov r0, a\n"
+    ".Lashrsi3_loop:\n"
+    "  mov a, r7\n"
+    "  mov c, 231\n"
+    "  rrc a\n"
+    "  mov r7, a\n"
+    "  mov a, r6\n"
+    "  rrc a\n"
+    "  mov r6, a\n"
+    "  mov a, r5\n"
+    "  rrc a\n"
+    "  mov r5, a\n"
+    "  mov a, r4\n"
+    "  rrc a\n"
+    "  mov r4, a\n"
+    "  djnz r0, .Lashrsi3_loop\n"
+    ".Lashrsi3_done:\n"
+    "  ret\n"
+    ".size __ashrsi3, .-__ashrsi3\n");
+#else
+/* Portable versions so the helpers can be tested on the host. */
+uint32_t __ashlsi3(uint32_t Value, int Count) {
+  return (unsigned)Count >= 32 ? 0 : Value << Count;
+}
+
+uint32_t __lshrsi3(uint32_t Value, int Count) {
+  return (unsigned)Count >= 32 ? 0 : Value >> Count;
+}
+
+int32_t __ashrsi3(int32_t Value, int Count) {
+  return Value >> ((unsigned)Count >= 32 ? 31 : Count);
+}
+#endif
+
 uint64_t __muldi3(uint64_t LHS, uint64_t RHS) {
   Word64Bytes Left = {.Value = LHS};
   Word64Bytes Right = {.Value = RHS};
