@@ -211,6 +211,16 @@ def MCS51poparg8 : SDNode<"MCS51ISD::POP_ARG8", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 def MCS51pushpad8 : SDNode<"MCS51ISD::PUSH_PAD8", SDTNone, [SDNPHasChain]>;
 
+// Brackets the pushes of stack arguments, so frame lowering knows how far SP
+// has moved when it resolves a frame index inside the sequence.
+def SDT_MCS51CallSeqStart : SDCallSeqStart<[SDTCisVT<0, i16>,
+                                            SDTCisVT<1, i16>]>;
+def SDT_MCS51CallSeqEnd : SDCallSeqEnd<[SDTCisVT<0, i16>, SDTCisVT<1, i16>]>;
+def MCS51callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_MCS51CallSeqStart,
+                                [SDNPHasChain, SDNPOutGlue]>;
+def MCS51callseq_end : SDNode<"ISD::CALLSEQ_END", SDT_MCS51CallSeqEnd,
+                              [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
 class MCS51Inst<bits<8> opcode, string mnemonic> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
@@ -575,22 +585,22 @@ def : Pat<(MCS51ret_i64 MCS51GPR8:$b0, MCS51GPR8:$b1,
                    MCS51GPR8:$b2, MCS51GPR8:$b3,
                    MCS51GPR8:$b4, MCS51GPR8:$b5,
                    MCS51GPR8:$b6, MCS51GPR8:$b7)>;
-def : Pat<(MCS51srl16_8 MCS51PTR:$src), (SRL16_8 MCS51PTR:$src)>;
-def : Pat<(MCS51shl16_8 MCS51PTR:$src), (SHL16_8 MCS51PTR:$src)>;
-def : Pat<(MCS51srl16 MCS51PTR:$src, MCS51PTR:$amount),
-          (SRL16 MCS51PTR:$src, MCS51PTR:$amount)>;
-def : Pat<(MCS51shl16 MCS51PTR:$src, MCS51PTR:$amount),
-          (SHL16 MCS51PTR:$src, MCS51PTR:$amount)>;
-def : Pat<(MCS51sra16 MCS51PTR:$src, MCS51PTR:$amount),
-          (SRA16 MCS51PTR:$src, MCS51PTR:$amount)>;
+def : Pat<(MCS51srl16_8 MCS51GPR16:$src), (SRL16_8 MCS51GPR16:$src)>;
+def : Pat<(MCS51shl16_8 MCS51GPR16:$src), (SHL16_8 MCS51GPR16:$src)>;
+def : Pat<(MCS51srl16 MCS51GPR16:$src, MCS51GPR16:$amount),
+          (SRL16 MCS51GPR16:$src, MCS51GPR16:$amount)>;
+def : Pat<(MCS51shl16 MCS51GPR16:$src, MCS51GPR16:$amount),
+          (SHL16 MCS51GPR16:$src, MCS51GPR16:$amount)>;
+def : Pat<(MCS51sra16 MCS51GPR16:$src, MCS51GPR16:$amount),
+          (SRA16 MCS51GPR16:$src, MCS51GPR16:$amount)>;
 def : Pat<(MCS51select8 MCS51GPR8:$cond, MCS51GPR8:$true,
                          MCS51GPR8:$false),
           (SELECT8 MCS51GPR8:$cond, MCS51GPR8:$true,
                    MCS51GPR8:$false)>;
-def : Pat<(MCS51select16 MCS51GPR8:$cond, MCS51PTR:$true,
-                           MCS51PTR:$false),
-          (SELECT16 MCS51GPR8:$cond, MCS51PTR:$true,
-                    MCS51PTR:$false)>;
+def : Pat<(MCS51select16 MCS51GPR8:$cond, MCS51GPR16:$true,
+                           MCS51GPR16:$false),
+          (SELECT16 MCS51GPR8:$cond, MCS51GPR16:$true,
+                    MCS51GPR16:$false)>;
 
 def MCS51Imm8 : Operand<i8>,
                 ImmLeaf<i8, "return isUInt<8>(Imm) || isInt<8>(Imm);"> {
@@ -1412,10 +1422,30 @@ class MCS51Abs11Inst<bits<5> opcode, string mnemonic> : Instruction {
 def AJMP : MCS51Abs11Inst<0b00001, "ajmp"> {
   let isBranch = 1; let isTerminator = 1; let isBarrier = 1;
 }
-let Defs = [A, B, C, DPTR, SP, R0, R1],
+let isPseudo = 1, isCodeGenOnly = 1, hasSideEffects = 1, Size = 0,
+    Defs = [SP], Uses = [SP] in {
+def ADJCALLSTACKDOWN : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i16imm:$amt1, i16imm:$amt2);
+  let AsmString = "";
+  let Pattern = [(MCS51callseq_start timm:$amt1, timm:$amt2)];
+}
+def ADJCALLSTACKUP : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i16imm:$amt1, i16imm:$amt2);
+  let AsmString = "";
+  let Pattern = [(MCS51callseq_end timm:$amt1, timm:$amt2)];
+}
+}
+
+// A call may change any imaginary register.
+defvar ImagRegs = !foreach(i, !range(24), !cast<Register>("IM" # i));
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1], ImagRegs),
     Uses = [SP], isCall = 1 in
 def ACALL : MCS51Abs11Inst<0b10001, "acall">;
-let Defs = [A, B, C, DPTR, SP, R0, R1],
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1], ImagRegs),
     Uses = [SP], isCall = 1 in
 def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
@@ -1424,7 +1454,7 @@ def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
 def : Pat<(MCS51call (i16 texternalsym:$addr)),
           (LCALL texternalsym:$addr)>;
 
-let Defs = [A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7],
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7], ImagRegs),
     Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
 def LCALL_I32 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call_i32 (i16 tglobaladdr:$addr))];
@@ -1432,7 +1462,7 @@ def LCALL_I32 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
 def : Pat<(MCS51call_i32 (i16 texternalsym:$addr)),
           (LCALL_I32 texternalsym:$addr)>;
 
-let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7], ImagRegs),
     Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
 def LCALL_I64 : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call_i64 (i16 tglobaladdr:$addr))];
@@ -1444,12 +1474,12 @@ def : Pat<(MCS51call_i64 (i16 texternalsym:$addr)),
 // pseudo to an LCALL of a local dispatch block and a continuation jump when
 // needed. The dispatcher clears A, then uses JMP @A+DPTR to tail-transfer to
 // the callee; its RET returns to the call site's continuation.
-let Defs = [A, B, C, DPTR, SP, R0, R1],
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1], ImagRegs),
     Uses = [SP, DPTR], isCall = 1 in
 def ICALL : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51PTR:$target);
+  let InOperandList = (ins);
   let AsmString = "";
   // AsmPrinter expands this to two PUSH instructions and an LCALL.
   let Size = 7;
@@ -1457,33 +1487,44 @@ def ICALL : Instruction {
   let isCodeGenOnly = 1;
 }
 
-def : Pat<(MCS51icall (i16 MCS51PTR:$target)), (ICALL MCS51PTR:$target)>;
+// The selected form takes the target in a word register; the inserter moves it
+// into DPTR and emits ICALL.
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1], ImagRegs), Uses = [SP],
+    isCall = 1, isPseudo = 1, isCodeGenOnly = 1, usesCustomInserter = 1 in
+def ICALL_W : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR16:$target);
+  let AsmString = "";
+  let Size = 7;
+}
+def : Pat<(MCS51icall (i16 MCS51GPR16:$target)), (ICALL_W MCS51GPR16:$target)>;
 
-let Defs = [A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7],
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R4, R5, R6, R7], ImagRegs),
     Uses = [SP, DPTR], isCall = 1, isPseudo = 1, isCodeGenOnly = 1,
     usesCustomInserter = 1 in
 def ICALL_I32 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51PTR:$target);
+  let InOperandList = (ins MCS51GPR16:$target);
   let AsmString = "";
   let Size = 7;
 }
-def : Pat<(MCS51icall_i32 (i16 MCS51PTR:$target)),
-          (ICALL_I32 MCS51PTR:$target)>;
+def : Pat<(MCS51icall_i32 (i16 MCS51GPR16:$target)),
+          (ICALL_I32 MCS51GPR16:$target)>;
 
-let Defs = [A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7],
+let Defs = !listconcat([A, B, C, DPTR, SP, R0, R1, R2, R3, R4, R5, R6, R7], ImagRegs),
     Uses = [SP, DPTR], isCall = 1, isPseudo = 1, isCodeGenOnly = 1,
     usesCustomInserter = 1 in
 def ICALL_I64 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51PTR:$target);
+  let InOperandList = (ins MCS51GPR16:$target);
   let AsmString = "";
   let Size = 7;
 }
-def : Pat<(MCS51icall_i64 (i16 MCS51PTR:$target)),
-          (ICALL_I64 MCS51PTR:$target)>;
+def : Pat<(MCS51icall_i64 (i16 MCS51GPR16:$target)),
+          (ICALL_I64 MCS51GPR16:$target)>;
 
 def MOV_DPTR_IMM : Instruction {
   let Namespace = "MCS51";
@@ -1515,7 +1556,7 @@ def LDI16 : Instruction {
   let Pattern = [(set MCS51GPR16:$dst, MCS51Imm16BE:$imm)];
 }
 
-def : Pat<(i16 tglobaladdr:$addr), (MOV_DPTR_IMM tglobaladdr:$addr)>;
+def : Pat<(i16 tglobaladdr:$addr), (LDI16 tglobaladdr:$addr)>;
 
 def LOADSTACKARG8 : Instruction {
   let Namespace = "MCS51";
@@ -1792,7 +1833,7 @@ def LOAD_FRAME8_INDEX : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
-                           MCS51PTR:$index);
+                           MCS51GPR16:$index);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1806,7 +1847,7 @@ def STORE_FRAME8_INDEX : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
-                           MCS51PTR:$index, MCS51GPR8:$src);
+                           MCS51GPR16:$index, MCS51GPR8:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2113,16 +2154,16 @@ def CMP32 : Instruction {
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
 }
-def : Pat<(MCS51cmpult16 MCS51PTR:$lhs, MCS51PTR:$rhs),
-          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 0)>;
-def : Pat<(MCS51cmpslt16 MCS51PTR:$lhs, MCS51PTR:$rhs),
-          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 1)>;
-def : Pat<(MCS51cmpuge16 MCS51PTR:$lhs, MCS51PTR:$rhs),
-          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 3)>;
-def : Pat<(MCS51cmpsge16 MCS51PTR:$lhs, MCS51PTR:$rhs),
-          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 4)>;
-def : Pat<(MCS51cmpeq16 MCS51PTR:$lhs, MCS51PTR:$rhs),
-          (CMP16 MCS51PTR:$lhs, MCS51PTR:$rhs, 2)>;
+def : Pat<(MCS51cmpult16 MCS51GPR16:$lhs, MCS51GPR16:$rhs),
+          (CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, 0)>;
+def : Pat<(MCS51cmpslt16 MCS51GPR16:$lhs, MCS51GPR16:$rhs),
+          (CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, 1)>;
+def : Pat<(MCS51cmpuge16 MCS51GPR16:$lhs, MCS51GPR16:$rhs),
+          (CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, 3)>;
+def : Pat<(MCS51cmpsge16 MCS51GPR16:$lhs, MCS51GPR16:$rhs),
+          (CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, 4)>;
+def : Pat<(MCS51cmpeq16 MCS51GPR16:$lhs, MCS51GPR16:$rhs),
+          (CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, 2)>;
 def : Pat<(MCS51cmpult8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 0)>;
 def : Pat<(MCS51cmpult8 MCS51GPR8:$lhs, MCS51Imm8:$rhs),
@@ -2139,11 +2180,11 @@ def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51GPR8:$rhs),
           (CMP8 MCS51GPR8:$lhs, MCS51GPR8:$rhs, 2)>;
 def : Pat<(MCS51cmpeq8 MCS51GPR8:$lhs, MCS51Imm8:$rhs),
           (CMP8I MCS51GPR8:$lhs, MCS51Imm8:$rhs, 2)>;
-def : Pat<(MCS51cmp32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                         MCS51PTR:$rhslo, MCS51PTR:$rhshi,
+def : Pat<(MCS51cmp32 MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                         MCS51GPR16:$rhslo, MCS51GPR16:$rhshi,
                          MCS51Imm8:$kind),
-          (CMP32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                 MCS51PTR:$rhslo, MCS51PTR:$rhshi,
+          (CMP32 MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                 MCS51GPR16:$rhslo, MCS51GPR16:$rhshi,
                  MCS51Imm8:$kind)>;
 
 // Start with the compact relative jump. The pre-emit branch relaxation pass
@@ -2532,6 +2573,140 @@ def MOV_DIRECT_RN : Instruction {
   let Inst{7-3} = 0b10001;
   let Inst{2-0} = src;
   let Inst{15-8} = addr;
+}
+
+// Moves involving imaginary registers. They are ordinary direct-addressed
+// moves; the imaginary register operand supplies the direct address, so the
+// allocator sees exactly which byte of DATA RAM is read or written.
+class MCS51ImagMove<dag outs, dag ins, string asm, int size>
+    : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = outs;
+  let InOperandList = ins;
+  let AsmString = asm;
+  let Size = size;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 0;
+}
+def MOV_A_IM : MCS51ImagMove<(outs MCS51AReg:$dst), (ins MCS51Imag8:$src),
+                             "mov a, $src", 2> {
+  bits<1> dst; bits<8> src; bits<16> Inst;
+  let dst = 0;
+  let Inst{7-0} = 0xE5;
+  let Inst{15-8} = src;
+}
+def MOV_IM_A : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51AReg:$src),
+                             "mov $dst, a", 2> {
+  bits<8> dst; bits<1> src; bits<16> Inst;
+  let src = 0;
+  let Inst{7-0} = 0xF5;
+  let Inst{15-8} = dst;
+}
+def MOV_RN_IM : MCS51ImagMove<(outs MCS51GPR8:$dst), (ins MCS51Imag8:$src),
+                              "mov $dst, $src", 2> {
+  bits<3> dst; bits<8> src; bits<16> Inst;
+  let Inst{7-3} = 0b10101;
+  let Inst{2-0} = dst;
+  let Inst{15-8} = src;
+}
+def MOV_IM_RN : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51GPR8:$src),
+                              "mov $dst, $src", 2> {
+  bits<8> dst; bits<3> src; bits<16> Inst;
+  let Inst{7-3} = 0b10001;
+  let Inst{2-0} = src;
+  let Inst{15-8} = dst;
+}
+def MOV_IM_IM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51Imag8:$src),
+                              "mov $dst, $src", 3> {
+  bits<8> dst; bits<8> src; bits<24> Inst;
+  let Inst{7-0} = 0x85;
+  let Inst{15-8} = src;
+  let Inst{23-16} = dst;
+}
+def MOV_IM_DIRECT : MCS51ImagMove<(outs MCS51Imag8:$dst),
+                                  (ins MCS51Direct8:$src),
+                                  "mov $dst, $src", 3> {
+  let hasSideEffects = 1;
+  let mayLoad = 1;
+  bits<8> dst; bits<8> src; bits<24> Inst;
+  let Inst{7-0} = 0x85;
+  let Inst{15-8} = src;
+  let Inst{23-16} = dst;
+}
+def MOV_DIRECT_IM : MCS51ImagMove<(outs), (ins MCS51Direct8:$dst,
+                                               MCS51Imag8:$src),
+                                  "mov $dst, $src", 3> {
+  let hasSideEffects = 1;
+  let mayStore = 1;
+  bits<8> dst; bits<8> src; bits<24> Inst;
+  let Inst{7-0} = 0x85;
+  let Inst{15-8} = src;
+  let Inst{23-16} = dst;
+}
+def MOV_IM_R1_IND : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins), "mov $dst, @r1", 2> {
+  let hasSideEffects = 1;
+  let mayLoad = 1;
+  let Uses = [R1];
+  bits<8> dst; bits<16> Inst;
+  let Inst{7-0} = 0x87;
+  let Inst{15-8} = dst;
+}
+def MOV_R1_IND_IM : MCS51ImagMove<(outs), (ins MCS51Imag8:$src), "mov @r1, $src", 2> {
+  let hasSideEffects = 1;
+  let mayStore = 1;
+  let Uses = [R1];
+  bits<8> src; bits<16> Inst;
+  let Inst{7-0} = 0xA7;
+  let Inst{15-8} = src;
+}
+class MCS51ImagAcc<bits<8> opcode, string mnemonic, list<Register> defs,
+                   list<Register> uses> : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Imag8:$src);
+  let AsmString = mnemonic # " a, $src";
+  let Size = 2;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 0;
+  let mayLoad = 0;
+  let Defs = defs;
+  let Uses = uses;
+  bits<8> src; bits<16> Inst;
+  let Inst{7-0} = opcode;
+  let Inst{15-8} = src;
+}
+def ADD_A_IM  : MCS51ImagAcc<0x25, "add",  [A, C], [A]>;
+def ADDC_A_IM : MCS51ImagAcc<0x35, "addc", [A, C], [A, C]>;
+def SUBB_A_IM : MCS51ImagAcc<0x95, "subb", [A, C], [A, C]>;
+def ANL_A_IM  : MCS51ImagAcc<0x55, "anl",  [A],    [A]>;
+def ORL_A_IM  : MCS51ImagAcc<0x45, "orl",  [A],    [A]>;
+def XRL_A_IM  : MCS51ImagAcc<0x65, "xrl",  [A],    [A]>;
+// Spill transfers that leave A untouched: the register's bank-0 address is the
+// direct operand of MOV direct,@R1 and MOV @R1,direct.
+def MOV_RN_R1_IND : MCS51ImagMove<(outs MCS51GPR8:$dst), (ins), "mov $dst, @r1", 2> {
+  let hasSideEffects = 1;
+  let mayLoad = 1;
+  let Uses = [R1];
+  bits<8> dst; bits<16> Inst;
+  let Inst{7-0} = 0x87;
+  let Inst{15-8} = dst;
+}
+def MOV_R1_IND_RN : MCS51ImagMove<(outs), (ins MCS51GPR8:$src), "mov @r1, $src", 2> {
+  let hasSideEffects = 1;
+  let mayStore = 1;
+  let Uses = [R1];
+  bits<8> src; bits<16> Inst;
+  let Inst{7-0} = 0xA7;
+  let Inst{15-8} = src;
+}
+def MOV_IM_IMM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51Imm8:$imm),
+                               "mov $dst, #$imm", 3> {
+  bits<8> dst; bits<8> imm; bits<24> Inst;
+  let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
+  let Inst{7-0} = 0x75;
+  let Inst{15-8} = dst;
+  let Inst{23-16} = imm;
 }
 
 class MCS51MovIndirectDirect<bits<8> opcode, string indirect> : Instruction {

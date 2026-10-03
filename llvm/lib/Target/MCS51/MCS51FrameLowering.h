@@ -24,6 +24,18 @@ public:
   StackOffset getFrameIndexReference(const MachineFunction &MF, int FI,
                                      Register &FrameReg) const override;
 
+  // The call-frame pseudos must be removed even in functions without stack
+  // objects.
+  bool needsFrameIndexResolution(const MachineFunction &) const override {
+    return true;
+  }
+  bool hasReservedCallFrame(const MachineFunction &MF) const override {
+    return false;
+  }
+  MachineBasicBlock::iterator eliminateCallFramePseudoInstr(
+      MachineFunction &MF, MachineBasicBlock &MBB,
+      MachineBasicBlock::iterator MI) const override;
+
 protected:
   bool hasFPImpl(const MachineFunction &MF) const override;
 };
