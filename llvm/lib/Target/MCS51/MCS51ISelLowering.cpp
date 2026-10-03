@@ -2491,11 +2491,13 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       if (B.IsImm)
         BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IMM))
             .addImm(0xF0)
-            .addImm(B.Imm);
+            .addImm(B.Imm)
+            .addReg(MCS51::B, RegState::ImplicitDefine);
       else
         BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IM))
             .addImm(0xF0)
-            .addReg(B.Reg, RegState{}, B.Sub);
+            .addReg(B.Reg, RegState{}, B.Sub)
+            .addReg(MCS51::B, RegState::ImplicitDefine);
     };
     LoadA(L[0]);
     LoadB(R[0]);

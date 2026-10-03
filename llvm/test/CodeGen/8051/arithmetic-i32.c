@@ -59,26 +59,17 @@ unsigned char less_than_signed_long(long lhs, long rhs) {
 
 // CHECK-LABEL: add_long:
 // CHECK-NOT: subb a,
-// CHECK: add a, r4
-// CHECK: mov r4, a
-// CHECK: mov a, r7
-// CHECK: addc a, r5
-// CHECK: mov r5, a
-// CHECK: mov a, r3
-// CHECK: addc a, r6
-// CHECK: mov r6, a
-// CHECK: addc a, r0
-// CHECK: mov r7, a
+// CHECK: add a, 48
+// CHECK: addc a, 49
+// CHECK: addc a, 50
+// CHECK: addc a, 51
 // CHECK: ret
 // CHECK-LABEL: subtract_long:
-// CHECK: subb a, r2
-// CHECK: mov r4, a
-// CHECK: subb a, r7
-// CHECK: mov r5, a
-// CHECK: subb a, r3
-// CHECK: mov r6, a
-// CHECK: subb a, r0
-// CHECK: mov r7, a
+// CHECK: clr c
+// CHECK: subb a, 52
+// CHECK: subb a, 53
+// CHECK: subb a, 54
+// CHECK: subb a, 55
 // CHECK: ret
 // CHECK-LABEL: multiply_word:
 // CHECK: mul ab
@@ -103,25 +94,22 @@ unsigned char less_than_signed_long(long lhs, long rhs) {
 // CHECK-LABEL: shift_right_word:
 // CHECK: ret
 // CHECK: rrc a
-// CHECK: dec a
-// CHECK: mov r2, a
-// CHECK: jnz
-// CHECK: sjmp
+// CHECK: rrc a
+// CHECK: djnz
+// CHECK: ret
 // CHECK-LABEL: shift_left_word:
 // CHECK: ret
 // CHECK: rlc a
-// CHECK: dec a
-// CHECK: mov r2, a
-// CHECK: jnz
-// CHECK: sjmp
+// CHECK: rlc a
+// CHECK: djnz
+// CHECK: ret
 // CHECK-LABEL: shift_right_signed_word:
 // CHECK: ret
 // CHECK: mov c, 231
 // CHECK: rrc a
-// CHECK: dec a
-// CHECK: mov r2, a
-// CHECK: jnz
-// CHECK: sjmp
+// CHECK: rrc a
+// CHECK: djnz
+// CHECK: ret
 // CHECK-LABEL: less_than_unsigned_long:
 // CHECK: subb a,
 // CHECK: rlc a
