@@ -77,7 +77,7 @@ float call_echo_float(void) { return echo_float(2.5f); }
 // ASM-O2-LABEL: first_double_vararg:
 // ASM-O2-NOT: movx
 // ASM-O2: mov 49, r3
-// ASM-O2: mov 51, r2
+// ASM-O2: mov 51, r3
 // ASM-O2: ret
 // ASM-O2-LABEL: call_first_double_vararg:
 // ASM-O2: push 49
