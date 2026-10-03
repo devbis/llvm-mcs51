@@ -1,7 +1,7 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -c %s -o %t.user.o
+// RUN:   -mllvm -verify-machineinstrs -c %s -o %t.user.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -ffunction-sections -fdata-sections \
+// RUN:   -ffunction-sections -fdata-sections -mllvm -verify-machineinstrs \
 // RUN:   -c %S/../../../lib/Target/MCS51/mcs51-runtime.c \
 // RUN:   -o %t.runtime.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
