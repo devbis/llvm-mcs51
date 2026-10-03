@@ -10,6 +10,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetMachine.h"
 #include <algorithm>
+#include "llvm/ADT/Twine.h"
 
 using namespace llvm;
 

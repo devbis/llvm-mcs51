@@ -860,6 +860,8 @@ public:
 
 #define GET_DAGISEL_BODY MCS51DAGToDAGISel
 #include "MCS51GenDAGISel.inc"
+#include "llvm/ADT/Twine.h"
+#include "llvm/IR/InlineAsm.h"
 
 char MCS51DAGToDAGISelLegacy::ID = 0;
 
