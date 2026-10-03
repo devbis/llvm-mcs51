@@ -169,6 +169,9 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::SHL);
   setTargetDAGCombine(ISD::SRL);
   setTargetDAGCombine(ISD::TRUNCATE);
+  setTargetDAGCombine(ISD::STORE);
+  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::SRL16_8));
+  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::SHL16_8));
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);
@@ -1127,10 +1130,16 @@ SDValue MCS51TargetLowering::LowerCall(
   Chain = DAG.getNode(CallOpcode, DL, CallVTs, Ops);
   InGlue = Chain.getValue(1);
 
-  auto PopStackArguments = [&]() {
-    for (unsigned I = 0; I < CCInfo.getStackSize(); ++I)
-      Chain = DAG.getNode(MCS51ISD::POP_ARG8, DL, MVT::Other, Chain);
-  };
+  // Pop the stack arguments right after the call and glue the pops to it. The
+  // type legalizer drops the chain of pure library calls, which would
+  // otherwise discard the pops and leak the arguments.
+  for (unsigned I = 0; I < CCInfo.getStackSize(); ++I) {
+    SDValue Pop = DAG.getNode(MCS51ISD::POP_ARG8, DL,
+                              DAG.getVTList(MVT::Other, MVT::Glue), Chain,
+                              InGlue);
+    Chain = Pop.getValue(0);
+    InGlue = Pop.getValue(1);
+  }
 
   if (CLI.RetTy && (CLI.RetTy->isIntegerTy(32) ||
                     CLI.RetTy->isIntegerTy(64) ||
@@ -1154,7 +1163,6 @@ SDValue MCS51TargetLowering::LowerCall(
       InGlue = Part.getValue(2);
       InVals.push_back(Part.getValue(0));
     }
-    PopStackArguments();
     return Chain;
   }
 
@@ -1168,7 +1176,6 @@ SDValue MCS51TargetLowering::LowerCall(
     InGlue = Copy.getValue(2);
     InVals.push_back(Copy.getValue(0));
   }
-  PopStackArguments();
   return Chain;
 }
 
@@ -1292,6 +1299,46 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  // Shifting a value assembled from two bytes by eight bits only moves a byte.
+  if ((N->getOpcode() == MCS51ISD::SRL16_8 ||
+       N->getOpcode() == MCS51ISD::SHL16_8) &&
+      N->getOperand(0).getOpcode() == ISD::BUILD_PAIR &&
+      N->getOperand(0).getOperand(0).getValueType() == MVT::i8) {
+    SelectionDAG &DAG = DCI.DAG;
+    SDLoc DL(N);
+    SDValue Pair = N->getOperand(0);
+    if (N->getOpcode() == MCS51ISD::SRL16_8)
+      return DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Pair.getOperand(1));
+    return DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i16,
+                       DAG.getConstant(0, DL, MVT::i8), Pair.getOperand(0));
+  }
+  // Store the halves of a 16-bit value assembled from two bytes directly.
+  // Going through a 16-bit pointer register only copies the bytes into DPTR
+  // and back out again.
+  if (N->getOpcode() == ISD::STORE) {
+    auto *Store = cast<StoreSDNode>(N);
+    SDValue Value = Store->getValue();
+    if (!DCI.isBeforeLegalize() && !Store->isIndexed() &&
+        !Store->isTruncatingStore() && Store->getMemoryVT() == MVT::i16 &&
+        Value.getOpcode() == ISD::BUILD_PAIR &&
+        Value.getOperand(0).getValueType() == MVT::i8 &&
+        (Store->getAddressSpace() == MCS51::Default ||
+         Store->getAddressSpace() == MCS51::XData) &&
+        !containsFrameIndex(Store->getBasePtr())) {
+      SelectionDAG &DAG = DCI.DAG;
+      SDLoc DL(N);
+      SDValue Chain = Store->getChain();
+      SDValue Ptr = Store->getBasePtr();
+      MachineMemOperand::Flags Flags = Store->getMemOperand()->getFlags();
+      SDValue Lo = DAG.getStore(Chain, DL, Value.getOperand(0), Ptr,
+                                Store->getPointerInfo(), Align(1), Flags);
+      SDValue HiPtr = DAG.getMemBasePlusOffset(Ptr, TypeSize::getFixed(1), DL);
+      SDValue Hi = DAG.getStore(Chain, DL, Value.getOperand(1), HiPtr,
+                                Store->getPointerInfo().getWithOffset(1),
+                                Align(1), Flags);
+      return DAG.getNode(ISD::TokenFactor, DL, MVT::Other, Lo, Hi);
+    }
+  }
   if (N->getOpcode() == ISD::SRL && N->getValueType(0) == MVT::i32 &&
       N->hasOneUse() &&
       N->use_begin()->getUser()->getOpcode() == ISD::TRUNCATE &&
@@ -3177,6 +3224,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Src = MI.getOperand(1).getReg();
     Register Amount = MI.getOperand(2).getReg();
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      // The pseudo was the last instruction, so there was nothing to split
+      // off. Give the loop blocks a real tail to branch to.
+      MachineFunction &TailMF = *MBB->getParent();
+      Tail = TailMF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      TailMF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *CheckAmount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *LoadCount = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
@@ -3460,13 +3516,6 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
         .addImm(0xE0)
         .addReg(MCS51::A, RegState::Implicit);
-    MI.eraseFromParent();
-    return MBB;
-  }
-  if (MI.getOpcode() == MCS51::POPARG8) {
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::POP_DIRECT))
-        .addImm(0xF0)
-        .addReg(MCS51::B, RegState::ImplicitDefine);
     MI.eraseFromParent();
     return MBB;
   }
@@ -3963,6 +4012,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (IsSigned) {
       MachineFunction &MF = *MBB->getParent();
       MachineBasicBlock *Tail = MBB->splitAt(MI);
+      if (Tail == MBB) {
+        // The pseudo was the last instruction, so there was nothing to split
+        // off. Give the loop blocks a real tail to branch to.
+        MachineFunction &TailMF = *MBB->getParent();
+        Tail = TailMF.CreateMachineBasicBlock(MBB->getBasicBlock());
+        TailMF.insert(std::next(MBB->getIterator()), Tail);
+        Tail->transferSuccessorsAndUpdatePHIs(MBB);
+        MBB->addSuccessor(Tail);
+      }
       MachineBasicBlock *Decrement =
           MF.CreateMachineBasicBlock(MBB->getBasicBlock());
       MF.insert(Tail->getIterator(), Decrement);
@@ -4077,6 +4135,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Src = MI.getOperand(1).getReg();
     Register Amount = MI.getOperand(2).getReg();
     MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      // The pseudo was the last instruction, so there was nothing to split
+      // off. Give the loop blocks a real tail to branch to.
+      MachineFunction &TailMF = *MBB->getParent();
+      Tail = TailMF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      TailMF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
     MachineBasicBlock *CheckLow = IsNarrowCount
                                       ? nullptr
                                       : MF.CreateMachineBasicBlock(

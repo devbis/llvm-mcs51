@@ -278,10 +278,14 @@ public:
       return;
     }
     if (N->getOpcode() == MCS51ISD::POP_ARG8) {
-      SDValue Ops[] = {N->getOperand(0)};
-      SDNode *Res = CurDAG->getMachineNode(MCS51::POPARG8, DL,
+      SmallVector<SDValue, 3> Ops;
+      Ops.push_back(CurDAG->getTargetConstant(0x81, DL, MVT::i32));
+      for (const SDValue &Operand : N->ops())
+        Ops.push_back(Operand);
+      SDNode *Res = CurDAG->getMachineNode(MCS51::POP_ARG_SP, DL,
                                            N->getVTList(), Ops);
       ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
       CurDAG->RemoveDeadNode(N);
       return;
     }
