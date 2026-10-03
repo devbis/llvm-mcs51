@@ -282,6 +282,15 @@ static void emitDptrAddress(MachineBasicBlock &MBB,
     return;
   }
   auto Half = [&](unsigned Dest, unsigned Sub, bool Carry, uint8_t K) {
+    if (Carry && K == 0) {
+      // Only the carry out of the low byte: 0 + byte + C.
+      BuildMI(MBB, At, DL, TII.get(MCS51::CLR_A));
+      BuildMI(MBB, At, DL, TII.get(MCS51::ADDC_A_IM))
+          .addReg(Base, RegState{}, Sub);
+      return BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), Dest)
+          .addReg(MCS51::A)
+          .getInstr();
+    }
     BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::A)
         .addReg(Base, RegState{}, Sub);
     BuildMI(MBB, At, DL,
@@ -2941,6 +2950,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       }
       if (IsSub && First)
         BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+      if (IsAdd && High && HasImm && K == 0 && (Imm & 0xff) != 0) {
+        // Only the carry into the high byte: 0 + byte + C, which is one byte
+        // shorter than loading the byte and adding zero.
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::ADDC_A_IM))
+            .addReg(LHS, RegState{}, Sub);
+        return saveAToImag(*MBB, MII, DL, TII, MRI);
+      }
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
           .addReg(LHS, RegState{}, Sub);
       unsigned ImOpcode, ImmOpcode;
