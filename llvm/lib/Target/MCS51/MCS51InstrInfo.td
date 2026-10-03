@@ -494,6 +494,32 @@ def XRL_A_R0_IND : MCS51Inst<0x66, "xrl a, @r0"> {
 def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1"> {
   let Defs = [A]; let Uses = [A, R1]; let mayLoad = 1;
 }
+// Prologue/epilogue calls of the shared callee-saved register save and restore
+// routines in the runtime (__mcs51_save_{r,im}N and __mcs51_restore_{r,im}N).
+// The helpers pop their return address into DPTR, push or pop the registers,
+// then jump back, so they preserve A and the return-value registers. The
+// AsmPrinter turns a restore that is directly followed by RET into an LJMP.
+// $kind is 0 for R2.. and 1 for IM8..; $n is the number of registers.
+let Defs = [A, DPTR, SP], Uses = [SP], Size = 3 in
+def CSR_SAVE : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i8imm:$kind, i8imm:$n);
+  let AsmString = "";
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+}
+let Defs = [DPTR, SP], Uses = [SP], Size = 3 in
+def CSR_RESTORE : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i8imm:$kind, i8imm:$n);
+  let AsmString = "";
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+}
 def RET  : MCS51Inst<0x22, "ret"> {
   let isReturn = 1;
   let isTerminator = 1;
