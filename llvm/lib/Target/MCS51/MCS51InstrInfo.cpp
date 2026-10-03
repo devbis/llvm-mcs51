@@ -292,6 +292,18 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     const DebugLoc &DL = MI.getDebugLoc();
     Register Dst = MI.getOperand(0).getReg();
     const MachineOperand &Src = MI.getOperand(1);
+    if (Src.isGlobal() && !isa<Function>(Src.getGlobal()) &&
+        Dst != MCS51::DPTR) {
+      // The bytes of a variable's address are loaded directly into the pair.
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_SYMLO),
+              RI.getSubReg(Dst, MCS51::sub_lo))
+          .addGlobalAddress(Src.getGlobal(), Src.getOffset());
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_SYMHI),
+              RI.getSubReg(Dst, MCS51::sub_hi))
+          .addGlobalAddress(Src.getGlobal(), Src.getOffset());
+      MI.eraseFromParent();
+      return true;
+    }
     if (!Src.isImm()) {
       // A symbol address needs the 16-bit relocation that only MOV DPTR has.
       MachineInstrBuilder Load =

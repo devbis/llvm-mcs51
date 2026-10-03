@@ -2796,6 +2796,27 @@ def POP_IM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins), "pop $dst", 2> {
   let Inst{7-0} = 0xD0;
   let Inst{15-8} = dst;
 }
+// A byte of a symbol's address, resolved by the linker.
+def MCS51SymLo8 : Operand<i8> { let EncoderMethod = "getSymLo8OpValue"; }
+def MCS51SymHi8 : Operand<i8> { let EncoderMethod = "getSymHi8OpValue"; }
+def MOV_IM_SYMLO : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51SymLo8:$sym),
+                                 "mov $dst, #lo8($sym)", 3> {
+  bits<8> dst; bits<8> sym; bits<24> Inst;
+  let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
+  let Inst{7-0} = 0x75;
+  let Inst{15-8} = dst;
+  let Inst{23-16} = sym;
+}
+def MOV_IM_SYMHI : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51SymHi8:$sym),
+                                 "mov $dst, #hi8($sym)", 3> {
+  bits<8> dst; bits<8> sym; bits<24> Inst;
+  let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
+  let Inst{7-0} = 0x75;
+  let Inst{15-8} = dst;
+  let Inst{23-16} = sym;
+}
 def MOV_IM_IMM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51Imm8:$imm),
                                "mov $dst, #$imm", 3> {
   bits<8> dst; bits<8> imm; bits<24> Inst;

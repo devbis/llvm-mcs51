@@ -50,6 +50,10 @@ public:
       return {"fixup_pcrel8", 0, 8, 0};
     if (Kind == MCS51::fixup_11)
       return {"fixup_11", 0, 11, 0};
+    if (Kind == MCS51::fixup_lo8)
+      return {"fixup_lo8", 0, 8, 0};
+    if (Kind == MCS51::fixup_hi8)
+      return {"fixup_hi8", 0, 8, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 
@@ -74,6 +78,10 @@ public:
     if (mc::isRelocation(Fixup.getKind()))
       return;
 
+    if (Fixup.getKind() == MCS51::fixup_hi8) {
+      Data[0] |= static_cast<uint8_t>(Value >> 8);
+      return;
+    }
     if (Fixup.getKind() == MCS51::fixup_16_be ||
         Fixup.getKind() == MCS51::fixup_dptr16) {
       Data[0] |= static_cast<uint8_t>(Value >> 8);
