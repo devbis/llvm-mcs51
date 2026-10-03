@@ -26,6 +26,10 @@ public:
   preferredShiftLegalizationStrategy(SelectionDAG &DAG, SDNode *N,
                                      unsigned ExpansionFactor) const override;
 
+  // A symbol plus a constant is a single relocated address.
+  bool isOffsetFoldingLegal(const GlobalAddressSDNode *) const override {
+    return true;
+  }
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
   SDValue PerformDAGCombine(SDNode *N, DAGCombinerInfo &DCI) const override;
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,

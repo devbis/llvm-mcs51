@@ -2148,6 +2148,109 @@ static cl::opt<bool> CheckDptrReads("mcs51-check-dptr-reads", cl::Hidden,
 // Blocks that custom inserters create inside a call sequence start with no
 // recorded call frame size, but PEI needs it to resolve frame indices by the
 // number of argument bytes already pushed. Recompute it for every block.
+// Several stores of the same constant into direct or register bytes are
+// shorter through A: one load of A and 2-byte (or 1-byte) stores replace the
+// 3-byte (or 2-byte) immediate moves. Applies where A is dead.
+class MCS51ConstantByteGrouping final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51ConstantByteGrouping() : MachineFunctionPass(ID) {}
+
+  static bool isCandidate(const MachineInstr &MI) {
+    return (MI.getOpcode() == MCS51::MOV_IM_IMM ||
+            MI.getOpcode() == MCS51::MOV_RN_IMM) &&
+           MI.getOperand(1).isImm();
+  }
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    const auto &TII =
+        *static_cast<const MCS51InstrInfo *>(MF.getSubtarget().getInstrInfo());
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    bool Changed = false;
+    for (MachineBasicBlock &MBB : MF) {
+      for (auto I = MBB.begin(); I != MBB.end(); ++I) {
+        if (!isCandidate(*I))
+          continue;
+        int64_t Value = I->getOperand(1).getImm();
+        // Gather the stores of Value up to the first instruction touching A,
+        // which must overwrite A (or the block must end with A dead).
+        SmallVector<MachineInstr *, 8> Group;
+        bool ADead = false;
+        auto J = I;
+        for (; J != MBB.end(); ++J) {
+          if (J->isDebugInstr())
+            continue;
+          if (isCandidate(*J)) {
+            if (J->getOperand(1).getImm() == Value)
+              Group.push_back(&*J);
+            continue;
+          }
+          if (J->isInlineAsm() || J->readsRegister(MCS51::A, TRI) ||
+              J->isCall() || J->getNumExplicitOperands() > 0 &&
+                                 llvm::any_of(J->explicit_operands(),
+                                              [](const MachineOperand &MO) {
+                                                return MO.isImm() &&
+                                                       MO.getImm() == 0xe0;
+                                              })) {
+            ADead = J->isCall() && !J->readsRegister(MCS51::A, TRI) &&
+                    J->definesRegister(MCS51::A, TRI);
+            break;
+          }
+          if (J->modifiesRegister(MCS51::A, TRI)) {
+            ADead = true;
+            break;
+          }
+        }
+        if (J == MBB.end()) {
+          ADead = true;
+          for (MachineBasicBlock *Succ : MBB.successors())
+            ADead &= !Succ->isLiveIn(MCS51::A);
+        }
+        unsigned Needed = Value == 0 ? 2 : 3;
+        if (!ADead || Group.size() < Needed) {
+          continue;
+        }
+        const DebugLoc &DL = I->getDebugLoc();
+        if (Value == 0)
+          BuildMI(MBB, *Group.front(), DL, TII.get(MCS51::CLR_A));
+        else
+          BuildMI(MBB, *Group.front(), DL, TII.get(MCS51::MOV_A_IMM),
+                  MCS51::A)
+              .addImm(Value);
+        for (MachineInstr *MI : Group) {
+          Register Dst = MI->getOperand(0).getReg();
+          if (MI->getOpcode() == MCS51::MOV_IM_IMM)
+            BuildMI(MBB, *MI, MI->getDebugLoc(), TII.get(MCS51::MOV_IM_A),
+                    Dst)
+                .addReg(MCS51::A);
+          else
+            BuildMI(MBB, *MI, MI->getDebugLoc(), TII.get(MCS51::MOV_RN_A),
+                    Dst);
+          MI->eraseFromParent();
+        }
+        Changed = true;
+        // Continue after the group; the next candidate search starts at I,
+        // which was erased, so restart from the block's current position.
+        I = MBB.begin();
+        for (auto K = MBB.begin(); K != MBB.end(); ++K) {
+          I = K;
+          if (&*K == &*J)
+            break;
+        }
+        if (J == MBB.end())
+          break;
+        I = J;
+      }
+    }
+    return Changed;
+  }
+
+  StringRef getPassName() const override {
+    return "MCS-51 constant byte grouping";
+  }
+};
+char MCS51ConstantByteGrouping::ID = 0;
+
 class MCS51CallFramePropagation final : public MachineFunctionPass {
 public:
   static char ID;
@@ -2395,6 +2498,7 @@ public:
 
   void addPreEmitPass() override {
     addPass(new MCS51PostRAPeephole());
+    addPass(new MCS51ConstantByteGrouping());
     addPass(&BranchRelaxationPassID);
     addPass(new MCS51BranchIslandSharing());
   }
