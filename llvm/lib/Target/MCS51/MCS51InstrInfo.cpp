@@ -35,24 +35,44 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     return Pair == MCS51::R2R3 ? MCS51::R3
                                : Pair == MCS51::R4R5 ? MCS51::R5 : MCS51::R7;
   };
+  // Byte copies to and from one half of DPTR.
+  auto IsHalf = [](Register Reg) {
+    return Reg == MCS51::DPL || Reg == MCS51::DPH;
+  };
+  if (IsHalf(SrcReg) && MCS51::MCS51GPR8RegClass.contains(DestReg)) {
+    BuildMI(MBB, MI, DL,
+            get(SrcReg == MCS51::DPL ? MCS51::MOV_RN_DPL : MCS51::MOV_RN_DPH),
+            DestReg);
+    return;
+  }
+  if (IsHalf(SrcReg) && DestReg == MCS51::A) {
+    BuildMI(MBB, MI, DL,
+            get(SrcReg == MCS51::DPL ? MCS51::MOV_A_DPL : MCS51::MOV_A_DPH),
+            MCS51::A)
+        .addReg(MCS51::DPTR);
+    return;
+  }
+  if (IsHalf(DestReg) && MCS51::MCS51GPR8RegClass.contains(SrcReg)) {
+    BuildMI(MBB, MI, DL,
+            get(DestReg == MCS51::DPL ? MCS51::MOV_DPL_RN : MCS51::MOV_DPH_RN))
+        .addReg(SrcReg, getKillRegState(KillSrc));
+    return;
+  }
+  if (IsHalf(DestReg) && SrcReg == MCS51::A) {
+    BuildMI(MBB, MI, DL,
+            get(DestReg == MCS51::DPL ? MCS51::MOV_DPL_A : MCS51::MOV_DPH_A));
+    return;
+  }
   if (DestReg == MCS51::DPTR && IsPair(SrcReg)) {
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_RN))
-        .addImm(0x82)
-        .addReg(Lo(SrcReg), getKillRegState(KillSrc))
-        .addReg(MCS51::DPTR, RegState::ImplicitDefine);
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_RN))
-        .addImm(0x83)
-        .addReg(Hi(SrcReg), getKillRegState(KillSrc))
-        .addReg(MCS51::DPTR, RegState::ImplicitDefine);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_DPL_RN))
+        .addReg(Lo(SrcReg), getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_DPH_RN))
+        .addReg(Hi(SrcReg), getKillRegState(KillSrc));
     return;
   }
   if (IsPair(DestReg) && SrcReg == MCS51::DPTR) {
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DIRECT), Lo(DestReg))
-        .addImm(0x82)
-        .addReg(MCS51::DPTR, RegState::Implicit);
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DIRECT), Hi(DestReg))
-        .addImm(0x83)
-        .addReg(MCS51::DPTR, RegState::Implicit);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DPL), Lo(DestReg));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DPH), Hi(DestReg));
     return;
   }
   if (IsPair(DestReg) && IsPair(SrcReg)) {
@@ -128,10 +148,13 @@ void MCS51InstrInfo::storeRegToStackSlot(
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
   bool IsIndirectByte = RC == &MCS51::MCS51Indirect8RegClass;
   bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
-  bool IsWord = RC == &MCS51::MCS51PTRRegClass ||
-                RC == &MCS51::MCS51GPR16RegClass;
+  // The allocator also asks for subclasses of the word class when a
+  // subregister restricts the possible pairs.
+  bool IsWord = MCS51::MCS51GPR16RegClass.hasSubClassEq(RC) ||
+                MCS51::MCS51PTRRegClass.hasSubClassEq(RC);
   if (!IsByte && !IsIndirectByte && !IsAccumulator && !IsWord)
-    llvm_unreachable("unsupported MCS-51 spill register class");
+    report_fatal_error(Twine("unsupported MCS-51 spill register class ") +
+                       RI.getRegClassName(RC));
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineMemOperand *MMO = MF.getMachineMemOperand(
@@ -157,10 +180,13 @@ void MCS51InstrInfo::loadRegFromStackSlot(
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
   bool IsIndirectByte = RC == &MCS51::MCS51Indirect8RegClass;
   bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
-  bool IsWord = RC == &MCS51::MCS51PTRRegClass ||
-                RC == &MCS51::MCS51GPR16RegClass;
+  // The allocator also asks for subclasses of the word class when a
+  // subregister restricts the possible pairs.
+  bool IsWord = MCS51::MCS51GPR16RegClass.hasSubClassEq(RC) ||
+                MCS51::MCS51PTRRegClass.hasSubClassEq(RC);
   if ((!IsByte && !IsIndirectByte && !IsAccumulator && !IsWord) || SubReg)
-    llvm_unreachable("unsupported MCS-51 reload register class");
+    report_fatal_error(Twine("unsupported MCS-51 reload register class ") +
+                       RI.getRegClassName(RC));
   MachineFunction &MF = *MBB.getParent();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   MachineMemOperand *MMO = MF.getMachineMemOperand(

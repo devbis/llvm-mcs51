@@ -29,6 +29,29 @@ static bool isWordImmediate(const MachineInstr &MI) {
          MI.getOperand(1).isImm();
 }
 
+// One byte of a 16-bit value. This is a plain subregister copy, so a value
+// held in a register pair never has to visit DPTR to be split.
+static Register extractWordByte(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator I,
+                                const DebugLoc &DL, const TargetInstrInfo &TII,
+                                MachineRegisterInfo &MRI, Register Word,
+                                bool High) {
+  Register Byte = MRI.createVirtualRegister(&MCS51::MCS51GPR8RegClass);
+  BuildMI(MBB, I, DL, TII.get(TargetOpcode::COPY), Byte)
+      .addReg(Word, {}, High ? MCS51::sub_hi : MCS51::sub_lo);
+  return Byte;
+}
+
+static void buildWord(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
+                      const DebugLoc &DL, const TargetInstrInfo &TII,
+                      Register Dst, Register Lo, Register Hi) {
+  BuildMI(MBB, I, DL, TII.get(TargetOpcode::REG_SEQUENCE), Dst)
+      .addReg(Lo)
+      .addImm(MCS51::sub_lo)
+      .addReg(Hi)
+      .addImm(MCS51::sub_hi);
+}
+
 static bool containsFrameIndex(SDValue V) {
   SmallVector<SDValue, 8> Worklist(1, V);
   while (!Worklist.empty()) {
@@ -2348,50 +2371,23 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                            MI.getOperand(InputBase + 2).getReg(),
                            MI.getOperand(InputBase + 3).getReg()};
 
-    // i16 values are allocated in DPTR. Capture each source word immediately
-    // after its definition, before a later load or rematerialized constant
-    // overwrites DPTR. The byte temporaries can then remain live in the
-    // register bank or spill normally while the arithmetic uses DPTR.
     Register InputBytes[4][2] = {};
-    MachineInstr *InputDefs[4] = {};
     bool RHSIsImmediate[2] = {false, false};
     uint16_t RHSImmediate[2] = {0, 0};
-    bool CanCaptureInputs = true;
-    for (unsigned I = 0; I != 4; ++I) {
+    for (unsigned I = 2; I != 4; ++I) {
       MachineInstr *Def = MRI.getVRegDef(Operands[I]);
-      if (!Def || Def->getParent() != MBB || Def->isPHI()) {
-        CanCaptureInputs = false;
-        break;
-      }
-      InputDefs[I] = Def;
-      if (I >= 2 && isWordImmediate(*Def) &&
-          Def->getOperand(1).isImm()) {
+      if (Def && isWordImmediate(*Def)) {
         RHSIsImmediate[I - 2] = true;
         RHSImmediate[I - 2] =
             static_cast<uint16_t>(Def->getOperand(1).getImm());
       }
     }
-
-    if (CanCaptureInputs) {
-      for (unsigned I = 0; I != 4; ++I) {
-        if (I >= 2 && RHSIsImmediate[I - 2])
-          continue;
-        MachineInstr *Def = InputDefs[I];
-        MachineBasicBlock::iterator InsertPt = std::next(Def->getIterator());
-        BuildMI(*MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-            .addReg(Operands[I]);
-        for (unsigned Byte = 0; Byte != 2; ++Byte) {
-          Register Value = MRI.createVirtualRegister(
-              &MCS51::MCS51GPR8RegClass);
-          BuildMI(*MBB, InsertPt, DL,
-                  TII.get(Byte == 0 ? MCS51::MOV_A_DPL : MCS51::MOV_A_DPH),
-                  MCS51::A)
-              .addReg(MCS51::DPTR);
-          BuildMI(*MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Value)
-              .addReg(MCS51::A);
-          InputBytes[I][Byte] = Value;
-        }
-      }
+    for (unsigned I = 0; I != 4; ++I) {
+      if (I >= 2 && RHSIsImmediate[I - 2])
+        continue;
+      for (unsigned Byte = 0; Byte != 2; ++Byte)
+        InputBytes[I][Byte] =
+            extractWordByte(*MBB, MII, DL, TII, MRI, Operands[I], Byte != 0);
     }
 
     Register Sum[4];
@@ -2400,78 +2396,38 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                             : MF.getRegInfo().createVirtualRegister(
                                   &MCS51::MCS51GPR8RegClass);
 
-    if (CanCaptureInputs) {
-      for (unsigned I = 0; I != 4; ++I) {
-        unsigned Word = I < 2 ? 0 : 1;
-        unsigned Byte = I & 1;
-        Register LHS = InputBytes[Word][Byte];
-        unsigned RHSWord = I < 2 ? 0 : 1;
-        Register RHS = InputBytes[2 + RHSWord][Byte];
-        if (RHSIsImmediate[RHSWord]) {
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
-          if (!IsAdd && I == 0)
-            BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-          uint8_t Imm = (RHSImmediate[RHSWord] >> (Byte * 8)) & 0xff;
-          unsigned Opcode = IsAdd
-                               ? (I == 0 ? MCS51::ADD_A_IMM
-                                         : MCS51::ADDC_A_IMM)
-                               : MCS51::SUBB_A_IMM;
-          BuildMI(*MBB, MII, DL, TII.get(Opcode), MCS51::A).addImm(Imm);
-        } else {
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
-              .addReg(LHS);
-          if (!IsAdd && I == 0)
-            BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-          unsigned Opcode = IsAdd
-                               ? (I == 0 ? MCS51::ADD_A_RN
-                                         : MCS51::ADDC_A_RN)
-                               : MCS51::SUBB_A_RN;
-          BuildMI(*MBB, MII, DL, TII.get(Opcode)).addReg(RHS);
-        }
-        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Sum[I])
-            .addReg(MCS51::A);
-      }
-    } else {
-      auto CopyDPTR = [&](Register Src) {
-        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-            .addReg(Src);
-      };
-      for (unsigned I = 0; I != 4; ++I) {
-        Register LHS = Operands[I < 2 ? 0 : 1];
-        Register RHS = Operands[I < 2 ? 2 : 3];
-        Register Work = MF.getRegInfo().createVirtualRegister(
-            &MCS51::MCS51GPR8RegClass);
-        unsigned Direct = (I & 1) ? 0x83 : 0x82;
-        CopyDPTR(LHS);
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-            .addImm(Direct);
-        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Work)
-            .addReg(MCS51::A);
-        CopyDPTR(RHS);
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Work);
+    for (unsigned I = 0; I != 4; ++I) {
+      unsigned Word = I < 2 ? 0 : 1;
+      unsigned Byte = I & 1;
+      Register LHS = InputBytes[Word][Byte];
+      unsigned RHSWord = I < 2 ? 0 : 1;
+      Register RHS = InputBytes[2 + RHSWord][Byte];
+      if (RHSIsImmediate[RHSWord]) {
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
         if (!IsAdd && I == 0)
           BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-        unsigned ArithmeticOpcode =
-            IsAdd ? (I == 0 ? MCS51::ADD_A_DIRECT : MCS51::ADDC_A_DIRECT)
-                  : MCS51::SUBB_A_DIRECT;
-        BuildMI(*MBB, MII, DL, TII.get(ArithmeticOpcode), MCS51::A)
-            .addImm(Direct);
-        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Sum[I])
-            .addReg(MCS51::A);
+        uint8_t Imm = (RHSImmediate[RHSWord] >> (Byte * 8)) & 0xff;
+        unsigned Opcode = IsAdd
+                             ? (I == 0 ? MCS51::ADD_A_IMM
+                                       : MCS51::ADDC_A_IMM)
+                             : MCS51::SUBB_A_IMM;
+        BuildMI(*MBB, MII, DL, TII.get(Opcode), MCS51::A).addImm(Imm);
+      } else {
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+        if (!IsAdd && I == 0)
+          BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
+        unsigned Opcode = IsAdd
+                             ? (I == 0 ? MCS51::ADD_A_RN : MCS51::ADDC_A_RN)
+                             : MCS51::SUBB_A_RN;
+        BuildMI(*MBB, MII, DL, TII.get(Opcode)).addReg(RHS);
       }
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Sum[I])
+          .addReg(MCS51::A);
     }
 
-    auto WriteWord = [&](Register Dst, Register Lo, Register Hi) {
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Lo);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Hi);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-          .addReg(MCS51::DPTR);
-    };
     if (!IsByteResult) {
-      WriteWord(DstLo, Sum[0], Sum[1]);
-      WriteWord(DstHi, Sum[2], Sum[3]);
+      buildWord(*MBB, MII, DL, TII, DstLo, Sum[0], Sum[1]);
+      buildWord(*MBB, MII, DL, TII, DstHi, Sum[2], Sum[3]);
     }
     MI.eraseFromParent();
     return MBB;
@@ -3443,17 +3399,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::BUILDPAIR16) {
-    Register Dst = MI.getOperand(0).getReg();
-    Register Lo = MI.getOperand(1).getReg();
-    Register Hi = MI.getOperand(2).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
-        .addReg(Lo);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
-        .addReg(Hi);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x83);
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-        .addReg(MCS51::DPTR);
+    buildWord(*MBB, MII, DL, TII, MI.getOperand(0).getReg(),
+              MI.getOperand(1).getReg(), MI.getOperand(2).getReg());
     MI.eraseFromParent();
     return MBB;
   }
@@ -4109,13 +4056,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::TRUNC16TO8) {
+    Register Dst = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .addReg(Src);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-        .addReg(MCS51::A);
+        .addReg(Src, {}, MCS51::sub_lo);
     MI.eraseFromParent();
     return MBB;
   }
