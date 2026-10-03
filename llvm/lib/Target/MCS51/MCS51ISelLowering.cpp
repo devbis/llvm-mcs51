@@ -23,6 +23,12 @@ using namespace llvm;
 #define GET_CALLING_CONV_IMPL
 #include "MCS51GenCallingConv.inc"
 
+static bool isWordImmediate(const MachineInstr &MI) {
+  return (MI.getOpcode() == MCS51::MOV_DPTR_IMM ||
+          MI.getOpcode() == MCS51::LDI16) &&
+         MI.getOperand(1).isImm();
+}
+
 static bool containsFrameIndex(SDValue V) {
   SmallVector<SDValue, 8> Worklist(1, V);
   while (!Worklist.empty()) {
@@ -149,7 +155,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
                                          const MCS51Subtarget &STI)
     : TargetLowering(TM, STI), STI(STI) {
   addRegisterClass(MVT::i8, &MCS51::MCS51GPR8RegClass);
-  addRegisterClass(MVT::i16, &MCS51::MCS51PTRRegClass);
+  addRegisterClass(MVT::i16, &MCS51::MCS51GPR16RegClass);
   setOperationAction(ISD::UDIV, MVT::i8, Legal);
   setOperationAction(ISD::UREM, MVT::i8, Legal);
   setOperationAction(ISD::UDIV, MVT::i16, LibCall);
@@ -1789,9 +1795,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register TrueValue = MI.getOperand(2).getReg();
     Register FalseValue = MI.getOperand(3).getReg();
     Register TrueCopy = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51PTRRegClass);
+        &MCS51::MCS51GPR16RegClass);
     Register FalseCopy = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51PTRRegClass);
+        &MCS51::MCS51GPR16RegClass);
     MachineBasicBlock *Tail = MBB->splitAt(MI);
     if (Tail == MBB) {
       Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
@@ -2358,7 +2364,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         break;
       }
       InputDefs[I] = Def;
-      if (I >= 2 && Def->getOpcode() == MCS51::MOV_DPTR_IMM &&
+      if (I >= 2 && isWordImmediate(*Def) &&
           Def->getOperand(1).isImm()) {
         RHSIsImmediate[I - 2] = true;
         RHSImmediate[I - 2] =
@@ -2371,15 +2377,16 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         if (I >= 2 && RHSIsImmediate[I - 2])
           continue;
         MachineInstr *Def = InputDefs[I];
+        MachineBasicBlock::iterator InsertPt = std::next(Def->getIterator());
+        BuildMI(*MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+            .addReg(Operands[I]);
         for (unsigned Byte = 0; Byte != 2; ++Byte) {
           Register Value = MRI.createVirtualRegister(
               &MCS51::MCS51GPR8RegClass);
-          MachineBasicBlock::iterator InsertPt =
-              std::next(Def->getIterator());
           BuildMI(*MBB, InsertPt, DL,
                   TII.get(Byte == 0 ? MCS51::MOV_A_DPL : MCS51::MOV_A_DPH),
                   MCS51::A)
-              .addReg(Operands[I]);
+              .addReg(MCS51::DPTR);
           BuildMI(*MBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Value)
               .addReg(MCS51::A);
           InputBytes[I][Byte] = Value;
@@ -2678,7 +2685,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (CompareKind == 2) {
       MachineInstr *RHSDef = MF.getRegInfo().getVRegDef(RHS);
       bool RHSIsImmediate = RHSDef &&
-                            RHSDef->getOpcode() == MCS51::MOV_DPTR_IMM &&
+                            isWordImmediate(*RHSDef) &&
                             RHSDef->getOperand(1).isImm();
       uint16_t RHSImmediate = RHSIsImmediate
                                   ? static_cast<uint16_t>(
@@ -2907,14 +2914,17 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         CanCapture = false;
         break;
       }
-      if (I >= 2 && Defs[I]->getOpcode() == MCS51::MOV_DPTR_IMM &&
+      if (I >= 2 && isWordImmediate(*Defs[I]) &&
           Defs[I]->getOperand(1).isImm()) {
         RHSIsImmediate[I - 2] = true;
         RHSImmediate[I - 2] =
             static_cast<uint16_t>(Defs[I]->getOperand(1).getImm());
       }
     }
-    bool RHSLoInDPTR = CanCapture && Defs[2]->getParent() == MBB;
+    // The low RHS byte was left in DPTR instead of being captured. With the
+    // value free to live in a register pair that assumption no longer holds,
+    // and only some comparison paths know how to read it back.
+    bool RHSLoInDPTR = false;
     if (RHSLoInDPTR) {
       for (auto I = std::next(Defs[2]->getIterator()); I != MII; ++I) {
         if (I->modifiesRegister(MCS51::DPTR, TRI)) {
@@ -2939,12 +2949,15 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         MachineBasicBlock::iterator InsertPt =
             std::next(Defs[I]->getIterator());
         std::array<Register, 2> CapturedBytes;
+        BuildMI(*DefMBB, InsertPt, DL, TII.get(TargetOpcode::COPY),
+                MCS51::DPTR)
+            .addReg(Operands[I]);
         for (unsigned Byte = 0; Byte != 2; ++Byte) {
           Register Value = MRI.createVirtualRegister(&MCS51::MCS51GPR8RegClass);
           BuildMI(*DefMBB, InsertPt, DL,
                   TII.get(Byte == 0 ? MCS51::MOV_A_DPL : MCS51::MOV_A_DPH),
                   MCS51::A)
-              .addReg(Operands[I]);
+              .addReg(MCS51::DPTR);
           BuildMI(*DefMBB, InsertPt, DL, TII.get(TargetOpcode::COPY), Value)
               .addReg(MCS51::A);
           Bytes[I][Byte] = Value;
@@ -3066,11 +3079,11 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     auto CompareByte = [&](unsigned LHS, unsigned RHS, unsigned Byte,
                            bool ClearCarry, bool BiasSign) {
       if (!CanCapture) {
-        CopyDPTR(RHS);
+        CopyDPTR(Operands[RHS]);
         BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
             .addImm(Byte == 0 ? 0x82 : 0x83);
         BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
-        CopyDPTR(LHS);
+        CopyDPTR(Operands[LHS]);
         if (ClearCarry)
           BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
         BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
@@ -3096,11 +3109,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         return;
       }
       if (BiasSign || (RHSLoInDPTR && RHS == 2)) {
-        if (RHSLoInDPTR && RHS == 2)
+        if (RHSLoInDPTR && RHS == 2) {
+          BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+              .addReg(Operands[RHS]);
           BuildMI(*MBB, MII, DL,
                   TII.get(Byte == 0 ? MCS51::MOV_A_DPL : MCS51::MOV_A_DPH),
                   MCS51::A)
-              .addReg(Operands[RHS]);
+              .addReg(MCS51::DPTR);
+        }
         else
           BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
               .addReg(Bytes[RHS][Byte]);
@@ -3515,6 +3531,17 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::PUSH_DIRECT))
         .addImm(0xE0)
         .addReg(MCS51::A, RegState::Implicit);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::SUB16DEC) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .addReg(Src);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::DEC_DPTR16));
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(MCS51::DPTR);
     MI.eraseFromParent();
     return MBB;
   }
@@ -4083,9 +4110,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::TRUNC16TO8) {
     Register Src = MI.getOperand(1).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+        .addReg(Src);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0x82)
-        .addReg(Src, RegState::Implicit);
+        .addImm(0x82);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
     MI.eraseFromParent();

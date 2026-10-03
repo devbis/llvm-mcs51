@@ -16,8 +16,14 @@ MCS51FrameLowering::MCS51FrameLowering()
     : TargetFrameLowering(StackGrowsUp, Align(1), 1) {}
 
 bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
-    MachineFunction &, const TargetRegisterInfo *,
+    MachineFunction &MF, const TargetRegisterInfo *,
     std::vector<CalleeSavedInfo> &) const {
+  // Frame objects are plain bytes on the 8-bit stack. Source alignments of 2
+  // for 16-bit objects would only add padding to the 255-byte stack window.
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  for (int I = 0, E = MFI.getObjectIndexEnd(); I < E; ++I)
+    if (!MFI.isDeadObjectIndex(I))
+      MFI.setObjectAlignment(I, Align(1));
   // Callee-saved R registers are pushed directly; they do not need frame slots.
   return true;
 }
@@ -130,6 +136,9 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
     case MCS51::R5: SaveR[5] = true; break;
     case MCS51::R6: SaveR[6] = true; break;
     case MCS51::R7: SaveR[7] = true; break;
+    case MCS51::R2R3: SaveR[2] = SaveR[3] = true; break;
+    case MCS51::R4R5: SaveR[4] = SaveR[5] = true; break;
+    case MCS51::R6R7: SaveR[6] = SaveR[7] = true; break;
     default: break;
     }
   };
@@ -199,7 +208,12 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
   if (StackSize + MF.getFrameInfo().getCalleeSavedInfo().size() > 255)
-    report_fatal_error("MCS-51 stack frame exceeds 255-byte stack address space");
+    report_fatal_error(Twine("MCS-51 stack frame exceeds 255-byte stack address "
+                             "space in '") +
+                       MF.getName() + "': " + Twine(StackSize) +
+                       " bytes of locals and " +
+                       Twine(MF.getFrameInfo().getCalleeSavedInfo().size()) +
+                       " saved registers");
   bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
   MachineBasicBlock::iterator I = MBB.begin();
   while (I != MBB.end() &&

@@ -26,6 +26,7 @@
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Transforms/Scalar.h"
@@ -799,6 +800,7 @@ public:
   MCS51RedundantSpillCopyElimination() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     bool Changed = false;
     for (MachineBasicBlock &MBB : MF) {
       for (auto I = MBB.begin(); I != MBB.end();) {
@@ -812,10 +814,34 @@ public:
                 Store->getOperand(0).getIndex() ||
             Load->getOperand(2).getImm() != Store->getOperand(1).getImm())
           continue;
+        // The store writes back the value that was just loaded, so it is
+        // always redundant. The load itself is only dead when nothing reads
+        // the register afterwards.
+        Register Reg = Load->getOperand(0).getReg();
+        bool UsedAfter = false;
+        bool Redefined = false;
+        for (MachineInstr *Later = Store->getNextNode(); Later;
+             Later = Later->getNextNode()) {
+          if (Later->readsRegister(Reg, TRI)) {
+            UsedAfter = true;
+            break;
+          }
+          if (Later->modifiesRegister(Reg, TRI)) {
+            Redefined = true;
+            break;
+          }
+        }
+        if (!UsedAfter && !Redefined)
+          for (const MachineBasicBlock *Succ : MBB.successors())
+            for (const MachineBasicBlock::RegisterMaskPair &LiveIn :
+                 Succ->liveins())
+              if (TRI->regsOverlap(Reg, LiveIn.PhysReg))
+                UsedAfter = true;
         MachineInstr *Next = Store->getNextNode();
         I = Next ? Next->getIterator() : MBB.end();
         Store->eraseFromParent();
-        Load->eraseFromParent();
+        if (!UsedAfter)
+          Load->eraseFromParent();
         Changed = true;
       }
     }
@@ -2077,6 +2103,203 @@ private:
 
 char MCS51BranchIslandSharing::ID = 0;
 
+// Direct reads of SFR addresses 0x82 and 0x83 return the bytes of DPTR, but
+// the instructions only name the address. Without a use of DPTR the copy that
+// loaded it looks dead and is deleted, and the read returns whatever DPTR
+// happened to hold. Record the use on every such read.
+static cl::opt<bool> NoDptrReads("mcs51-no-dptr-reads", cl::Hidden, cl::init(false));
+
+class MCS51DirectDptrReads final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51DirectDptrReads() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    if (NoDptrReads)
+      return false;
+    const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+    bool Changed = false;
+
+    // A call clobbers DPTR; its value afterwards is not a definition.
+    auto WritesDptr = [](const MachineInstr &MI) {
+      if (MI.isCall())
+        return false;
+      for (const MachineOperand &MO : MI.operands())
+        if (MO.isReg() && MO.isDef() && MO.getReg() == MCS51::DPTR)
+          return true;
+      return false;
+    };
+    auto ClobbersDptr = [](const MachineInstr &MI) {
+      return MI.isCall() && MI.definesRegister(MCS51::DPTR, /*TRI=*/nullptr);
+    };
+
+    struct BlockInfo {
+      bool DefinedAtExit = false; // DPTR holds a value when the block ends
+      bool EntryDefined = false;  // every predecessor leaves DPTR defined
+      bool ReadsBeforeDef = false;
+      bool Writes = false;
+      bool Need = false; // DPTR flows in from the predecessors
+    };
+    DenseMap<const MachineBasicBlock *, BlockInfo> Info;
+    for (const MachineBasicBlock &MBB : MF) {
+      BlockInfo &BI = Info[&MBB];
+      bool Defined = false;
+      for (const MachineInstr &MI : MBB) {
+        if (readsDptrByte(MI) && !MI.readsRegister(MCS51::DPTR, TRI) &&
+            !Defined)
+          BI.ReadsBeforeDef = true;
+        if (WritesDptr(MI)) {
+          Defined = true;
+          BI.Writes = true;
+        } else if (ClobbersDptr(MI)) {
+          Defined = false;
+        }
+      }
+      BI.DefinedAtExit = Defined;
+      BI.EntryDefined = !MBB.pred_empty() || MBB.isLiveIn(MCS51::DPTR);
+    }
+    Info[&MF.front()].EntryDefined = MF.front().isLiveIn(MCS51::DPTR);
+    for (bool Again = true; Again;) {
+      Again = false;
+      for (const MachineBasicBlock &MBB : MF) {
+        BlockInfo &BI = Info[&MBB];
+        if (&MBB == &MF.front() || !BI.EntryDefined)
+          continue;
+        for (const MachineBasicBlock *Pred : MBB.predecessors()) {
+          const BlockInfo &PI = Info[Pred];
+          bool ExitDefined = PI.DefinedAtExit ||
+                             (PI.EntryDefined && !PI.Writes &&
+                              !hasClobber(*Pred));
+          if (!ExitDefined) {
+            BI.EntryDefined = false;
+            Again = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Blocks that need DPTR from their predecessors, directly or because a
+    // successor does and they neither write nor clobber it.
+    for (bool Again = true; Again;) {
+      Again = false;
+      for (const MachineBasicBlock &MBB : MF) {
+        BlockInfo &BI = Info[&MBB];
+        if (BI.Need || !BI.EntryDefined)
+          continue;
+        bool Needed = BI.ReadsBeforeDef;
+        if (!Needed && !BI.Writes && !hasClobber(MBB))
+          for (const MachineBasicBlock *Succ : MBB.successors())
+            if (Info[Succ].Need)
+              Needed = true;
+        if (Needed) {
+          BI.Need = true;
+          Again = true;
+        }
+      }
+    }
+
+    // Reads whose DPTR comes from this block, or from nowhere.
+    for (MachineBasicBlock &MBB : MF) {
+      BlockInfo &BI = Info[&MBB];
+      bool Defined = BI.Need;
+      for (MachineInstr &MI : MBB) {
+        if (readsDptrByte(MI) && !MI.readsRegister(MCS51::DPTR, TRI)) {
+          MI.addOperand(MF, MachineOperand::CreateReg(
+                                MCS51::DPTR, /*isDef=*/false, /*isImp=*/true,
+                                /*isKill=*/false, /*isDead=*/false,
+                                /*isUndef=*/!Defined));
+          Changed = true;
+        }
+        if (WritesDptr(MI))
+          Defined = true;
+        else if (ClobbersDptr(MI))
+          Defined = false;
+      }
+    }
+
+    // Carry DPTR in a virtual register so liveness sees the dependency: each
+    // block ending in front of a needing successor copies DPTR into a PHI
+    // input, and each needing block copies the merged value back into DPTR.
+    const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+    MachineRegisterInfo &MRI = MF.getRegInfo();
+    DenseMap<const MachineBasicBlock *, Register> EdgeValue;
+    auto GetEdgeValue = [&](MachineBasicBlock &Pred) {
+      Register &Value = EdgeValue[&Pred];
+      if (!Value) {
+        Value = MRI.createVirtualRegister(&MCS51::MCS51GPR16RegClass);
+        BuildMI(Pred, Pred.getFirstTerminator(), DebugLoc(),
+                TII->get(TargetOpcode::COPY), Value)
+            .addReg(MCS51::DPTR);
+      }
+      return Value;
+    };
+    for (MachineBasicBlock &MBB : MF) {
+      if (!Info[&MBB].Need || &MBB == &MF.front())
+        continue;
+      Register Merged = MRI.createVirtualRegister(&MCS51::MCS51GPR16RegClass);
+      MachineInstrBuilder Phi = BuildMI(MBB, MBB.begin(), DebugLoc(),
+                                        TII->get(TargetOpcode::PHI), Merged);
+      for (MachineBasicBlock *Pred : MBB.predecessors())
+        Phi.addReg(GetEdgeValue(*Pred)).addMBB(Pred);
+      BuildMI(MBB, MBB.getFirstNonPHI(), DebugLoc(),
+              TII->get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Merged);
+      Changed = true;
+    }
+    return Changed;
+  }
+
+private:
+  static bool hasClobber(const MachineBasicBlock &MBB) {
+    for (const MachineInstr &MI : MBB)
+      if (MI.isCall())
+        return true;
+    return false;
+  }
+
+  static bool isDptrAddress(const MachineInstr &MI, unsigned Operand) {
+    return Operand < MI.getNumOperands() && MI.getOperand(Operand).isImm() &&
+           (MI.getOperand(Operand).getImm() == 0x82 ||
+            MI.getOperand(Operand).getImm() == 0x83);
+  }
+
+  static bool readsDptrByte(const MachineInstr &MI) {
+    switch (MI.getOpcode()) {
+    case MCS51::MOV_A_DIRECT:
+    case MCS51::ADD_A_DIRECT:
+    case MCS51::ADDC_A_DIRECT:
+    case MCS51::SUBB_A_DIRECT:
+    case MCS51::ANL_A_DIRECT:
+    case MCS51::ORL_A_DIRECT:
+    case MCS51::XRL_A_DIRECT:
+    case MCS51::MOV_RN_DIRECT:
+    case MCS51::XCH_A_DIRECT:
+      return isDptrAddress(MI, 1);
+    case MCS51::CJNE_A_DIRECT:
+    case MCS51::PUSH_DIRECT:
+    case MCS51::MOV_R0_IND_DIRECT:
+    case MCS51::MOV_R1_IND_DIRECT:
+    case MCS51::INC_DIRECT:
+    case MCS51::DEC_DIRECT:
+    case MCS51::DJNZ_DIRECT:
+    case MCS51::ANL_DIRECT_A:
+    case MCS51::ORL_DIRECT_A:
+    case MCS51::XRL_DIRECT_A:
+    case MCS51::ANL_DIRECT_IMM:
+    case MCS51::ORL_DIRECT_IMM:
+    case MCS51::XRL_DIRECT_IMM:
+      return isDptrAddress(MI, 0);
+    case MCS51::MOV_DIRECT_DIRECT:
+      return isDptrAddress(MI, 1);
+    default:
+      return false;
+    }
+  }
+};
+
+char MCS51DirectDptrReads::ID = 0;
+
 class MCS51TargetObjectFile final : public TargetLoweringObjectFileELF {
 public:
   MCSection *SelectSectionForGlobal(const GlobalObject *GO, SectionKind Kind,
@@ -2177,6 +2400,13 @@ public:
       addPass(createCFGSimplificationPass());
     }
     return false;
+  }
+
+  void addMachineSSAOptimization() override {
+    // Record the DPTR uses of direct SFR reads before any machine pass can
+    // treat the copies feeding them as dead.
+    addPass(new MCS51DirectDptrReads());
+    TargetPassConfig::addMachineSSAOptimization();
   }
 
   void addPreRegAlloc() override { addPass(new MCS51AccCopyHoisting()); }

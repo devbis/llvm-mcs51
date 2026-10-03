@@ -55,6 +55,15 @@ BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                             int SPAdj, unsigned FIOperandNum,
                                             RegScavenger *) const {
+  auto PairLo = [](Register Pair) {
+    return Pair == MCS51::R2R3 ? MCS51::R2
+                               : Pair == MCS51::R4R5 ? MCS51::R4 : MCS51::R6;
+  };
+  auto PairHi = [](Register Pair) {
+    return Pair == MCS51::R2R3 ? MCS51::R3
+                               : Pair == MCS51::R4R5 ? MCS51::R5 : MCS51::R7;
+  };
+
   assert(SPAdj == 0 && "unexpected MCS-51 stack pointer adjustment");
   MachineBasicBlock &MBB = *MI->getParent();
   MachineFunction &MF = *MBB.getParent();
@@ -162,7 +171,16 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     } else {
       EmitAddress();
     }
-    if (MI->getOpcode() == MCS51::SPILL_LOAD16) {
+    if ((MI->getOpcode() == MCS51::SPILL_LOAD16 ||
+         MI->getOpcode() == MCS51::LOAD_FRAME16) &&
+        Dst != MCS51::DPTR) {
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), PairLo(Dst));
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), PairHi(Dst));
+    } else if (MI->getOpcode() == MCS51::SPILL_LOAD16) {
       UsesDirectWordTransfer = true;
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_R1_IND))
           .addImm(0x82)
@@ -181,7 +199,9 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8 ||
         MI->getOpcode() == MCS51::LOAD_FRAME8) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
-    } else if (MI->getOpcode() != MCS51::SPILL_LOAD16) {
+    } else if (MI->getOpcode() != MCS51::SPILL_LOAD16 &&
+               !(MI->getOpcode() == MCS51::LOAD_FRAME16 &&
+                 Dst != MCS51::DPTR)) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_A)).addImm(0x82);
       BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
           .addReg(MCS51::R1);
@@ -195,7 +215,17 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
              MI->getOpcode() == MCS51::SPILL_STORE_A8 ||
              MI->getOpcode() == MCS51::STORE_FRAME16) {
     Register Src = MI->getOperand(FIOperandNum + 2).getReg();
-    if (MI->getOpcode() == MCS51::SPILL_STORE16) {
+    if ((MI->getOpcode() == MCS51::SPILL_STORE16 ||
+         MI->getOpcode() == MCS51::STORE_FRAME16) &&
+        Src != MCS51::DPTR) {
+      EmitAddress();
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(PairLo(Src));
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
+          .addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(PairHi(Src));
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
+    } else if (MI->getOpcode() == MCS51::SPILL_STORE16) {
       UsesDirectWordTransfer = true;
       EmitAddress();
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_DIRECT))

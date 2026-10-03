@@ -224,7 +224,7 @@ public:
   }
 
   void emitInstruction(const MachineInstr *MI) override {
-    if (MI->getOpcode() == MCS51::SUB16DEC) {
+    if (MI->getOpcode() == MCS51::DEC_DPTR16) {
       auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
         MCInst Inst;
         Inst.setOpcode(Opcode);
