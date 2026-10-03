@@ -2145,6 +2145,9 @@ char MCS51BranchIslandSharing::ID = 0;
 // loaded it looks dead and is deleted, and the read returns whatever DPTR
 // happened to hold. Record the use on every such read.
 
+static cl::opt<unsigned> UnrollThreshold(
+    "mcs51-unroll-threshold", cl::Hidden, cl::init(30),
+    cl::desc("Cost threshold for fully unrolling constant-trip loops"));
 static cl::opt<bool> CheckDptrReads("mcs51-check-dptr-reads", cl::Hidden,
                                     cl::desc("Report direct DPL/DPH reads with no DPTR write in the block"));
 
@@ -2542,7 +2545,7 @@ public:
       addPass(createLoopSimplifyPass());
       addPass(createLoopUnrollPass(/*OptLevel=*/3, /*OnlyWhenForced=*/false,
                                    /*ForgetAllSCEV=*/false,
-                                   /*Threshold=*/200, /*Count=*/-1,
+                                   /*Threshold=*/UnrollThreshold, /*Count=*/-1,
                                    /*AllowPartial=*/0, /*Runtime=*/0,
                                    /*UpperBound=*/0, /*AllowPeeling=*/0));
       addPass(createCFGSimplificationPass());
