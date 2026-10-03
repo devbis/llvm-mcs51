@@ -3724,7 +3724,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     unsigned LoadOpcode = MI.getOpcode() == MCS51::LOADI8
                               ? MCS51::MOV_A_IND_RI
                               : MCS51::MOVX_A_IND_RI;
-    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
+    // The address must be in R0 or R1; naming R0 here leaves the allocator
+    // free to keep the pointer anywhere between accesses.
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::R0).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(MCS51::R0);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
     MI.eraseFromParent();
@@ -3736,8 +3739,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     unsigned StoreOpcode = MI.getOpcode() == MCS51::STOREI8
                                ? MCS51::MOV_IND_RI_A
                                : MCS51::MOVX_IND_RI_A;
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::R0).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
-    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
+    BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(MCS51::R0);
     MI.eraseFromParent();
     return MBB;
   }
