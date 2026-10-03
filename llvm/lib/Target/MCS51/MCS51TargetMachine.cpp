@@ -19,6 +19,7 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
@@ -2330,9 +2331,38 @@ public:
   // optionally verify that every read follows a write of DPTR in its block.
   bool runOnMachineFunction(MachineFunction &MF) override {
     bool Changed = false;
+    const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
     for (MachineBasicBlock &MBB : MF) {
       bool Defined = false;
-      for (MachineInstr &MI : MBB) {
+      for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
+        if (MI.isInlineAsm()) {
+          // A memory operand is printed as @dptr (or @r0/@r1): move a word
+          // address into DPTR in front of the statement.
+          for (unsigned I = InlineAsm::MIOp_FirstOperand;
+               I < MI.getNumOperands();) {
+            const MachineOperand &FlagOp = MI.getOperand(I);
+            if (!FlagOp.isImm()) {
+              ++I;
+              continue;
+            }
+            InlineAsm::Flag Flags(FlagOp.getImm());
+            unsigned Count = Flags.getNumOperandRegisters();
+            if (Flags.isMemKind() && Count == 1 && I + 1 < MI.getNumOperands()) {
+              MachineOperand &Address = MI.getOperand(I + 1);
+              if (Address.isReg() && Address.getReg().isVirtual() &&
+                  MF.getRegInfo().getRegClass(Address.getReg()) ==
+                      &MCS51::MCS51GPR16RegClass) {
+                BuildMI(MBB, MI, MI.getDebugLoc(),
+                        TII.get(TargetOpcode::COPY), MCS51::DPTR)
+                    .addReg(Address.getReg());
+                Address.setReg(MCS51::DPTR);
+                Address.setIsKill(false);
+                Changed = true;
+              }
+            }
+            I += Count + 1;
+          }
+        }
         if (readsDptrByte(MI)) {
           if (CheckDptrReads && !Defined) {
             errs() << "DPTR-READ-WITHOUT-DEF in " << MF.getName() << " bb."

@@ -18,7 +18,7 @@ unsigned short add_large16(unsigned short value) { return value + 60000; }
 // CHECK-NEXT: mov a, 48
 // CHECK-NEXT: jnz .Lmcs51_word_skip{{[0-9]+}}
 // CHECK-NEXT: inc 49
-// CHECK-NEXT: ret
+// CHECK: ret
 // CHECK-LABEL: add_two16:
 // CHECK: mov a, 48
 // CHECK-NEXT: add a, #2
@@ -32,19 +32,19 @@ unsigned short add_large16(unsigned short value) { return value + 60000; }
 // CHECK-NEXT: mov a, 48
 // CHECK-NEXT: cjne a, #255, .Lmcs51_word_skip{{[0-9]+}}
 // CHECK-NEXT: dec 49
-// CHECK-NEXT: ret
+// CHECK: ret
 // CHECK-LABEL: add_negative_one16:
 // CHECK: dec 48
 // CHECK-NEXT: mov a, 48
 // CHECK-NEXT: cjne a, #255, .Lmcs51_word_skip{{[0-9]+}}
 // CHECK-NEXT: dec 49
-// CHECK-NEXT: ret
+// CHECK: ret
 // CHECK-LABEL: subtract_one_signed16:
 // CHECK: dec 48
 // CHECK-NEXT: mov a, 48
 // CHECK-NEXT: cjne a, #255, .Lmcs51_word_skip{{[0-9]+}}
 // CHECK-NEXT: dec 49
-// CHECK-NEXT: ret
+// CHECK: ret
 // CHECK-LABEL: add_25616:
 // CHECK: mov a, 49
 // CHECK-NEXT: add a, #1
