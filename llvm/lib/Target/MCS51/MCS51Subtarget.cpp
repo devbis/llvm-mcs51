@@ -1,6 +1,8 @@
 #include "MCS51Subtarget.h"
 #include "llvm/IR/RuntimeLibcalls.h"
 
+#define DEBUG_TYPE "mcs51-subtarget"
+
 #define GET_SUBTARGETINFO_TARGET_DESC
 #define GET_SUBTARGETINFO_CTOR
 #include "MCS51GenSubtargetInfo.inc"
