@@ -73,7 +73,10 @@ private:
         return false;
       }
     }
-    if (!HasVariableIndex)
+    // Locals reached through casts to the default address space would be
+    // accessed as XDATA; access them directly in IDATA, where they live. This
+    // also lets mem2reg promote them.
+    if (!HasVariableIndex && Seen.size() == 1)
       return false;
 
     LLVMContext &C = AI.getContext();
