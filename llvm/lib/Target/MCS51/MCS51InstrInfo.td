@@ -992,6 +992,33 @@ def BRCMP16 : Instruction {
                                bb:$target)];
 }
 
+// The same for 32-bit operands given as two words each.
+def SDT_MCS51BrCmp32 : SDTypeProfile<0, 6, [SDTCisVT<0, i16>, SDTCisVT<1, i16>,
+                                            SDTCisVT<2, i16>, SDTCisVT<3, i16>,
+                                            SDTCisVT<4, i8>,
+                                            SDTCisVT<5, OtherVT>]>;
+def MCS51brcmp32 : SDNode<"MCS51ISD::BR_CMP32", SDT_MCS51BrCmp32,
+                          [SDNPHasChain]>;
+def BRCMP32 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                           MCS51GPR16:$rhslo, MCS51GPR16:$rhshi,
+                           MCS51Imm8:$kind, MCS51Addr16:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [A, B, C];
+  let Pattern = [(MCS51brcmp32 MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                               MCS51GPR16:$rhslo, MCS51GPR16:$rhshi, imm:$kind,
+                               bb:$target)];
+}
+
 def BR_EQ8ri : MCS51BrCCImmPseudo<MCS51br_eq>;
 def BR_EQ8rr : MCS51BrCCRegPseudo<MCS51br_eq>;
 def BR_NE8ri : MCS51BrCCImmPseudo<MCS51br_ne>;

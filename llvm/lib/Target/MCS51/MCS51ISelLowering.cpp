@@ -448,6 +448,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::SHL);
   setTargetDAGCombine(ISD::SRL);
   setTargetDAGCombine(ISD::SRA);
+  setTargetDAGCombine(ISD::BRCOND);
   setTargetDAGCombine(ISD::TRUNCATE);
   setTargetDAGCombine(ISD::STORE);
   setOperationAction(ISD::SHL, MVT::i8, Legal);
@@ -1750,6 +1751,55 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
     }
     return SDValue();
   }
+  // A branch on a 32-bit compare works on the four bytes of the operands
+  // without materializing the outcome.
+  if (N->getOpcode() == ISD::BRCOND && DCI.isBeforeLegalize()) {
+    SDValue Cond = N->getOperand(1);
+    if (Cond.getOpcode() == ISD::SETCC &&
+        Cond.getOperand(0).getValueType() == MVT::i32 && Cond.hasOneUse()) {
+      ISD::CondCode CC = cast<CondCodeSDNode>(Cond.getOperand(2))->get();
+      SDValue LHS = Cond.getOperand(0), RHS = Cond.getOperand(1);
+      unsigned Kind;
+      switch (CC) {
+      case ISD::SETEQ: Kind = 2; break;
+      case ISD::SETNE: Kind = 5; break;
+      case ISD::SETULT: Kind = 0; break;
+      case ISD::SETUGE: Kind = 3; break;
+      case ISD::SETLT: Kind = 1; break;
+      case ISD::SETGE: Kind = 4; break;
+      case ISD::SETUGT:
+        std::swap(LHS, RHS);
+        Kind = 0;
+        break;
+      case ISD::SETULE:
+        std::swap(LHS, RHS);
+        Kind = 3;
+        break;
+      case ISD::SETGT:
+        std::swap(LHS, RHS);
+        Kind = 1;
+        break;
+      case ISD::SETLE:
+        std::swap(LHS, RHS);
+        Kind = 4;
+        break;
+      default:
+        return SDValue();
+      }
+      SelectionDAG &DAG = DCI.DAG;
+      SDLoc DL(N);
+      SDValue Zero = DAG.getConstant(0, DL, MVT::i16);
+      SDValue One = DAG.getConstant(1, DL, MVT::i16);
+      SDValue Ops[] = {
+          N->getOperand(0),
+          DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, LHS, Zero),
+          DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, LHS, One),
+          DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, RHS, Zero),
+          DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i16, RHS, One),
+          DAG.getConstant(Kind, DL, MVT::i8), N->getOperand(2)};
+      return DAG.getNode(MCS51ISD::BR_CMP32, DL, MVT::Other, Ops);
+    }
+  }
   // A 32-bit shift by a constant works on the four bytes of the operand; the
   // generic expansion would shift both halves and merge them.
   if ((N->getOpcode() == ISD::SHL || N->getOpcode() == ISD::SRL ||
@@ -3015,6 +3065,28 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::BRCMP32) {
+    MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+    int64_t Kind = MI.getOperand(4).getImm();
+    MachineBasicBlock *Target = MI.getOperand(5).getMBB();
+    SmallVector<WordByte, 4> L, R;
+    describeWord(MRI, MI.getOperand(0).getReg(), L);
+    describeWord(MRI, MI.getOperand(1).getReg(), L);
+    describeWord(MRI, MI.getOperand(2).getReg(), R);
+    describeWord(MRI, MI.getOperand(3).getReg(), R);
+    emitWordCompare(*MBB, MII, DL, TII, L, R, Kind);
+    unsigned Branch;
+    switch (Kind) {
+    case 2: Branch = MCS51::JZ; break;
+    case 5: Branch = MCS51::JNZ; break;
+    case 0:
+    case 1: Branch = MCS51::JC; break;
+    default: Branch = MCS51::JNC; break;
+    }
+    BuildMI(*MBB, MII, DL, TII.get(Branch)).addMBB(Target);
     MI.eraseFromParent();
     return MBB;
   }
