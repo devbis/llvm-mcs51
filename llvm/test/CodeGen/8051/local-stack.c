@@ -6,9 +6,11 @@ unsigned char local_byte(unsigned char value) {
   return slot;
 }
 
+// Locals live in IDATA; they must not be accessed with MOVX.
 // CHECK-LABEL: local_byte:
-// CHECK: movx @dptr, a
-// CHECK: movx a, @dptr
+// CHECK: mov @r{{[01]}}, a
+// CHECK: mov a, @r{{[01]}}
+// CHECK-NOT: movx
 // CHECK: ret
 
 unsigned char local_array_element(unsigned char value) {
@@ -18,6 +20,7 @@ unsigned char local_array_element(unsigned char value) {
 }
 
 // CHECK-LABEL: local_array_element:
-// CHECK: movx @dptr, a
-// CHECK: movx a, @dptr
+// CHECK: mov @r{{[01]}}, a
+// CHECK: mov a, @r{{[01]}}
+// CHECK-NOT: movx
 // CHECK: ret
