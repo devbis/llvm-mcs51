@@ -216,6 +216,75 @@ static void markAddressInDptr(MachineInstr &User) {
   User.getOperand(AddressOperand).setReg(MCS51::DPTR);
 }
 
+// Loads DPTR with Base + Offset in front of At. When the DPTR value already
+// held in front of At is Base plus a smaller or equal offset, only increments
+// are emitted; the 16-bit accesses that step DPTR are accounted for.
+static void emitDptrAddress(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator At, const DebugLoc &DL,
+                            const TargetInstrInfo &TII,
+                            const TargetRegisterInfo &TRI,
+                            MCS51MachineFunctionInfo &FuncInfo, Register Base,
+                            uint16_t Offset) {
+  // Find the nearest instruction that set DPTR and count the increments
+  // after it.
+  int64_t Increments = 0;
+  const MachineInstr *Def = nullptr;
+  for (auto It = At; It != MBB.begin();) {
+    --It;
+    if (It->isDebugInstr())
+      continue;
+    if (It->getOpcode() == MCS51::INC_DPTR) {
+      ++Increments;
+      continue;
+    }
+    if (It->isCall() || It->modifiesRegister(MCS51::DPTR, &TRI) ||
+        It->isInlineAsm()) {
+      Def = &*It;
+      break;
+    }
+  }
+  if (Def) {
+    if (const auto *Known = FuncInfo.getDptrAddress(Def)) {
+      int64_t Current = Known->second + Increments;
+      int64_t Delta = int64_t(Offset) - Current;
+      if (Known->first == Base && Delta >= 0 && Delta <= 6) {
+        for (int64_t I = 0; I != Delta; ++I)
+          BuildMI(MBB, At, DL, TII.get(MCS51::INC_DPTR));
+        return;
+      }
+    }
+  }
+  MachineInstr *Last;
+  if (Offset <= 4) {
+    Last = BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+               .addReg(Base)
+               .getInstr();
+    FuncInfo.setDptrAddress(Last, Base, 0);
+    for (unsigned I = 0; I != Offset; ++I)
+      BuildMI(MBB, At, DL, TII.get(MCS51::INC_DPTR));
+    return;
+  }
+  auto Half = [&](unsigned Dest, unsigned Sub, bool Carry, uint8_t K) {
+    BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::A)
+        .addReg(Base, RegState{}, Sub);
+    BuildMI(MBB, At, DL,
+            TII.get(Carry ? MCS51::ADDC_A_IMM : MCS51::ADD_A_IMM), MCS51::A)
+        .addImm(K);
+    return BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), Dest)
+        .addReg(MCS51::A)
+        .getInstr();
+  };
+  if ((Offset & 0xff) == 0) {
+    BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPL)
+        .addReg(Base, RegState{}, MCS51::sub_lo);
+    Last = Half(MCS51::DPH, MCS51::sub_hi, false, Offset >> 8);
+  } else {
+    Half(MCS51::DPL, MCS51::sub_lo, false, Offset & 0xff);
+    Last = Half(MCS51::DPH, MCS51::sub_hi, true, Offset >> 8);
+  }
+  FuncInfo.setDptrAddress(Last, Base, Offset);
+}
+
 static bool containsFrameIndex(SDValue V) {
   SmallVector<SDValue, 8> Worklist(1, V);
   while (!Worklist.empty()) {
@@ -1852,6 +1921,13 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   MachineBasicBlock::iterator MII = MI.getIterator();
   const DebugLoc &DL = MI.getDebugLoc();
   MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+  // Loads DPTR with a pointer plus offset in front of the pseudo being
+  // expanded, reusing the DPTR value already there when it allows.
+  auto SetDptr = [&](Register Base, uint16_t Offset) {
+    emitDptrAddress(*MBB, MII, DL, TII, *STI.getRegisterInfo(),
+                    *MBB->getParent()->getInfo<MCS51MachineFunctionInfo>(),
+                    Base, Offset);
+  };
   auto getAccumulatorCopy = [&](Register Reg) -> MachineInstr * {
     if (!Reg.isVirtual())
       return nullptr;
@@ -2796,49 +2872,23 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       if (MachineInstr *User = singleDptrAddressUser(MRI, Dst, MBB)) {
         // The sum only addresses memory: build it directly in DPTR.
         MachineBasicBlock::iterator At = User->getIterator();
-        auto CopyDptr = [&]() {
-          BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-              .addReg(LHS);
-        };
-        auto Half = [&](unsigned Half, unsigned Sub, bool Carry, bool IsZero,
-                        bool HasK, uint8_t K, Register Other,
+        auto Half = [&](unsigned Half, unsigned Sub, bool Carry, Register Other,
                         unsigned OtherSub) {
           BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::A)
               .addReg(LHS, RegState{}, Sub);
-          if (HasK)
-            BuildMI(*MBB, At, DL,
-                    TII.get(Carry ? MCS51::ADDC_A_IMM : MCS51::ADD_A_IMM),
-                    MCS51::A)
-                .addImm(K);
-          else
-            BuildMI(*MBB, At, DL,
-                    TII.get(Carry ? MCS51::ADDC_A_IM : MCS51::ADD_A_IM))
-                .addReg(Other, RegState{}, OtherSub);
-          (void)IsZero;
+          BuildMI(*MBB, At, DL,
+                  TII.get(Carry ? MCS51::ADDC_A_IM : MCS51::ADD_A_IM))
+              .addReg(Other, RegState{}, OtherSub);
           BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), Half)
               .addReg(MCS51::A);
         };
         if (HasImm) {
-          if (Imm <= 4) {
-            CopyDptr();
-            for (unsigned I = 0; I != Imm; ++I)
-              BuildMI(*MBB, At, DL, TII.get(MCS51::INC_DPTR));
-          } else if ((Imm & 0xff) == 0) {
-            BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPL)
-                .addReg(LHS, RegState{}, MCS51::sub_lo);
-            Half(MCS51::DPH, MCS51::sub_hi, false, false, true, Imm >> 8,
-                 Register(), 0);
-          } else {
-            Half(MCS51::DPL, MCS51::sub_lo, false, false, true, Imm & 0xff,
-                 Register(), 0);
-            Half(MCS51::DPH, MCS51::sub_hi, true, false, true, Imm >> 8,
-                 Register(), 0);
-          }
+          emitDptrAddress(*MBB, At, DL, TII, *STI.getRegisterInfo(),
+                          *MBB->getParent()->getInfo<MCS51MachineFunctionInfo>(),
+                          LHS, Imm);
         } else {
-          Half(MCS51::DPL, MCS51::sub_lo, false, false, false, 0, RHS,
-               MCS51::sub_lo);
-          Half(MCS51::DPH, MCS51::sub_hi, true, false, false, 0, RHS,
-               MCS51::sub_hi);
+          Half(MCS51::DPL, MCS51::sub_lo, false, RHS, MCS51::sub_lo);
+          Half(MCS51::DPH, MCS51::sub_hi, true, RHS, MCS51::sub_hi);
         }
         markAddressInDptr(*User);
         MI.eraseFromParent();
@@ -3415,8 +3465,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
           .add(MI.getOperand(1));
     else if (MI.getOperand(1).getReg() != MCS51::DPTR)
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-          .add(MI.getOperand(1));
+      SetDptr(MI.getOperand(1).getReg(), 0);
     Register Bytes[2];
     for (unsigned I = 0; I != 2; ++I) {
       if (I)
@@ -3571,8 +3620,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::LOADX8) {
     Register Dst = MI.getOperand(0).getReg();
     if (MI.getOperand(1).getReg() != MCS51::DPTR)
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-          .add(MI.getOperand(1));
+      SetDptr(MI.getOperand(1).getReg(), 0);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
@@ -3593,8 +3641,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::LOADCODE8) {
     Register Dst = MI.getOperand(0).getReg();
     if (MI.getOperand(1).getReg() != MCS51::DPTR)
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-          .add(MI.getOperand(1));
+      SetDptr(MI.getOperand(1).getReg(), 0);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVC_ADPTR));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
@@ -3604,8 +3651,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREX8) {
     if (MI.getOperand(0).getReg() != MCS51::DPTR)
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-          .add(MI.getOperand(0));
+      SetDptr(MI.getOperand(0).getReg(), 0);
     Register Src = MI.getOperand(1).getReg();
     MachineInstr *Def = nullptr;
     if (valueRemainsInAccumulator(Src, Def))
@@ -3623,8 +3669,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Addr = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();
     if (Addr != MCS51::DPTR)
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-          .addReg(Addr);
+      SetDptr(Addr, 0);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
         .addReg(Src, RegState{}, MCS51::sub_lo);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));
