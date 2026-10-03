@@ -1383,6 +1383,35 @@ public:
           if (AddressReg == MCS51::R0 || AddressReg == MCS51::R1) {
             std::optional<int> &CachedOffset =
                 AddressReg == MCS51::R0 ? R0StackOffset : R1StackOffset;
+            // MOV Rn,SP followed by INC/DEC steps names a stack address. When
+            // the register already holds a nearby one, step from there.
+            int Target = 0;
+            auto Last = std::next(I);
+            unsigned Steps = 0;
+            while (Last != MBB.end() &&
+                   (Last->getOpcode() == MCS51::INC_RN ||
+                    Last->getOpcode() == MCS51::DEC_RN) &&
+                   Last->getOperand(0).isReg() &&
+                   Last->getOperand(0).getReg() == AddressReg) {
+              Target += Last->getOpcode() == MCS51::INC_RN ? 1 : -1;
+              ++Steps;
+              ++Last;
+            }
+            if (CachedOffset && std::abs(Target - *CachedOffset) < int(Steps) + 1) {
+              int Delta = Target - *CachedOffset;
+              auto Insert = I;
+              MRI.clearKillFlags(AddressReg);
+              for (int N = 0; N != std::abs(Delta); ++N)
+                BuildMI(MBB, Insert, I->getDebugLoc(),
+                        TII->get(Delta > 0 ? MCS51::INC_RN : MCS51::DEC_RN))
+                    .addReg(AddressReg, RegState::Define)
+                    .addReg(AddressReg);
+              while (I != Last)
+                I = MBB.erase(I);
+              CachedOffset = Target;
+              Changed = true;
+              continue;
+            }
             CachedOffset = 0;
             ++I;
             continue;
