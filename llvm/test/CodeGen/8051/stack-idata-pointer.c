@@ -12,10 +12,15 @@ void read_local_array(unsigned char Index) {
   Sink = read_idata((__idata const unsigned char *)&Values[Index]);
 }
 
+// The local array is initialized and indexed in IDATA: the element address is
+// the frame address plus the index, passed on as a byte-sized pointer.
 // CHECK-LABEL: <read_local_array>:
+// CHECK: mov 48, #49
+// CHECK: mov 49, #66
 // CHECK: mov a, 129
-// CHECK: add a, #250
-// CHECK: mov r1, a
-// CHECK: mov a, r0
-// CHECK: add a, 130
+// CHECK: add a, #253
+// CHECK: mov r0, a
+// CHECK-NOT: movx
+// CHECK: add a, r7
 // CHECK: mov r7, a
+// CHECK: lcall

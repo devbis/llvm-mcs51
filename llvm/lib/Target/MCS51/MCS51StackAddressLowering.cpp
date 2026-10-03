@@ -36,6 +36,8 @@ private:
   static bool lowerIndexedStackObject(AllocaInst &AI) {
     SmallVector<Value *, 16> Worklist{&AI};
     SmallPtrSet<Value *, 16> Seen;
+    SmallPtrSet<MemIntrinsic *, 4> MemCalls;
+    SmallVector<AddrSpaceCastInst *, 4> BackCasts;
     SmallVector<GetElementPtrInst *, 8> GEPs;
     bool HasVariableIndex = false;
 
@@ -49,6 +51,12 @@ private:
         if (auto *Cast = dyn_cast<AddrSpaceCastInst>(U)) {
           if (Cast->getPointerOperand() != Pointer)
             return false;
+          // A cast back to the object's own address space is the identity on
+          // the remapped pointer, whatever its users do with it.
+          if (Cast->getDestAddressSpace() == AI.getAddressSpace()) {
+            BackCasts.push_back(Cast);
+            continue;
+          }
           Worklist.push_back(Cast);
           continue;
         }
@@ -68,6 +76,17 @@ private:
         if (auto *Store = dyn_cast<StoreInst>(U))
           if (Store->getPointerOperand() == Pointer)
             continue;
+        if (auto *Mem = dyn_cast<MemIntrinsic>(U)) {
+          // Block copies and fills accept pointers of any address space.
+          bool OtherIsPointer = false;
+          if (auto *Transfer = dyn_cast<MemTransferInst>(Mem))
+            OtherIsPointer = Transfer->getRawSource() == Pointer &&
+                             Transfer->getRawDest() == Pointer;
+          if (!OtherIsPointer) {
+            MemCalls.insert(Mem);
+            continue;
+          }
+        }
         // Keeping pointer escapes and other pointer operations in their
         // original address space avoids changing their observable behavior.
         return false;
@@ -129,6 +148,37 @@ private:
       }
     }
 
+    for (AddrSpaceCastInst *Cast : BackCasts)
+      if (Value *New = Remapped.lookup(Cast->getPointerOperand())) {
+        Cast->replaceAllUsesWith(New);
+        Cast->eraseFromParent();
+      }
+    for (MemIntrinsic *Mem : MemCalls) {
+      auto Remap = [&](Value *V) {
+        Value *New = Remapped.lookup(V);
+        return New ? New : V;
+      };
+      IRBuilder<> CallBuilder(Mem);
+      Instruction *NewCall = nullptr;
+      if (auto *Copy = dyn_cast<MemCpyInst>(Mem))
+        NewCall = CallBuilder.CreateMemCpy(
+            Remap(Copy->getRawDest()), Copy->getDestAlign(),
+            Remap(Copy->getRawSource()), Copy->getSourceAlign(),
+            Copy->getLength(), Copy->isVolatile());
+      else if (auto *Move = dyn_cast<MemMoveInst>(Mem))
+        NewCall = CallBuilder.CreateMemMove(
+            Remap(Move->getRawDest()), Move->getDestAlign(),
+            Remap(Move->getRawSource()), Move->getSourceAlign(),
+            Move->getLength(), Move->isVolatile());
+      else if (auto *Set = dyn_cast<MemSetInst>(Mem))
+        NewCall = CallBuilder.CreateMemSet(
+            Remap(Set->getRawDest()), Set->getValue(), Set->getLength(),
+            Set->getDestAlign(), Set->isVolatile());
+      if (NewCall) {
+        NewCall->setDebugLoc(Mem->getDebugLoc());
+        Mem->eraseFromParent();
+      }
+    }
     for (auto It = GEPs.rbegin(); It != GEPs.rend(); ++It)
       if ((*It)->use_empty())
         (*It)->eraseFromParent();
