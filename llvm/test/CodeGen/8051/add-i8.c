@@ -191,16 +191,19 @@ unsigned char greater_equal_words(unsigned short lhs, unsigned short rhs) {
 }
 
 // CHECK-LABEL: signed_less_words:
-// CHECK: xrl a,
-// CHECK: xch a, 240
-// CHECK: xrl a,
+// CHECK: subb a,
+// CHECK: xrl a, #128
+// CHECK: xrl a, #128
 // CHECK: subb a, 240
+// CHECK: rlc a
 // CHECK: ret
 unsigned char signed_less_words(short lhs, short rhs) { return lhs < rhs; }
 
 // CHECK-LABEL: signed_less_equal_words:
-// CHECK: xch a, 240
-// CHECK: xrl a,
+// CHECK: subb a,
+// CHECK: xrl a, #128
+// CHECK: xrl a, #128
+// CHECK: subb a, 240
 // CHECK: cpl c
 // CHECK: rlc a
 // CHECK: ret
@@ -209,17 +212,21 @@ unsigned char signed_less_equal_words(short lhs, short rhs) {
 }
 
 // CHECK-LABEL: signed_greater_words:
-// CHECK: xch a, 240
+// CHECK: subb a,
+// CHECK: xrl a, #128
+// CHECK: xrl a, #128
 // CHECK: subb a, 240
+// CHECK: rlc a
 // CHECK: ret
 unsigned char signed_greater_words(short lhs, short rhs) {
   return lhs > rhs;
 }
 
 // CHECK-LABEL: signed_greater_equal_words:
-// CHECK: xrl a,
-// CHECK: xch a, 240
-// CHECK: xrl a,
+// CHECK: subb a,
+// CHECK: xrl a, #128
+// CHECK: xrl a, #128
+// CHECK: subb a, 240
 // CHECK: cpl c
 // CHECK: rlc a
 // CHECK: ret

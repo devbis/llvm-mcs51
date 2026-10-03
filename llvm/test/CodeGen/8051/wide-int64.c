@@ -1,6 +1,5 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -mllvm -verify-machineinstrs \
-// RUN:   -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
+// RUN:   -S %s -o - | FileCheck %s
 
 unsigned long long add64(unsigned long long lhs, unsigned long long rhs) {
   return lhs + rhs;

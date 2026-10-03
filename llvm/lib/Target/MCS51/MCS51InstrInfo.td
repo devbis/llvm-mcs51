@@ -933,6 +933,47 @@ def BRCMP16 : Instruction {
                                bb:$target)];
 }
 
+// A select on a 16-bit comparison (kinds as for BRCMP16), expanded into a
+// compare and branch over the bytes of the operands.
+def SDT_MCS51SelectCmp16 : SDTypeProfile<1, 5, [SDTCisInt<0>,
+                                                SDTCisVT<1, i16>,
+                                                SDTCisSameAs<1, 2>,
+                                                SDTCisVT<3, i8>,
+                                                SDTCisSameAs<0, 4>,
+                                                SDTCisSameAs<0, 5>]>;
+def MCS51selectcmp16 : SDNode<"MCS51ISD::SELECT_CMP16", SDT_MCS51SelectCmp16>;
+let Defs = [A, B, C] in {
+def SELECT8_CMP16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs, MCS51Imm8:$kind,
+                           MCS51GPR8:$true, MCS51GPR8:$false);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+def SELECT16_CMP16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs, MCS51Imm8:$kind,
+                           MCS51GPR16:$true, MCS51GPR16:$false);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+}
+}
+def : Pat<(i8 (MCS51selectcmp16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, imm:$kind,
+                                MCS51GPR8:$true, MCS51GPR8:$false)),
+          (SELECT8_CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, imm:$kind,
+                         MCS51GPR8:$true, MCS51GPR8:$false)>;
+def : Pat<(i16 (MCS51selectcmp16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, imm:$kind,
+                                 MCS51GPR16:$true, MCS51GPR16:$false)),
+          (SELECT16_CMP16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, imm:$kind,
+                          MCS51GPR16:$true, MCS51GPR16:$false)>;
 // The same for 32-bit operands given as two words each.
 def SDT_MCS51BrCmp32 : SDTypeProfile<0, 6, [SDTCisVT<0, i16>, SDTCisVT<1, i16>,
                                             SDTCisVT<2, i16>, SDTCisVT<3, i16>,

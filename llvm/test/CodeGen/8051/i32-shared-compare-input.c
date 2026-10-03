@@ -15,6 +15,8 @@ unsigned char incoming_is_max_or_older(void) {
 // spilling the shared volatile load to the internal stack.
 // CHECK-LABEL: incoming_is_max_or_older:
 // CHECK-NOT: inc 129
-// CHECK: cjne a, #255
+// CHECK: xrl a, #255
+// CHECK-NOT: inc 129
+// CHECK: subb a,
 // CHECK-NOT: inc 129
 // CHECK: .Lfunc_end

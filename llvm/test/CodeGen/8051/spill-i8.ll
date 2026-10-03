@@ -20,7 +20,7 @@ entry:
 ; CHECK: mov a, 129
 ; CHECK-NEXT: add a, #4
 ; CHECK-NEXT: mov 129, a
-; CHECK: mov @r1, a
+; CHECK: mov @r1, {{r[0-7]|a}}
 ; CHECK: dec 129
 ; CHECK: ret
 
@@ -53,6 +53,6 @@ entry:
 
 ; Other MCS-51 profiles retain the ordinary function ABI for main.
 ; GENERIC-LABEL: main:
-; GENERIC: push 2
+; GENERIC: lcall __mcs51_save_r{{[0-7]}}
 ; GENERIC: lcall entry_barrier
-; GENERIC: pop 2
+; GENERIC: lcall __mcs51_restore_r{{[0-7]}}

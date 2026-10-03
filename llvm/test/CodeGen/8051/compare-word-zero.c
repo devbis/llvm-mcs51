@@ -10,11 +10,11 @@ unsigned char branch_on_zero(unsigned short value) {
 
 
 // CHECK-LABEL: equal_zero:
-// CHECK: mov a, 130
-// CHECK: orl a, 131
-// CHECK: jnz
+// CHECK: mov a, 48
+// CHECK: orl a, 49
+// CHECK: rlc a
 
 // CHECK-LABEL: branch_on_zero:
-// CHECK: mov a, 130
-// CHECK: orl a, 131
-// CHECK: jnz
+// CHECK: mov a, 48
+// CHECK-NEXT: orl a, 49
+// CHECK-NEXT: jnz

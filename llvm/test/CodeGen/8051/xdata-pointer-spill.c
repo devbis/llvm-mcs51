@@ -19,10 +19,13 @@ static uint8_t copy_payload(void) {
 
 void main(void) { result = copy_payload(); }
 
-// XDATA pointer spills use direct-to-indirect moves instead of routing each
-// byte through A while saving and restoring DPTR.
+// Pointers live in pairs of direct bytes, so the copy loop moves them into
+// DPTR for each access without spilling anything through the stack.
 // CHECK-LABEL: main:
-// CHECK: mov @r1, 130
-// CHECK: mov @r1, 131
-// CHECK: mov 130, @r1
-// CHECK: mov 131, @r1
+// CHECK-NOT: @r1
+// CHECK: mov 130, 50
+// CHECK: mov 131, 51
+// CHECK: movx a, @dptr
+// CHECK: mov 130, 48
+// CHECK: mov 131, 49
+// CHECK: movx @dptr, a

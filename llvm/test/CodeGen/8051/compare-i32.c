@@ -34,7 +34,7 @@ unsigned char signed_ge(long lhs, long rhs) { return lhs >= rhs; }
 // optimization levels, including inversion and operand swapping.
 // O0-LABEL: unsigned_eq:
 // O0: xrl a,
-// O0: jnz
+// O0: orl a,
 // O0: ret
 // O0-LABEL: unsigned_ne:
 // O0: ret

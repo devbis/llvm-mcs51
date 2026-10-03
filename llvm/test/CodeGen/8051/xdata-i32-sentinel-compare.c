@@ -20,4 +20,7 @@ void main(void) {
 // CHECK: .Lfunc_end
 // CHECK-LABEL: __mcs51_xdata_ult32_or_max:
 // CHECK: movx a, @dptr
-// CHECK: cjne a, #255
+// CHECK: xrl a, #255
+// CHECK: jz
+// CHECK: mov 130, 50
+// CHECK: movx a, @dptr
