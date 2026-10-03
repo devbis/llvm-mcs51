@@ -226,22 +226,39 @@ static void emitDptrAddress(MachineBasicBlock &MBB,
                             MCS51MachineFunctionInfo &FuncInfo, Register Base,
                             uint16_t Offset) {
   // Find the nearest instruction that set DPTR and count the increments
-  // after it.
+  // after it. Scanning continues into the only predecessor of the first block
+  // of an IR block whose single IR predecessor is that block.
   int64_t Increments = 0;
   const MachineInstr *Def = nullptr;
-  for (auto It = At; It != MBB.begin();) {
-    --It;
-    if (It->isDebugInstr())
-      continue;
-    if (It->getOpcode() == MCS51::INC_DPTR) {
-      ++Increments;
-      continue;
+  MachineBasicBlock *Block = &MBB;
+  auto It = At;
+  for (unsigned Hops = 0; Hops != 4; ++Hops) {
+    while (It != Block->begin()) {
+      --It;
+      if (It->isDebugInstr())
+        continue;
+      if (It->getOpcode() == MCS51::INC_DPTR) {
+        ++Increments;
+        continue;
+      }
+      if (It->isCall() || It->modifiesRegister(MCS51::DPTR, &TRI) ||
+          It->isInlineAsm()) {
+        Def = &*It;
+        break;
+      }
     }
-    if (It->isCall() || It->modifiesRegister(MCS51::DPTR, &TRI) ||
-        It->isInlineAsm()) {
-      Def = &*It;
+    if (Def)
       break;
-    }
+    const BasicBlock *IRBlock = Block->getBasicBlock();
+    if (Block->pred_size() != 1 || !IRBlock)
+      break;
+    MachineBasicBlock *Pred = *Block->pred_begin();
+    if (Pred == Block || !Pred->getBasicBlock() ||
+        Pred->getBasicBlock() == IRBlock ||
+        IRBlock->getSinglePredecessor() != Pred->getBasicBlock())
+      break;
+    Block = Pred;
+    It = Block->end();
   }
   if (Def) {
     if (const auto *Known = FuncInfo.getDptrAddress(Def)) {
