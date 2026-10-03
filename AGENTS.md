@@ -140,12 +140,13 @@ function, and restores FMAP, including when the caller is itself banked.
 Taking the address of a banked function yields its common-area trampoline, so
 ordinary 16-bit function pointers can call banked functions indirectly; the
 trampoline saves and restores FMAP around the call. Functions placed in unique
-`.mcs51.autobank.<name>` sections are distributed across the seven flash banks
-by LLD's size-balanced placement pass. Their calls and function pointers use
+`.mcs51.autobank.<name>` sections are packed into the seven flash banks
+by LLD's first-fit placement pass (largest sections first, each bank filled
+to 32 KiB before the next is used). Their calls and function pointers use
 common-area trampolines whose bank number is resolved after placement. With
 `-mcpu=cc2530` and function sections enabled (the CC2530 Clang profile's
-default), ordinary `.text.*` function sections are also distributed across
-the seven banks by LLD's size-balanced pass. `.text.main`, startup sections,
+default), ordinary `.text.*` function sections are also packed into the
+seven banks by LLD's first-fit pass. `.text.main`, startup sections,
 and interrupt handlers stay in common flash.
 Compiler-generated calls and function pointers use common-area bank-call
 trampolines; LLD redirects cross-bank direct calls and function-address
