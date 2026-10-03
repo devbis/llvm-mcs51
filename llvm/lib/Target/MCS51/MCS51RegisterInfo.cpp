@@ -52,22 +52,18 @@ BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   // The halves of DPTR are byte subregisters for copies only.
   Reserved.set(MCS51::DPL);
   Reserved.set(MCS51::DPH);
+  // DPTR is only ever used inside one expansion; word values live in the
+  // imaginary pairs.
+  Reserved.set(MCS51::DPTR);
   return Reserved;
 }
 
 bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                                             int SPAdj, unsigned FIOperandNum,
                                             RegScavenger *) const {
-  auto PairLo = [](Register Pair) {
-    return Pair == MCS51::R2R3 ? MCS51::R2
-                               : Pair == MCS51::R4R5 ? MCS51::R4 : MCS51::R6;
-  };
-  auto PairHi = [](Register Pair) {
-    return Pair == MCS51::R2R3 ? MCS51::R3
-                               : Pair == MCS51::R4R5 ? MCS51::R5 : MCS51::R7;
-  };
+  auto PairLo = [&](Register Pair) { return getSubReg(Pair, MCS51::sub_lo); };
+  auto PairHi = [&](Register Pair) { return getSubReg(Pair, MCS51::sub_hi); };
 
-  assert(SPAdj == 0 && "unexpected MCS-51 stack pointer adjustment");
   MachineBasicBlock &MBB = *MI->getParent();
   MachineFunction &MF = *MBB.getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
@@ -78,6 +74,9 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                        ->getFrameIndexReference(MF, FI, FrameReg)
                        .getFixed();
   Offset += MI->getOperand(FIOperandNum + 1).getImm();
+  // Stack arguments pushed for a call in progress move SP up, which puts the
+  // frame further below it. PEI reports that growth as a negative SPAdj.
+  Offset += SPAdj;
   bool UsesDirectWordTransfer = false;
   if (Offset < -256 || Offset > 255)
     report_fatal_error("MCS-51 stack frame exceeds 256-byte displacement");
@@ -109,6 +108,52 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   };
   auto OffsetAfterPush = [&](int64_t Count) {
     return static_cast<uint8_t>(Offset - Count);
+  };
+  // Spill code inserted by the allocator can land between a write of A or C
+  // and its reader, so it must leave both alone.
+  auto IsLiveAfter = [&](MCRegister Reg) {
+    for (auto It = std::next(MI); It != MBB.end(); ++It) {
+      if (It->isDebugInstr())
+        continue;
+      if (It->readsRegister(Reg, this))
+        return true;
+      if (It->modifiesRegister(Reg, this))
+        return false;
+    }
+    for (const MachineBasicBlock *Succ : MBB.successors())
+      if (Succ->isLiveIn(Reg))
+        return true;
+    return false;
+  };
+  auto EmitSpillAddress = [&]() {
+    if (Offset >= -2 && Offset <= 2) {
+      EmitDirectStackAddress(Offset);
+      return;
+    }
+    bool PreserveA = IsLiveAfter(MCS51::A);
+    bool PreserveC = IsLiveAfter(MCS51::C);
+    if (!PreserveA && !PreserveC) {
+      EmitAddressAtOffset(Offset);
+      return;
+    }
+    if (Offset >= -8 && Offset <= 8) {
+      EmitDirectStackAddress(Offset);
+      return;
+    }
+    unsigned Pushed = 0;
+    if (PreserveA) {
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+      ++Pushed;
+    }
+    if (PreserveC) {
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+      ++Pushed;
+    }
+    EmitAddressAtOffset(OffsetAfterPush(Pushed));
+    if (PreserveC)
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+    if (PreserveA)
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
   };
 
   if (MI->getOpcode() == MCS51::FRAMEADDR8) {
@@ -171,18 +216,19 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         EmitAddressAtOffset(OffsetAfterPush(1));
         BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
       }
-    } else {
+    } else if (MI->getOpcode() == MCS51::LOAD_FRAME8 ||
+               MI->getOpcode() == MCS51::LOAD_FRAME16) {
       EmitAddress();
+    } else {
+      EmitSpillAddress();
     }
     if ((MI->getOpcode() == MCS51::SPILL_LOAD16 ||
          MI->getOpcode() == MCS51::LOAD_FRAME16) &&
         Dst != MCS51::DPTR) {
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), PairLo(Dst));
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IM_R1_IND), PairLo(Dst));
       BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
           .addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), PairHi(Dst));
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IM_R1_IND), PairHi(Dst));
     } else if (MI->getOpcode() == MCS51::SPILL_LOAD16) {
       UsesDirectWordTransfer = true;
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_R1_IND))
@@ -193,14 +239,18 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_R1_IND))
           .addImm(0x83)
           .addReg(MCS51::R1, RegState::Implicit);
+    } else if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
+               MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8) {
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_R1_IND), Dst);
     } else {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IND_RI)).addReg(MCS51::R1);
     }
     if (MI->getOpcode() == MCS51::SPILL_LOAD_A8) {
       // The load itself leaves the byte in the accumulator register class.
     } else if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
-        MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8 ||
-        MI->getOpcode() == MCS51::LOAD_FRAME8) {
+               MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8) {
+      // Already loaded straight into the register.
+    } else if (MI->getOpcode() == MCS51::LOAD_FRAME8) {
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
     } else if (MI->getOpcode() != MCS51::SPILL_LOAD16 &&
                !(MI->getOpcode() == MCS51::LOAD_FRAME16 &&
@@ -221,13 +271,14 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     if ((MI->getOpcode() == MCS51::SPILL_STORE16 ||
          MI->getOpcode() == MCS51::STORE_FRAME16) &&
         Src != MCS51::DPTR) {
-      EmitAddress();
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(PairLo(Src));
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
+      if (MI->getOpcode() == MCS51::SPILL_STORE16)
+        EmitSpillAddress();
+      else
+        EmitAddress();
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM)).addReg(PairLo(Src));
       BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
           .addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(PairHi(Src));
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM)).addReg(PairHi(Src));
     } else if (MI->getOpcode() == MCS51::SPILL_STORE16) {
       UsesDirectWordTransfer = true;
       EmitAddress();
@@ -255,8 +306,10 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       }
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
     } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||
-        MI->getOpcode() == MCS51::SPILL_STORE_INDIRECT8 ||
-        MI->getOpcode() == MCS51::STORE_FRAME8) {
+               MI->getOpcode() == MCS51::SPILL_STORE_INDIRECT8) {
+      EmitSpillAddress();
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_RN)).addReg(Src);
+    } else if (MI->getOpcode() == MCS51::STORE_FRAME8) {
       EmitAddress();
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
@@ -290,5 +343,5 @@ Register MCS51RegisterInfo::getFrameRegister(const MachineFunction &) const {
 
 const TargetRegisterClass *
 MCS51RegisterInfo::getPointerRegClass(unsigned) const {
-  return &MCS51::MCS51PTRRegClass;
+  return &MCS51::MCS51GPR16RegClass;
 }

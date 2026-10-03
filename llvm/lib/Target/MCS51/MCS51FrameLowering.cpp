@@ -1,4 +1,5 @@
 #include "MCS51FrameLowering.h"
+#include <set>
 #include "MCS51InstrInfo.h"
 #include "MCS51RegisterInfo.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
@@ -111,7 +112,7 @@ static void emitStackAdjustment(MachineBasicBlock &MBB,
   }
 }
 
-static SmallVector<unsigned, 13>
+static SmallVector<unsigned, 40>
 getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
   // An interrupt may arrive with arbitrary values in the register bank, so
   // save every architectural register that the handler actually clobbers.
@@ -119,7 +120,19 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
   bool SavePSW = false, SaveA = false, SaveB = false;
   bool SaveDPL = false, SaveDPH = false;
   bool SaveR[8] = {};
+  const auto &TRI = *MF.getSubtarget().getRegisterInfo();
+  // Imaginary registers are DATA RAM bytes the interrupted code may be using.
+  std::set<unsigned> SaveImag;
   auto Mark = [&](MCRegister Reg) {
+    if (MCS51::MCS51Imag8RegClass.contains(Reg)) {
+      SaveImag.insert(TRI.getEncodingValue(Reg));
+      return;
+    }
+    if (MCS51::MCS51GPR16RegClass.contains(Reg)) {
+      SaveImag.insert(TRI.getEncodingValue(TRI.getSubReg(Reg, MCS51::sub_lo)));
+      SaveImag.insert(TRI.getEncodingValue(TRI.getSubReg(Reg, MCS51::sub_hi)));
+      return;
+    }
     switch (Reg) {
     case MCS51::PSW: SavePSW = true; break;
     case MCS51::C: SavePSW = true; break;
@@ -165,6 +178,10 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
       for (const MachineOperand &MO : MI.operands())
         if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
           Mark(MO.getReg());
+        else if (MO.isRegMask())
+          for (unsigned Imag = MCS51::IM0; Imag <= MCS51::IM23; ++Imag)
+            if (MO.clobbersPhysReg(Imag))
+              Mark(Imag);
       if (MI.getFlag(MachineInstr::FrameSetup) ||
           MI.getFlag(MachineInstr::FrameDestroy) || MI.getNumOperands() == 0 ||
           !MI.getOperand(0).isImm())
@@ -190,7 +207,7 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
       }
     }
 
-  SmallVector<unsigned, 13> Addresses;
+  SmallVector<unsigned, 40> Addresses;
   if (SavePSW) Addresses.push_back(0xd0);
   if (SaveA) Addresses.push_back(0xe0);
   if (SaveB) Addresses.push_back(0xf0);
@@ -198,6 +215,8 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
   if (SaveDPH) Addresses.push_back(0x83);
   for (unsigned I = 0; I != 8; ++I)
     if (SaveR[I]) Addresses.push_back(I);
+  for (unsigned Address : SaveImag)
+    Addresses.push_back(Address);
   if (Reverse)
     std::reverse(Addresses.begin(), Addresses.end());
   return Addresses;
@@ -215,9 +234,14 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
                        Twine(MF.getFrameInfo().getCalleeSavedInfo().size()) +
                        " saved registers");
   bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
+  // Frame-setup instructions load incoming stack arguments relative to the
+  // entry SP, so the frame is allocated after the last of them. Copies that
+  // the allocator placed ahead of some of them do not end the sequence.
   MachineBasicBlock::iterator I = MBB.begin();
-  while (I != MBB.end() &&
-         (I->isDebugInstr() || I->getFlag(MachineInstr::FrameSetup)))
+  for (auto It = MBB.begin(); It != MBB.end(); ++It)
+    if (It->getFlag(MachineInstr::FrameSetup))
+      I = std::next(It);
+  while (I != MBB.end() && I->isDebugInstr())
     ++I;
   if (IsInterrupt) {
     // The 8051 hardware already saved the return PC. Preserve the subset of
@@ -262,9 +286,16 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   // The freestanding entry point returns to startup's halt loop. No caller
   // resumes with its stack, so releasing main's final frame is unnecessary.
   if (MF.getFunction().getName() != "main" ||
-      !MF.getTarget().getTargetCPU().equals_insensitive("cc2530"))
-    emitStackAdjustment(MBB, I, TII, StackSize, /*Deallocate=*/true,
+      !MF.getTarget().getTargetCPU().equals_insensitive("cc2530")) {
+    // The frame lies above the pushed callee-saved registers, so it is
+    // released before they are popped.
+    auto Release = I;
+    while (Release != MBB.begin() &&
+           std::prev(Release)->getFlag(MachineInstr::FrameDestroy))
+      --Release;
+    emitStackAdjustment(MBB, Release, TII, StackSize, /*Deallocate=*/true,
                         PreserveA);
+  }
   if (MF.getFunction().hasFnAttribute("interrupt")) {
     for (unsigned Address : getInterruptSaveAddresses(MF, true))
       BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
@@ -278,7 +309,20 @@ StackOffset MCS51FrameLowering::getFrameIndexReference(
     const MachineFunction &MF, int FI, Register &FrameReg) const {
   FrameReg = MCS51::SP;
   const MachineFrameInfo &MFI = MF.getFrameInfo();
-  return StackOffset::getFixed(MFI.getObjectOffset(FI) - MFI.getStackSize());
+  // Incoming stack arguments lie below the callee-saved registers that the
+  // prologue pushes; locals lie above them.
+  int64_t Pushed = FI < 0 ? static_cast<int64_t>(MFI.getCalleeSavedInfo().size())
+                          : 0;
+  return StackOffset::getFixed(MFI.getObjectOffset(FI) - MFI.getStackSize() -
+                               Pushed);
+}
+
+MachineBasicBlock::iterator MCS51FrameLowering::eliminateCallFramePseudoInstr(
+    MachineFunction &, MachineBasicBlock &MBB,
+    MachineBasicBlock::iterator MI) const {
+  // The pushes and pops of stack arguments are explicit instructions; the
+  // pseudos only tell frame-index elimination how far SP has moved.
+  return MBB.erase(MI);
 }
 
 bool MCS51FrameLowering::hasFPImpl(const MachineFunction &) const {

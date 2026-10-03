@@ -228,7 +228,7 @@ public:
       SDValue Addr = CurDAG->getTargetGlobalAddress(
           GA->getGlobal(), DL, MVT::i16, GA->getOffset(),
           GA->getTargetFlags());
-      SDNode *Res = CurDAG->getMachineNode(MCS51::MOV_DPTR_IMM, DL,
+      SDNode *Res = CurDAG->getMachineNode(MCS51::LDI16, DL,
                                            N->getVTList(), Addr);
       ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
       CurDAG->RemoveDeadNode(N);
