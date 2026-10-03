@@ -63,6 +63,159 @@ static Register saveAToImag(MachineBasicBlock &MBB,
   return Byte;
 }
 
+// One byte of a word operand for a byte-wise compare: a half of a register
+// pair, or a constant taken from the instruction that materialized the word.
+struct WordByte {
+  Register Reg;
+  unsigned Sub = 0;
+  bool IsImm = false;
+  uint8_t Imm = 0;
+};
+
+static void describeWord(MachineRegisterInfo &MRI, Register Word,
+                         SmallVectorImpl<WordByte> &Out) {
+  MachineInstr *Def = MRI.getVRegDef(Word);
+  if (Def && Def->getOpcode() == MCS51::LDI16 && Def->getOperand(1).isImm()) {
+    uint16_t Value = Def->getOperand(1).getImm();
+    Out.push_back({Register(), 0, true, uint8_t(Value & 0xff)});
+    Out.push_back({Register(), 0, true, uint8_t(Value >> 8)});
+    return;
+  }
+  Out.push_back({Word, MCS51::sub_lo, false, 0});
+  Out.push_back({Word, MCS51::sub_hi, false, 0});
+}
+
+// Leaves the outcome of comparing L with R in the carry flag (kinds 0, 1, 3
+// and 4: the borrow of L - R, with the sign bit of the top byte flipped for
+// the signed kinds) or, for kind 2, zero in A when the operands are equal.
+// The caller inverts as needed for the greater-or-equal kinds.
+static void emitWordCompare(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator MII,
+                            const DebugLoc &DL, const TargetInstrInfo &TII,
+                            ArrayRef<WordByte> L, ArrayRef<WordByte> R,
+                            int64_t Kind) {
+  unsigned Count = L.size();
+  auto LoadA = [&](const WordByte &B) {
+    if (B.IsImm)
+      BuildMI(MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A).addImm(B.Imm);
+    else
+      BuildMI(MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
+          .addReg(B.Reg, RegState{}, B.Sub);
+  };
+  auto Alu = [&](unsigned ImOpcode, unsigned ImmOpcode, const WordByte &B) {
+    if (B.IsImm)
+      BuildMI(MBB, MII, DL, TII.get(ImmOpcode), MCS51::A).addImm(B.Imm);
+    else
+      BuildMI(MBB, MII, DL, TII.get(ImOpcode)).addReg(B.Reg, RegState{}, B.Sub);
+  };
+  if (Kind == 2 || Kind == 5) {
+    // XOR the bytes pairwise and OR the differences; A ends up zero when all
+    // match. A zero constant makes the XOR a plain load of the other byte.
+    bool First = true;
+    for (unsigned I = 0; I != Count; ++I) {
+      bool RZero = R[I].IsImm && R[I].Imm == 0;
+      bool LZero = L[I].IsImm && L[I].Imm == 0;
+      if (LZero && RZero)
+        continue;
+      const WordByte &Byte = LZero ? R[I] : L[I];
+      const WordByte *Other = (LZero || RZero) ? nullptr : &R[I];
+      if (First) {
+        LoadA(Byte);
+        if (Other)
+          Alu(MCS51::XRL_A_IM, MCS51::XRL_A_IMM, *Other);
+        First = false;
+        continue;
+      }
+      if (!Other) {
+        // OR the byte straight into the accumulated difference.
+        Alu(MCS51::ORL_A_IM, MCS51::ORL_A_IMM, Byte);
+        continue;
+      }
+      BuildMI(MBB, MII, DL, TII.get(MCS51::MOV_B_A));
+      LoadA(Byte);
+      Alu(MCS51::XRL_A_IM, MCS51::XRL_A_IMM, *Other);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::ORL_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    }
+    if (First)
+      BuildMI(MBB, MII, DL, TII.get(MCS51::CLR_A));
+    return;
+  }
+  bool IsSigned = Kind == 1 || Kind == 4;
+  BuildMI(MBB, MII, DL, TII.get(MCS51::CLR_C));
+  for (unsigned I = 0; I != Count; ++I) {
+    bool Bias = IsSigned && I + 1 == Count;
+    if (!Bias) {
+      LoadA(L[I]);
+      Alu(MCS51::SUBB_A_IM, MCS51::SUBB_A_IMM, R[I]);
+      continue;
+    }
+    // Flip the sign bits so the borrow of an unsigned subtraction orders the
+    // operands as signed values.
+    if (R[I].IsImm) {
+      LoadA(L[I]);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A).addImm(0x80);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A)
+          .addImm(R[I].Imm ^ 0x80);
+    } else {
+      LoadA(R[I]);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A).addImm(0x80);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::MOV_B_A));
+      LoadA(L[I]);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A).addImm(0x80);
+      BuildMI(MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
+          .addImm(0xF0);
+    }
+  }
+}
+
+// The instruction that uses a word only as its XDATA or CODE address, if there
+// is exactly one such user in the block. A word built just to address memory
+// can be computed straight into DPTR.
+static MachineInstr *singleDptrAddressUser(MachineRegisterInfo &MRI,
+                                           Register Word,
+                                           MachineBasicBlock *MBB) {
+  if (!MRI.hasOneNonDBGUse(Word))
+    return nullptr;
+  MachineInstr &User = *MRI.use_nodbg_begin(Word)->getParent();
+  if (User.getParent() != MBB)
+    return nullptr;
+  unsigned AddressOperand;
+  switch (User.getOpcode()) {
+  case MCS51::LOADX8:
+  case MCS51::LOADX16:
+  case MCS51::LOADCODE8:
+  case MCS51::LOADCODE16:
+    AddressOperand = 1;
+    break;
+  case MCS51::STOREX8:
+  case MCS51::STOREX16:
+    AddressOperand = 0;
+    break;
+  default:
+    return nullptr;
+  }
+  if (!User.getOperand(AddressOperand).isReg() ||
+      User.getOperand(AddressOperand).getReg() != Word)
+    return nullptr;
+  // The word must not also be the stored value.
+  for (unsigned I = 0, E = User.getNumOperands(); I != E; ++I)
+    if (I != AddressOperand && User.getOperand(I).isReg() &&
+        User.getOperand(I).getReg() == Word)
+      return nullptr;
+  return &User;
+}
+
+// Points the user's address operand at DPTR itself, which the preceding
+// instructions have already loaded.
+static void markAddressInDptr(MachineInstr &User) {
+  unsigned AddressOperand =
+      (User.getOpcode() == MCS51::STOREX8 || User.getOpcode() == MCS51::STOREX16)
+          ? 0
+          : 1;
+  User.getOperand(AddressOperand).setReg(MCS51::DPTR);
+}
+
 static bool containsFrameIndex(SDValue V) {
   SmallVector<SDValue, 8> Worklist(1, V);
   while (!Worklist.empty()) {
@@ -816,42 +969,35 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   SDValue RHS = Op.getOperand(3);
   SDValue Dest = Op.getOperand(4);
   if (LHS.getValueType() == MVT::i16 && RHS.getValueType() == MVT::i16) {
-    if (CC == ISD::SETEQ || CC == ISD::SETNE) {
-      SDValue Result = DAG.getNode(MCS51ISD::CMPEQ16, DL, MVT::i8, LHS, RHS);
-      unsigned BranchOpcode = CC == ISD::SETEQ ? MCS51ISD::BR_NE
-                                                : MCS51ISD::BR_EQ;
-      return DAG.getNode(BranchOpcode, DL, MVT::Other, Op.getOperand(0),
-                         Result, DAG.getConstant(0, DL, MVT::i8), Dest);
-    }
-    bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
-                    CC == ISD::SETGT || CC == ISD::SETLE;
-    bool Invert = false;
+    unsigned Kind;
     switch (CC) {
-    case ISD::SETULT:
-    case ISD::SETLT:
-      break;
-    case ISD::SETUGE:
-    case ISD::SETGE:
-      Invert = true;
-      break;
+    case ISD::SETEQ: Kind = 2; break;
+    case ISD::SETNE: Kind = 5; break;
+    case ISD::SETULT: Kind = 0; break;
+    case ISD::SETUGE: Kind = 3; break;
+    case ISD::SETLT: Kind = 1; break;
+    case ISD::SETGE: Kind = 4; break;
     case ISD::SETUGT:
-    case ISD::SETGT:
       std::swap(LHS, RHS);
+      Kind = 0;
       break;
     case ISD::SETULE:
+      std::swap(LHS, RHS);
+      Kind = 3;
+      break;
+    case ISD::SETGT:
+      std::swap(LHS, RHS);
+      Kind = 1;
+      break;
     case ISD::SETLE:
       std::swap(LHS, RHS);
-      Invert = true;
+      Kind = 4;
       break;
     default:
       report_fatal_error("unsupported MCS-51 16-bit branch predicate");
     }
-    unsigned CompareOpcode = IsSigned ? MCS51ISD::CMPSLT16
-                                      : MCS51ISD::CMPULT16;
-    SDValue Result = DAG.getNode(CompareOpcode, DL, MVT::i8, LHS, RHS);
-    unsigned BranchOpcode = Invert ? MCS51ISD::BR_EQ : MCS51ISD::BR_NE;
-    return DAG.getNode(BranchOpcode, DL, MVT::Other, Op.getOperand(0),
-                       Result, DAG.getConstant(0, DL, MVT::i8), Dest);
+    return DAG.getNode(MCS51ISD::BR_CMP16, DL, MVT::Other, Op.getOperand(0),
+                       LHS, RHS, DAG.getConstant(Kind, DL, MVT::i8), Dest);
   }
   if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8)
     report_fatal_error("unsupported MCS-51 conditional branch");
@@ -2646,6 +2792,59 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       MI.eraseFromParent();
       return MBB;
     }
+    if (IsAdd) {
+      if (MachineInstr *User = singleDptrAddressUser(MRI, Dst, MBB)) {
+        // The sum only addresses memory: build it directly in DPTR.
+        MachineBasicBlock::iterator At = User->getIterator();
+        auto CopyDptr = [&]() {
+          BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+              .addReg(LHS);
+        };
+        auto Half = [&](unsigned Half, unsigned Sub, bool Carry, bool IsZero,
+                        bool HasK, uint8_t K, Register Other,
+                        unsigned OtherSub) {
+          BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::A)
+              .addReg(LHS, RegState{}, Sub);
+          if (HasK)
+            BuildMI(*MBB, At, DL,
+                    TII.get(Carry ? MCS51::ADDC_A_IMM : MCS51::ADD_A_IMM),
+                    MCS51::A)
+                .addImm(K);
+          else
+            BuildMI(*MBB, At, DL,
+                    TII.get(Carry ? MCS51::ADDC_A_IM : MCS51::ADD_A_IM))
+                .addReg(Other, RegState{}, OtherSub);
+          (void)IsZero;
+          BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), Half)
+              .addReg(MCS51::A);
+        };
+        if (HasImm) {
+          if (Imm <= 4) {
+            CopyDptr();
+            for (unsigned I = 0; I != Imm; ++I)
+              BuildMI(*MBB, At, DL, TII.get(MCS51::INC_DPTR));
+          } else if ((Imm & 0xff) == 0) {
+            BuildMI(*MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPL)
+                .addReg(LHS, RegState{}, MCS51::sub_lo);
+            Half(MCS51::DPH, MCS51::sub_hi, false, false, true, Imm >> 8,
+                 Register(), 0);
+          } else {
+            Half(MCS51::DPL, MCS51::sub_lo, false, false, true, Imm & 0xff,
+                 Register(), 0);
+            Half(MCS51::DPH, MCS51::sub_hi, true, false, true, Imm >> 8,
+                 Register(), 0);
+          }
+        } else {
+          Half(MCS51::DPL, MCS51::sub_lo, false, false, false, 0, RHS,
+               MCS51::sub_lo);
+          Half(MCS51::DPH, MCS51::sub_hi, true, false, false, 0, RHS,
+               MCS51::sub_hi);
+        }
+        markAddressInDptr(*User);
+        MI.eraseFromParent();
+        return MBB;
+      }
+    }
     if (HasImm && IsAdd && (Imm == 1 || Imm == 0xFFFF)) {
       BuildMI(*MBB, MII, DL, TII.get(Imm == 1 ? MCS51::INC16 : MCS51::DEC16),
               Dst)
@@ -2725,108 +2924,52 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Dst = MI.getOperand(0).getReg();
     unsigned Words = Is32 ? 4 : 2;
     int64_t CompareKind = MI.getOperand(Words + 1).getImm();
-    struct Byte {
-      Register Reg;
-      unsigned Sub = 0;
-      bool IsImm = false;
-      uint8_t Imm = 0;
-    };
-    SmallVector<Byte, 4> L, R;
-    auto AddOperand = [&](unsigned Operand, SmallVectorImpl<Byte> &Out) {
-      Register Word = MI.getOperand(Operand).getReg();
-      MachineInstr *Def = MRI.getVRegDef(Word);
-      if (Def && Def->getOpcode() == MCS51::LDI16 &&
-          Def->getOperand(1).isImm()) {
-        uint16_t Value = Def->getOperand(1).getImm();
-        Out.push_back({Register(), 0, true, uint8_t(Value & 0xff)});
-        Out.push_back({Register(), 0, true, uint8_t(Value >> 8)});
-        return;
-      }
-      Out.push_back({Word, MCS51::sub_lo, false, 0});
-      Out.push_back({Word, MCS51::sub_hi, false, 0});
-    };
+    SmallVector<WordByte, 4> L, R;
     if (Is32) {
-      AddOperand(1, L);
-      AddOperand(2, L);
-      AddOperand(3, R);
-      AddOperand(4, R);
+      describeWord(MRI, MI.getOperand(1).getReg(), L);
+      describeWord(MRI, MI.getOperand(2).getReg(), L);
+      describeWord(MRI, MI.getOperand(3).getReg(), R);
+      describeWord(MRI, MI.getOperand(4).getReg(), R);
     } else {
-      AddOperand(1, L);
-      AddOperand(2, R);
+      describeWord(MRI, MI.getOperand(1).getReg(), L);
+      describeWord(MRI, MI.getOperand(2).getReg(), R);
     }
-    unsigned Count = L.size();
-    auto LoadA = [&](const Byte &B) {
-      if (B.IsImm)
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
-            .addImm(B.Imm);
-      else
-        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
-            .addReg(B.Reg, RegState{}, B.Sub);
-    };
-    auto Alu = [&](unsigned ImOpcode, unsigned ImmOpcode, const Byte &B,
-                   int Xor = 0) {
-      if (B.IsImm)
-        BuildMI(*MBB, MII, DL, TII.get(ImmOpcode), MCS51::A)
-            .addImm(B.Imm ^ Xor);
-      else
-        BuildMI(*MBB, MII, DL, TII.get(ImOpcode))
-            .addReg(B.Reg, RegState{}, B.Sub);
-    };
+    emitWordCompare(*MBB, MII, DL, TII, L, R, CompareKind);
     if (CompareKind == 2) {
-      // OR the byte differences together; A is zero when all bytes match.
-      for (unsigned I = 0; I != Count; ++I) {
-        LoadA(L[I]);
-        if (!(R[I].IsImm && R[I].Imm == 0))
-          Alu(MCS51::XRL_A_IM, MCS51::XRL_A_IMM, R[I]);
-        if (I != 0)
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::ORL_A_DIRECT), MCS51::A)
-              .addImm(0xF0);
-        if (I + 1 != Count)
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
-      }
-      // A is non-zero when the operands differ. ADD 0xFF sets CY then; invert
-      // it to report equality.
+      // A is zero when the operands match. ADD 0xFF sets CY when it is not;
+      // invert it to report equality.
       BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A).addImm(0xFF);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
-    } else {
-      bool IsSigned = CompareKind == 1 || CompareKind == 4;
-      bool IsGreaterEqual = CompareKind == 3 || CompareKind == 4;
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_C));
-      for (unsigned I = 0; I != Count; ++I) {
-        bool Bias = IsSigned && I + 1 == Count;
-        if (!Bias) {
-          LoadA(L[I]);
-          Alu(MCS51::SUBB_A_IM, MCS51::SUBB_A_IMM, R[I]);
-          continue;
-        }
-        // Flip the sign bits so the borrow of an unsigned subtraction orders
-        // the operands as signed values.
-        if (R[I].IsImm) {
-          LoadA(L[I]);
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
-              .addImm(0x80);
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A)
-              .addImm(R[I].Imm ^ 0x80);
-        } else {
-          LoadA(R[I]);
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
-              .addImm(0x80);
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_B_A));
-          LoadA(L[I]);
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
-              .addImm(0x80);
-          BuildMI(*MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
-              .addImm(0xF0);
-        }
-      }
-      if (IsGreaterEqual)
-        BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
+    } else if (CompareKind == 3 || CompareKind == 4) {
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::CPL_C));
     }
     // CLR A preserves CY, and RLC moves it into bit zero.
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::BRCMP16) {
+    // Compare and branch without materializing the outcome. A single
+    // conditional branch follows the compare: equality leaves zero in A.
+    MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
+    int64_t Kind = MI.getOperand(2).getImm();
+    MachineBasicBlock *Target = MI.getOperand(3).getMBB();
+    SmallVector<WordByte, 2> L, R;
+    describeWord(MRI, MI.getOperand(0).getReg(), L);
+    describeWord(MRI, MI.getOperand(1).getReg(), R);
+    emitWordCompare(*MBB, MII, DL, TII, L, R, Kind);
+    unsigned Branch;
+    switch (Kind) {
+    case 2: Branch = MCS51::JZ; break;
+    case 5: Branch = MCS51::JNZ; break;
+    case 0:
+    case 1: Branch = MCS51::JC; break;
+    default: Branch = MCS51::JNC; break;
+    }
+    BuildMI(*MBB, MII, DL, TII.get(Branch)).addMBB(Target);
     MI.eraseFromParent();
     return MBB;
   }
@@ -3271,7 +3414,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (MI.getOpcode() == MCS51::LOADCODEABS16)
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
           .add(MI.getOperand(1));
-    else
+    else if (MI.getOperand(1).getReg() != MCS51::DPTR)
       BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
           .add(MI.getOperand(1));
     Register Bytes[2];
@@ -3427,8 +3570,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::LOADX8) {
     Register Dst = MI.getOperand(0).getReg();
+    if (MI.getOperand(1).getReg() != MCS51::DPTR)
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .add(MI.getOperand(1));
+          .add(MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
@@ -3448,8 +3592,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::LOADCODE8) {
     Register Dst = MI.getOperand(0).getReg();
+    if (MI.getOperand(1).getReg() != MCS51::DPTR)
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .add(MI.getOperand(1));
+          .add(MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVC_ADPTR));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
@@ -3458,8 +3603,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::STOREX8) {
+    if (MI.getOperand(0).getReg() != MCS51::DPTR)
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .add(MI.getOperand(0));
+          .add(MI.getOperand(0));
     Register Src = MI.getOperand(1).getReg();
     MachineInstr *Def = nullptr;
     if (valueRemainsInAccumulator(Src, Def))
@@ -3476,8 +3622,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::STOREX16) {
     Register Addr = MI.getOperand(0).getReg();
     Register Src = MI.getOperand(1).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-        .addReg(Addr);
+    if (Addr != MCS51::DPTR)
+      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
+          .addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
         .addReg(Src, RegState{}, MCS51::sub_lo);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_DPTRA));

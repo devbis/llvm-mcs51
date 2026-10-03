@@ -714,7 +714,7 @@ def MCS51Imm16BE : Operand<i16>,
 }
 
 def MCS51Imm16NotOne : Operand<i16>,
-                       ImmLeaf<i16, "return (isUInt<16>(Imm) || isInt<16>(Imm)) && Imm != 1;">;
+                       ImmLeaf<i16, "return isUInt<16>(Imm) || isInt<16>(Imm);">;
 
 def MCS51Rel8 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
@@ -963,6 +963,33 @@ class MCS51BrCCRegPseudo<SDNode Node> : Instruction {
   let hasSideEffects = 1;
   let Defs = [A, R1, C];
   let Pattern = [(Node MCS51GPR8:$lhs, MCS51GPR8:$rhs, bb:$target)];
+}
+
+// A 16-bit compare and branch in one pseudo: kind 2 equal, 5 not equal,
+// 0 and 1 unsigned and signed less than, 3 and 4 unsigned and signed greater
+// or equal. Expanded over the bytes of the operands.
+def SDT_MCS51BrCmp16 : SDTypeProfile<0, 4, [SDTCisVT<0, i16>,
+                                            SDTCisSameAs<0, 1>,
+                                            SDTCisVT<2, i8>,
+                                            SDTCisVT<3, OtherVT>]>;
+def MCS51brcmp16 : SDNode<"MCS51ISD::BR_CMP16", SDT_MCS51BrCmp16,
+                          [SDNPHasChain]>;
+def BRCMP16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs, MCS51Imm8:$kind,
+                           MCS51Addr16:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [A, B, C];
+  let Pattern = [(MCS51brcmp16 MCS51GPR16:$lhs, MCS51GPR16:$rhs, imm:$kind,
+                               bb:$target)];
 }
 
 def BR_EQ8ri : MCS51BrCCImmPseudo<MCS51br_eq>;
@@ -1894,7 +1921,6 @@ def INC16 : Instruction {
   let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 8;
-  let Pattern = [(set MCS51GPR16:$dst, (add MCS51GPR16:$src, (i16 1)))];
 }
 def DEC16 : Instruction {
   let Namespace = "MCS51";
