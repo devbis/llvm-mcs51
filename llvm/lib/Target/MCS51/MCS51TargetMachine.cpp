@@ -35,6 +35,8 @@
 #include "llvm/Transforms/Utils.h"
 #include <optional>
 #include <utility>
+#include "llvm/ADT/Twine.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 

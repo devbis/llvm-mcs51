@@ -10,6 +10,7 @@ using namespace llvm;
 
 #define PRINT_ALIAS_INSTR
 #include "MCS51GenAsmWriter.inc"
+#include "llvm/ADT/Twine.h"
 
 void MCS51InstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
   OS << getRegisterName(Reg);
