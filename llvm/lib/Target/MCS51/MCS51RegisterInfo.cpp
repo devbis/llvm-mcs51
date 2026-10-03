@@ -75,6 +75,24 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     report_fatal_error("MCS-51 stack frame exceeds 256-byte displacement");
 
   auto I = MI->getIterator();
+  // A spilled pair may have only one defined half: the allocator spills the
+  // whole pair when one of its lanes is live. Storing the other half is then
+  // a use of an undefined register, which is flagged as such.
+  auto ByteUndef = [&](Register Byte) {
+    for (auto It = I; It != MBB.begin();) {
+      --It;
+      if (It->isDebugInstr())
+        continue;
+      if (It->modifiesRegister(Byte, this))
+        return RegState{};
+      if (It->killsRegister(Byte, this))
+        return RegState::Undef;
+    }
+    for (const MachineBasicBlock::RegisterMaskPair &LI : MBB.liveins())
+      if (regsOverlap(LI.PhysReg, Byte))
+        return RegState{};
+    return RegState::Undef;
+  };
   auto EmitAddressAtOffset = [&](int64_t AddressOffset) {
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x81);
     BuildMI(MBB, I, DL, TII.get(MCS51::ADD_A_IMM), MCS51::A)
@@ -209,8 +227,9 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   }
   if (MI->getOpcode() == MCS51::SPILL_STORE_IM) {
     EmitSpillAddress();
+    Register Src = MI->getOperand(FIOperandNum + 2).getReg();
     BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM))
-        .addReg(MI->getOperand(FIOperandNum + 2).getReg());
+        .addReg(Src, ByteUndef(Src));
     MI->eraseFromParent();
     return true;
   }
@@ -291,10 +310,12 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
         EmitSpillAddress();
       else
         EmitAddress();
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM)).addReg(PairLo(Src));
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM))
+          .addReg(PairLo(Src), ByteUndef(PairLo(Src)));
       BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1)
           .addReg(MCS51::R1);
-      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM)).addReg(PairHi(Src));
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM))
+          .addReg(PairHi(Src), ByteUndef(PairHi(Src)));
     } else if (MI->getOpcode() == MCS51::SPILL_STORE16) {
       UsesDirectWordTransfer = true;
       EmitAddress();

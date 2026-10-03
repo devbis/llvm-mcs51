@@ -1,26 +1,26 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -ffunction-sections -fdata-sections \
+// RUN:   -ffunction-sections -fdata-sections -mllvm -verify-machineinstrs \
 // RUN:   -c %S/../../../lib/Target/MCS51/mcs51-runtime.c -o %t.runtime.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -DTEST_FIX_SFDI -c %s -o %t.user.o
+// RUN:   -DTEST_FIX_SFDI -mllvm -verify-machineinstrs -c %s -o %t.user.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections -Wl,--gc-sections %S/../../../lib/Target/MCS51/cc2530_startup.s \
 // RUN:   %t.user.o %t.runtime.o -o %t.fixsfdi.elf
 // RUN: llvm-readobj --symbols %t.fixsfdi.elf | FileCheck %s --check-prefix=FIX-SFDI
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -DTEST_FIX_UNSFDI -c %s -o %t.user.o
+// RUN:   -DTEST_FIX_UNSFDI -mllvm -verify-machineinstrs -c %s -o %t.user.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections -Wl,--gc-sections %S/../../../lib/Target/MCS51/cc2530_startup.s \
 // RUN:   %t.user.o %t.runtime.o -o %t.fixunssfdi.elf
 // RUN: llvm-readobj --symbols %t.fixunssfdi.elf | FileCheck %s --check-prefix=FIX-UNSFDI
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -DTEST_FLOATDISF -c %s -o %t.user.o
+// RUN:   -DTEST_FLOATDISF -mllvm -verify-machineinstrs -c %s -o %t.user.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections -Wl,--gc-sections %S/../../../lib/Target/MCS51/cc2530_startup.s \
 // RUN:   %t.user.o %t.runtime.o -o %t.floatdisf.elf
 // RUN: llvm-readobj --symbols %t.floatdisf.elf | FileCheck %s --check-prefix=FLOATDISF
 // RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
-// RUN:   -DTEST_FLOATUNDISF -c %s -o %t.user.o
+// RUN:   -DTEST_FLOATUNDISF -mllvm -verify-machineinstrs -c %s -o %t.user.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections -Wl,--gc-sections %S/../../../lib/Target/MCS51/cc2530_startup.s \
 // RUN:   %t.user.o %t.runtime.o -o %t.floatundisf.elf
