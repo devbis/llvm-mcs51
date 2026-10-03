@@ -2471,80 +2471,53 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::MUL16rr) {
+    // The low word of the product over the bytes of the operands, in the
+    // imaginary registers: lo = L0*R0 and hi = hi(L0*R0) + lo(L0*R1) +
+    // lo(L1*R0).
     MachineFunction &MF = *MBB->getParent();
-    Register Dst = MI.getOperand(0).getReg();
-    Register LHS = MI.getOperand(1).getReg();
-    Register RHS = MI.getOperand(2).getReg();
-    Register Bytes[4];
-    Register ProductLo = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    Register ProductHi = MF.getRegInfo().createVirtualRegister(
-        &MCS51::MCS51GPR8RegClass);
-    for (Register &Byte : Bytes)
-      Byte = MF.getRegInfo().createVirtualRegister(
-          &MCS51::MCS51GPR8RegClass);
-
-    auto CopyDPTR = [&](Register Src) {
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
-          .addReg(Src);
+    MachineRegisterInfo &MRI = MF.getRegInfo();
+    SmallVector<WordByte, 2> L, R;
+    describeWord(MRI, MI.getOperand(1).getReg(), L);
+    describeWord(MRI, MI.getOperand(2).getReg(), R);
+    auto LoadA = [&](const WordByte &B) {
+      if (B.IsImm)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+            .addImm(B.Imm);
+      else
+        BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
+            .addReg(B.Reg, RegState{}, B.Sub);
     };
-    auto ExtractBytes = [&](Register Src, Register Lo, Register Hi) {
-      CopyDPTR(Src);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(0x82);
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Lo)
-          .addReg(MCS51::A);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(0x83);
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Hi)
-          .addReg(MCS51::A);
+    auto LoadB = [&](const WordByte &B) {
+      if (B.IsImm)
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IMM))
+            .addImm(0xF0)
+            .addImm(B.Imm);
+      else
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_IM))
+            .addImm(0xF0)
+            .addReg(B.Reg, RegState{}, B.Sub);
     };
-    ExtractBytes(LHS, Bytes[0], Bytes[1]);
-    ExtractBytes(RHS, Bytes[2], Bytes[3]);
-
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Bytes[0]);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_RN))
-        .addImm(0xF0)
-        .addReg(Bytes[2]);
+    LoadA(L[0]);
+    LoadB(R[0]);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ProductLo)
-        .addReg(MCS51::A);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-        .addImm(0xF0);
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), ProductHi)
-        .addReg(MCS51::A);
-
-    auto AddCrossProductLow = [&](Register L, Register R) {
-      Register Partial = MF.getRegInfo().createVirtualRegister(
-          &MCS51::MCS51GPR8RegClass);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(L);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DIRECT_RN))
-          .addImm(0xF0)
-          .addReg(R);
+    Register Lo = saveAToImag(*MBB, MII, DL, TII, MRI);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
+    Register Hi = saveAToImag(*MBB, MII, DL, TII, MRI);
+    auto AddCross = [&](const WordByte &X, const WordByte &Y) {
+      LoadA(X);
+      LoadB(Y);
       BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Partial)
-          .addReg(MCS51::A);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ProductHi);
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_RN)).addReg(Partial);
-      Register NewProductHi = MF.getRegInfo().createVirtualRegister(
-          &MCS51::MCS51GPR8RegClass);
-      BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), NewProductHi)
-          .addReg(MCS51::A);
-      ProductHi = NewProductHi;
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::ADD_A_IM)).addReg(Hi);
+      Hi = saveAToImag(*MBB, MII, DL, TII, MRI);
     };
-    AddCrossProductLow(Bytes[0], Bytes[3]);
-    AddCrossProductLow(Bytes[1], Bytes[2]);
-
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ProductLo);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(ProductHi);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-        .addReg(MCS51::DPTR);
+    AddCross(L[0], R[1]);
+    AddCross(L[1], R[0]);
+    buildWord(*MBB, MII, DL, TII, MI.getOperand(0).getReg(), Lo, Hi);
     MI.eraseFromParent();
     return MBB;
   }
   if (MI.getOpcode() == MCS51::MUL8TO16rr) {
+    MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
     Register Dst = MI.getOperand(0).getReg();
     Register LHS = MI.getOperand(1).getReg();
     Register RHS = MI.getOperand(2).getReg();
@@ -2553,11 +2526,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addImm(0xF0)
         .addReg(RHS);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MUL_AB));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPL_A));
+    Register Lo = saveAToImag(*MBB, MII, DL, TII, MRI);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPH_A));
-    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
-        .addReg(MCS51::DPTR);
+    Register Hi = saveAToImag(*MBB, MII, DL, TII, MRI);
+    buildWord(*MBB, MII, DL, TII, Dst, Lo, Hi);
     MI.eraseFromParent();
     return MBB;
   }
