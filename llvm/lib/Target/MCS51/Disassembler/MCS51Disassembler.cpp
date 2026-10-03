@@ -9,6 +9,8 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
 
+#define DEBUG_TYPE "mcs51-disassembler"
+
 using namespace llvm;
 using namespace llvm::MCD;
 using DecodeStatus = MCDisassembler::DecodeStatus;

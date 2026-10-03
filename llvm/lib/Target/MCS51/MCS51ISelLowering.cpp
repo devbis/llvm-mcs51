@@ -170,8 +170,6 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setTargetDAGCombine(ISD::SRL);
   setTargetDAGCombine(ISD::TRUNCATE);
   setTargetDAGCombine(ISD::STORE);
-  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::SRL16_8));
-  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::SHL16_8));
   setOperationAction(ISD::SHL, MVT::i8, Legal);
   setOperationAction(ISD::SHL, MVT::i16, Custom);
   setOperationAction(ISD::SRL, MVT::i8, Legal);

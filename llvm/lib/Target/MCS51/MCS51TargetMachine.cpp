@@ -749,6 +749,7 @@ public:
       bool OnlyCopies = true;
       for (MachineInstr &Use : MRI.use_nodbg_instructions(AccValue)) {
         if (!Use.isCopy() || Use.getOperand(1).getReg() != AccValue ||
+            !Use.getOperand(0).getReg().isVirtual() ||
             MRI.getRegClass(Use.getOperand(0).getReg()) !=
                 &MCS51::MCS51GPR8RegClass ||
             !MRI.hasOneDef(Use.getOperand(0).getReg())) {
@@ -992,8 +993,20 @@ public:
                         CopySPToA->getNumOperands() > 1 &&
                         CopySPToA->getOperand(1).isImm() &&
                         CopySPToA->getOperand(1).getImm() == 0x81);
+        // The rewrite drops the address from A, so skip it when a later
+        // instruction still reads A.
+        auto AReadAfter = [&](MachineInstr *Start) {
+          for (auto J = std::next(Start->getIterator()); J != MBB.end(); ++J) {
+            if (J->readsRegister(MCS51::A, TRI))
+              return true;
+            if (J->modifiesRegister(MCS51::A, TRI))
+              return false;
+          }
+          return false;
+        };
         if (LoadsSP && AddZero &&
-            CopyAToR1 && AddZero->getOpcode() == MCS51::ADD_A_IMM &&
+            CopyAToR1 && !AReadAfter(CopyAToR1) &&
+            AddZero->getOpcode() == MCS51::ADD_A_IMM &&
             AddZero->getNumOperands() > 1 &&
             AddZero->getOperand(1).isImm() &&
             AddZero->getOperand(1).getImm() == 0 &&
@@ -1365,6 +1378,22 @@ public:
               AddressReg == MCS51::R0 ? R0StackOffset : R1StackOffset;
           int NewOffset =
               static_cast<int8_t>(AddressAdd->getOperand(1).getImm());
+          // The rewrite below drops the address from A. Keep the sequence when
+          // a later instruction still reads it.
+          bool AddressInAUsed = false;
+          for (auto J = std::next(AddressMove); J != MBB.end(); ++J) {
+            if (J->readsRegister(MCS51::A, TRI)) {
+              AddressInAUsed = true;
+              break;
+            }
+            if (J->modifiesRegister(MCS51::A, TRI))
+              break;
+          }
+          if (CachedOffset && AddressInAUsed) {
+            CachedOffset = NewOffset;
+            I = std::next(AddressMove);
+            continue;
+          }
           if (CachedOffset) {
             int Delta = static_cast<int8_t>(
                 static_cast<uint8_t>(NewOffset - *CachedOffset));

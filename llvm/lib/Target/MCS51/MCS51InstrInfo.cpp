@@ -216,7 +216,7 @@ bool MCS51InstrInfo::analyzeBranch(
         Opcode == MCS51::JC || Opcode == MCS51::JNC)
       return;
     for (const MachineOperand &MO : MI.operands())
-      if (!MO.isImplicit() && !MO.isMBB())
+      if (!MO.isMBB() && !(MO.isReg() && MO.isImplicit()))
         Cond.push_back(MO);
   };
 
