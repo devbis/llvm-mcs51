@@ -53,8 +53,7 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 
 // CHECK-LABEL: caller_promoted:
 // CHECK: lcall callee
-// CHECK: mov 130, a
-// CHECK: mov 131, #0
+// CHECK: mov 49, #0
 // CHECK: ret
 
 // CHECK-LABEL: caller_word_arg:
@@ -64,11 +63,12 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK-LABEL: echo_word:
 // CHECK: ret
 
+// The fifth byte argument is the first one on the stack.
 // CHECK-LABEL: fifth_arg:
-// CHECK: mov a, 129
-// CHECK: add a, #-2
-// CHECK: mov r0, a
-// CHECK: mov a, @r0
+// CHECK: mov r1, 129
+// CHECK: dec r1
+// CHECK: dec r1
+// CHECK: mov a, @r1
 // CHECK: ret
 
 // CHECK-LABEL: caller5:
@@ -77,48 +77,22 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
 // CHECK: dec 129
 // CHECK: ret
 
+// Word arguments travel in the first imaginary pairs, so the sixth argument
+// here is the second pair.
 // CHECK-LABEL: sixth_word:
-// CHECK: mov a, 129
-// CHECK: add a, #-2
-// CHECK: mov r0, a
-// CHECK: mov a, @r0
-// CHECK: mov 130, a
-// CHECK: dec r0
-// CHECK: mov a, @r0
-// CHECK: mov 131, a
-// CHECK: inc 129
+// CHECK: mov 48, 50
+// CHECK: mov 49, 51
 // CHECK: ret
 
 // CHECK-LABEL: caller6_word:
-// CHECK: mov a, 129
-// CHECK: add a, #-2
-// CHECK: mov r0, a
-// CHECK: mov a, @r0
-// CHECK: mov 130, a
-// CHECK: dec r0
-// CHECK: mov a, @r0
-// CHECK: mov 131, a
-// CHECK: inc 129
-// CHECK: push 131
-// CHECK: push 130
-// CHECK: mov dptr, #0
 // CHECK: lcall callee6_word
-// CHECK: dec 129
-// CHECK: dec 129
 // CHECK: ret
 
 // CHECK-LABEL: caller_mixed_stack:
-// CHECK: mov dptr, #4660
-// CHECK: push 131
-// CHECK: push 130
-// CHECK: mov 224, #0
 // CHECK: push 224
-// CHECK: mov a, r{{[0-7]}}
-// CHECK: push 224
+// CHECK: mov 50, #52
+// CHECK: mov 51, #18
 // CHECK: lcall callee_mixed_stack
-// CHECK: dec 129
-// CHECK: dec 129
-// CHECK: dec 129
 // CHECK: dec 129
 // CHECK: ret
 

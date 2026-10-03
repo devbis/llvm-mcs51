@@ -188,28 +188,32 @@ exit:
 
 ; CHECK-LABEL: equal_i16:
 ; CHECK: xrl a,
-; CHECK: jnz
-; CHECK: mov a, #1
-; CHECK: clr a
+; CHECK: orl a, 240
+; CHECK: rlc a
+; CHECK: ret
 
 ; CHECK-LABEL: branch_not_equal_i16:
 ; CHECK: xrl a,
-; CHECK: jnz
+; CHECK: orl a, 240
+; CHECK-NEXT: jz
 
 ; CHECK-LABEL: branch_signed_less:
-; CHECK: xch a, 240
+; CHECK: xrl a, #128
 ; CHECK: subb a, 240
-; CHECK: jz
+; CHECK-NEXT: jnc
 ; CHECK-LABEL: branch_unsigned_greater_equal:
-; CHECK: subb a, 131
-; CHECK: jnz
+; CHECK: subb a, 51
+; CHECK-NEXT: jc
 
 ; CHECK-LABEL: branch_equal_i32:
+; CHECK: orl a, 240
 ; CHECK: jnz
 ; CHECK-LABEL: branch_signed_less_i32:
-; CHECK: jnz
+; CHECK: subb a, 240
+; CHECK-NEXT: jnc
 ; CHECK-LABEL: branch_unsigned_greater_equal_i32:
-; CHECK: jnz
+; CHECK: subb a, 55
+; CHECK-NEXT: jc
 ; CHECK-LABEL: branch_not_equal_i32:
 ; CHECK-LABEL: branch_signed_greater_equal_i32:
 ; CHECK-LABEL: branch_signed_greater_i32:

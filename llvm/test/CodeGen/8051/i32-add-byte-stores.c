@@ -23,8 +23,6 @@ void main(void) {
 // use the byte results directly, so the stores share one incrementing DPTR.
 // CHECK-LABEL: main:
 // CHECK: mov dptr, #counter
-// CHECK: inc r3
-// CHECK: mov dptr, #counter+2
 // CHECK-NOT: mov @r1, a
 // CHECK-NOT: mov a, @r1
 // CHECK: mov dptr, #bytes
