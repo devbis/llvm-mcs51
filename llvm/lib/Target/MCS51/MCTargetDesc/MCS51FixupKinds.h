@@ -21,6 +21,8 @@ enum Fixups {
   fixup_dptr16,
   fixup_pcrel8,
   fixup_11,
+  fixup_lo8,
+  fixup_hi8,
   NumTargetFixupKinds
 };
 

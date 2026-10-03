@@ -85,6 +85,8 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   case R_8051_NONE:
     return R_NONE;
   case R_8051_8:
+  case R_8051_LO8:
+  case R_8051_HI8:
   case R_8051_16:
   case R_8051_16_BE:
   case R_8051_DPTR16:
@@ -279,6 +281,12 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_8051_8:
     checkUInt(ctx, loc, val, 8, rel);
     *loc = val;
+    break;
+  case R_8051_LO8:
+    *loc = static_cast<uint8_t>(val);
+    break;
+  case R_8051_HI8:
+    *loc = static_cast<uint8_t>(val >> 8);
     break;
   case R_8051_16:
     checkUInt(ctx, loc, val, 16, rel);
