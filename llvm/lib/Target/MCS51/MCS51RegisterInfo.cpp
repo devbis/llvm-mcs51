@@ -21,9 +21,17 @@ MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   // The freestanding C entry point is entered by startup code and never
   // returns to a C caller. It does not need to preserve the normal callee-save
   // register bank around its body.
+  // The imaginary registers IM12-IM23 are callee-saved for every function
+  // that is called; only the freestanding entry point is exempt.
   static const MCPhysReg MainSaveList[] = {0};
-  static const MCPhysReg I32ReturnSaveList[] = {MCS51::R2, MCS51::R3, 0};
-  static const MCPhysReg I64ReturnSaveList[] = {0};
+  static const MCPhysReg I32ReturnSaveList[] = {
+      MCS51::R2,  MCS51::R3,  MCS51::IM12, MCS51::IM13, MCS51::IM14,
+      MCS51::IM15, MCS51::IM16, MCS51::IM17, MCS51::IM18, MCS51::IM19,
+      MCS51::IM20, MCS51::IM21, MCS51::IM22, MCS51::IM23, 0};
+  static const MCPhysReg I64ReturnSaveList[] = {
+      MCS51::IM12, MCS51::IM13, MCS51::IM14, MCS51::IM15, MCS51::IM16,
+      MCS51::IM17, MCS51::IM18, MCS51::IM19, MCS51::IM20, MCS51::IM21,
+      MCS51::IM22, MCS51::IM23, 0};
   if (MF && MF->getFunction().getName() == "main" &&
       MF->getTarget().getTargetCPU().equals_insensitive("cc2530"))
     return MainSaveList;
