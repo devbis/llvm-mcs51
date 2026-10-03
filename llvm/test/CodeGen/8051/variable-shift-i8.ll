@@ -20,6 +20,6 @@ entry:
 }
 
 ; CHECK-LABEL: left_shift_byte_wide_amount:
-; CHECK: mov a, 131
+; CHECK: mov a, 49
 ; CHECK: jnz
 ; CHECK: djnz 240

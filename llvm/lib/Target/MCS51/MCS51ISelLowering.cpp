@@ -1013,6 +1013,32 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
     auto *FalseValue = dyn_cast<ConstantSDNode>(Op.getOperand(3));
     bool IsSigned = CC == ISD::SETLT || CC == ISD::SETGE ||
                     CC == ISD::SETGT || CC == ISD::SETLE;
+    bool IsBoolSelect = TrueValue && FalseValue &&
+                        ((TrueValue->isOne() && FalseValue->isZero()) ||
+                         (TrueValue->isZero() && FalseValue->isOne()));
+    if (!IsBoolSelect) {
+      // Select between the values with a compare-and-branch over the bytes,
+      // without materializing the condition.
+      SDValue LHS = Op.getOperand(0), RHS = Op.getOperand(1);
+      int64_t Kind = -1;
+      switch (CC) {
+      case ISD::SETEQ: Kind = 2; break;
+      case ISD::SETNE: Kind = 5; break;
+      case ISD::SETULT: Kind = 0; break;
+      case ISD::SETUGE: Kind = 3; break;
+      case ISD::SETLT: Kind = 1; break;
+      case ISD::SETGE: Kind = 4; break;
+      case ISD::SETUGT: std::swap(LHS, RHS); Kind = 0; break;
+      case ISD::SETULE: std::swap(LHS, RHS); Kind = 3; break;
+      case ISD::SETGT: std::swap(LHS, RHS); Kind = 1; break;
+      case ISD::SETLE: std::swap(LHS, RHS); Kind = 4; break;
+      default: break;
+      }
+      if (Kind >= 0)
+        return DAG.getNode(MCS51ISD::SELECT_CMP16, DL, Op.getValueType(), LHS,
+                           RHS, DAG.getConstant(Kind, DL, MVT::i8),
+                           Op.getOperand(2), Op.getOperand(3));
+    }
     if (Op.getValueType() == MVT::i16) {
       SDValue Result = LowerWordCompare(Op.getOperand(0), Op.getOperand(1),
                                         CC, IsSigned);
@@ -2107,6 +2133,66 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
             TII.get(TargetOpcode::PHI), Dst)
         .addReg(EqualCopy).addMBB(EqualBB)
         .addReg(NotEqualCopy).addMBB(NotEqualBB);
+    return Tail;
+  }
+  if (MI.getOpcode() == MCS51::SELECT8_CMP16 ||
+      MI.getOpcode() == MCS51::SELECT16_CMP16) {
+    // A select whose condition is a word comparison: compare and branch
+    // straight to the arm that produces the value.
+    MachineFunction &MF = *MBB->getParent();
+    MachineRegisterInfo &MRI = MF.getRegInfo();
+    bool IsWord = MI.getOpcode() == MCS51::SELECT16_CMP16;
+    const TargetRegisterClass *RC =
+        IsWord ? &MCS51::MCS51GPR16RegClass : &MCS51::MCS51GPR8RegClass;
+    Register Dst = MI.getOperand(0).getReg();
+    int64_t Kind = MI.getOperand(3).getImm();
+    Register TrueValue = MI.getOperand(4).getReg();
+    Register FalseValue = MI.getOperand(5).getReg();
+    SmallVector<WordByte, 2> L, R;
+    describeWord(MRI, MI.getOperand(1).getReg(), L);
+    describeWord(MRI, MI.getOperand(2).getReg(), R);
+    Register TrueCopy = MRI.createVirtualRegister(RC);
+    Register FalseCopy = MRI.createVirtualRegister(RC);
+    MachineBasicBlock *Tail = MBB->splitAt(MI);
+    if (Tail == MBB) {
+      Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      MF.insert(std::next(MBB->getIterator()), Tail);
+      Tail->transferSuccessorsAndUpdatePHIs(MBB);
+      MBB->addSuccessor(Tail);
+    }
+    Tail->removeLiveIn(MCS51::DPTR);
+    MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    MF.insert(Tail->getIterator(), TrueBB);
+    MF.insert(Tail->getIterator(), FalseBB);
+    while (!MBB->succ_empty())
+      MBB->removeSuccessor(MBB->succ_begin());
+    MBB->addSuccessor(TrueBB);
+    MBB->addSuccessor(FalseBB);
+    TrueBB->addSuccessor(Tail);
+    FalseBB->addSuccessor(Tail);
+    MI.eraseFromParent();
+
+    emitWordCompare(*MBB, MBB->end(), DL, TII, L, R, Kind);
+    unsigned Branch;
+    switch (Kind) {
+    case 2: Branch = MCS51::JZ; break;
+    case 5: Branch = MCS51::JNZ; break;
+    case 0:
+    case 1: Branch = MCS51::JC; break;
+    default: Branch = MCS51::JNC; break;
+    }
+    BuildMI(*MBB, MBB->end(), DL, TII.get(Branch)).addMBB(TrueBB);
+    BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(FalseBB);
+    BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(TargetOpcode::COPY), TrueCopy)
+        .addReg(TrueValue);
+    BuildMI(*TrueBB, TrueBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*FalseBB, FalseBB->end(), DL, TII.get(TargetOpcode::COPY),
+            FalseCopy)
+        .addReg(FalseValue);
+    BuildMI(*FalseBB, FalseBB->end(), DL, TII.get(MCS51::LJMP)).addMBB(Tail);
+    BuildMI(*Tail, Tail->getFirstNonPHI(), DL, TII.get(TargetOpcode::PHI), Dst)
+        .addReg(TrueCopy).addMBB(TrueBB).addReg(FalseCopy).addMBB(FalseBB);
     return Tail;
   }
   if (MI.getOpcode() == MCS51::SELECT16) {

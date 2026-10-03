@@ -14,8 +14,9 @@ merge:
 }
 
 ; CHECK-LABEL: compare_in_predecessor:
-; CHECK:       jnz
-; CHECK:       mov a, #1
-; CHECK:       sjmp
-; CHECK:       clr a
+; The compare result must be combined with %take (r7) without being lost.
+; CHECK:       xrl a, 50
+; CHECK:       xrl a, 51
+; CHECK:       orl a,
+; CHECK:       anl a, r7
 ; CHECK:       ret

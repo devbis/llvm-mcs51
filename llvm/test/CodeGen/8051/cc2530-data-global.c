@@ -25,28 +25,28 @@ int main(void) {
 }
 
 // MAP: Name: .mcs51_data1
-// MAP: Address: 0x30
+// MAP: Address: 0x48
 // MAP: Name: .mcs51_data2
-// MAP: Address: 0x31
+// MAP: Address: 0x49
 // MAP: Name: direct_data
-// MAP: Value: 0x30
+// MAP: Value: 0x48
 // MAP: Name: indirect_data
-// MAP: Value: 0x31
+// MAP: Value: 0x49
 
 // DIS-LABEL: <__mcs51_start>:
 // DIS: lcall
 // DIS: lcall
 // DIS: lcall
 // DIS-LABEL: <main>:
-// DIS: mov 48, #1
-// DIS: mov r0, #49
+// DIS: mov 72, #1
+// DIS: mov r0, #73
 // DIS: mov @r0, #2
 // DIS: movx @dptr, a
 // DIS-LABEL: <read_indirect_data>:
-// DIS: mov r0, #49
+// DIS: mov r0, #73
 // DIS: mov a, @r0
 // DIS-LABEL: <read_direct_data>:
-// DIS: mov a, 48
+// DIS: mov a, 72
 
 // IHEX: :01{{[0-9A-F][0-9A-F][0-9A-F][0-9A-F]}}0001
 // IHEX: :01{{[0-9A-F][0-9A-F][0-9A-F][0-9A-F]}}0002
