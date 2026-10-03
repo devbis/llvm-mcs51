@@ -23,8 +23,8 @@ unsigned short add_large16(unsigned short value) { return value + 60000; }
 // CHECK: mov a, 48
 // CHECK-NEXT: add a, #2
 // CHECK-NEXT: mov 48, a
-// CHECK-NEXT: mov a, 49
-// CHECK-NEXT: addc a, #0
+// CHECK-NEXT: clr a
+// CHECK-NEXT: addc a, 49
 // CHECK-NEXT: mov 49, a
 // CHECK-NEXT: ret
 // CHECK-LABEL: subtract_one16:

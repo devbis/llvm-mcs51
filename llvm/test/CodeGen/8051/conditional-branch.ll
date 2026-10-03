@@ -154,7 +154,6 @@ no:
 ; CHECK: subb a,
 
 ; CHECK-LABEL: choose_signed_const:
-; CHECK: mov r0, #-5
-; CHECK: mov a, r0
+; CHECK: mov a, #-5
 ; CHECK: xrl a, #128
 ; CHECK: subb a,
