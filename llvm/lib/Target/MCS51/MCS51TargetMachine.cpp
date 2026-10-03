@@ -2167,6 +2167,34 @@ public:
         *static_cast<const MCS51InstrInfo *>(MF.getSubtarget().getInstrInfo());
     const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
     bool Changed = false;
+    // MOV Rn,A / MOV A,Rn (either order) leaves A unchanged: drop the second.
+    for (MachineBasicBlock &MBB : MF) {
+      MachineInstr *Prev = nullptr;
+      for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
+        if (MI.isDebugInstr())
+          continue;
+        unsigned Opc = MI.getOpcode();
+        if (Prev && ((Prev->getOpcode() == MCS51::MOV_RN_A &&
+                      Opc == MCS51::MOV_A_RN) ||
+                     (Prev->getOpcode() == MCS51::MOV_A_RN &&
+                      Opc == MCS51::MOV_RN_A))) {
+          // Both forms name the R register as their first operand.
+          Register PrevReg = Prev->getOperand(0).getReg();
+          Register Reg = MI.getOperand(0).getReg();
+          if (PrevReg == Reg) {
+            bool Killed = Opc == MCS51::MOV_A_RN && MI.getOperand(0).isKill();
+            MI.eraseFromParent();
+            // With the register dead afterwards, the store was only for MI.
+            if (Killed)
+              Prev->eraseFromParent();
+            Changed = true;
+            Prev = nullptr;
+            continue;
+          }
+        }
+        Prev = &MI;
+      }
+    }
     for (MachineBasicBlock &MBB : MF) {
       for (auto I = MBB.begin(); I != MBB.end(); ++I) {
         if (!isCandidate(*I))
