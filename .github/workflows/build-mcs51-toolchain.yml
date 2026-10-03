@@ -1,0 +1,470 @@
+name: Build MCS-51 LLVM Toolchain
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "mcs51" ]
+    paths:
+      - "llvm/**"
+      - "clang/**"
+      - "lld/**"
+      - "cmake/**"
+      - ".github/workflows/build-mcs51-toolchain.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcs51-llvm-toolchain
+  cancel-in-progress: false
+
+env:
+  BUILD_TYPE: Release
+  ENABLE_PROJECTS: clang;lld
+  LLVM_DEFAULT_TARGET_TRIPLE: mcs51
+  LLVM_TARGETS_TO_BUILD: MCS51
+  LLVM_TOOLCHAIN_TOOLS: llc;opt;llvm-ar;llvm-mc;llvm-nm;llvm-objcopy;llvm-objdump;llvm-ranlib;llvm-readobj;llvm-size;llvm-strip
+  MCS51_LIT_TESTS: >-
+    llvm/test/CodeGen/8051
+    llvm/test/MC/MCS51
+    lld/test/ELF/mcs51-relocations.s
+    lld/test/ELF/mcs51-data-pointer-reloc.s
+    lld/test/ELF/mcs51-11-bit-branch.s
+    lld/test/ELF/mcs51-auto-bank.s
+    lld/test/ELF/mcs51-auto-bank-fill.s
+
+jobs:
+  build-toolchain:
+    name: ${{ matrix.host }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux-amd64
+            runs_on: ubuntu-latest
+            archive_ext: tar.gz
+            is_windows: false
+          - host: linux-arm64
+            runs_on: ubuntu-24.04-arm
+            archive_ext: tar.gz
+            is_windows: false
+          - host: macos-amd64
+            runs_on: macos-15-intel
+            archive_ext: tar.gz
+            is_windows: false
+          - host: macos-arm64
+            runs_on: macos-14
+            archive_ext: tar.gz
+            is_windows: false
+          - host: windows-amd64
+            runs_on: windows-latest
+            archive_ext: zip
+            is_windows: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Enable MSVC environment
+        if: matrix.is_windows
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake python3
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ninja >/dev/null 2>&1; then
+            brew install ninja
+          fi
+
+      - name: Show tool versions (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Show tool versions (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Configure LLVM toolchain (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$GITHUB_WORKSPACE/build/${{ matrix.host }}-toolchain"
+          INSTALL_DIR="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
+          mkdir -p "$BUILD_DIR" "$INSTALL_DIR"
+          cmake -S llvm -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+            -DLLVM_ENABLE_PROJECTS="$ENABLE_PROJECTS" \
+            -DLLVM_DEFAULT_TARGET_TRIPLE="$LLVM_DEFAULT_TARGET_TRIPLE" \
+            -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGETS_TO_BUILD" \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
+            -DLLVM_TOOLCHAIN_TOOLS="$LLVM_TOOLCHAIN_TOOLS" \
+            -DLLVM_INCLUDE_TESTS=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_BUILD_TESTS=OFF \
+            -DLLVM_BUILD_BENCHMARKS=OFF \
+            -DLLVM_BUILD_EXAMPLES=OFF \
+            -DLLVM_BUILD_DOCS=OFF \
+            -DCLANG_INCLUDE_TESTS=OFF
+
+      - name: Configure LLVM toolchain (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE "build/${{ matrix.host }}-toolchain"
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
+          New-Item -ItemType Directory -Force -Path $buildDir, $installDir | Out-Null
+          cmake -S llvm -B $buildDir -G Ninja `
+            "-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE" `
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" `
+            "-DCMAKE_INSTALL_PREFIX=$installDir" `
+            "-DLLVM_ENABLE_PROJECTS=$env:ENABLE_PROJECTS" `
+            "-DLLVM_DEFAULT_TARGET_TRIPLE=$env:LLVM_DEFAULT_TARGET_TRIPLE" `
+            "-DLLVM_TARGETS_TO_BUILD=$env:LLVM_TARGETS_TO_BUILD" `
+            "-DLLVM_ENABLE_ZSTD=OFF" `
+            "-DLLVM_ENABLE_LIBXML2=OFF" `
+            "-DLLVM_ENABLE_LIBEDIT=OFF" `
+            "-DLLVM_ENABLE_TERMINFO=OFF" `
+            "-DLLVM_INSTALL_TOOLCHAIN_ONLY=ON" `
+            "-DLLVM_TOOLCHAIN_TOOLS=$env:LLVM_TOOLCHAIN_TOOLS" `
+            "-DLLVM_INCLUDE_TESTS=ON" `
+            "-DLLVM_INCLUDE_BENCHMARKS=OFF" `
+            "-DLLVM_INCLUDE_EXAMPLES=OFF" `
+            "-DLLVM_BUILD_TESTS=OFF" `
+            "-DLLVM_BUILD_BENCHMARKS=OFF" `
+            "-DLLVM_BUILD_EXAMPLES=OFF" `
+            "-DLLVM_BUILD_DOCS=OFF" `
+            "-DCLANG_INCLUDE_TESTS=OFF"
+
+      # The runtime target builds the arithmetic/memory runtime, the CC2530
+      # startup object and linker script into Clang's resource directory, and
+      # the install target copies them next to the compiler.
+      - name: Build and install toolchain (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$GITHUB_WORKSPACE/build/${{ matrix.host }}-toolchain"
+          INSTALL_DIR="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
+          cmake --build "$BUILD_DIR" --target mcs51-runtime install llvm-config FileCheck --parallel
+          install -m 755 "$BUILD_DIR/bin/llvm-config" "$INSTALL_DIR/bin/llvm-config"
+          install -m 755 "$BUILD_DIR/bin/FileCheck" "$INSTALL_DIR/bin/FileCheck"
+
+      - name: Build and install toolchain (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE "build/${{ matrix.host }}-toolchain"
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
+          cmake --build $buildDir --target mcs51-runtime install llvm-config FileCheck --parallel
+          Copy-Item -Force (Join-Path $buildDir "bin/llvm-config.exe") (Join-Path $installDir "bin/llvm-config.exe")
+          Copy-Item -Force (Join-Path $buildDir "bin/FileCheck.exe") (Join-Path $installDir "bin/FileCheck.exe")
+
+      - name: Run MCS-51 lit tests (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$GITHUB_WORKSPACE/build/${{ matrix.host }}-toolchain"
+          cmake --build "$BUILD_DIR" --target clang llc llvm-mc llvm-objdump llvm-objcopy llvm-readobj FileCheck lld mcs51-runtime --parallel
+          # shellcheck disable=SC2086
+          "$BUILD_DIR/bin/llvm-lit" -q $MCS51_LIT_TESTS
+
+      - name: Strip toolchain binaries and remove extras (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
+          STRIP_TOOL="$INSTALL_DIR/bin/llvm-strip"
+          find "$INSTALL_DIR" -type f \( -name '*.la' -o -name '*.pdb' \) -delete 2>/dev/null || true
+          for d in "$INSTALL_DIR/share/man" "$INSTALL_DIR/share/info" "$INSTALL_DIR/share/doc" "$INSTALL_DIR/share/locale"; do
+            rm -rf "$d"
+          done
+          if [ -x "$STRIP_TOOL" ]; then
+            while IFS= read -r -d '' f; do
+              "$STRIP_TOOL" "$f" 2>/dev/null || true
+            done < <(find "$INSTALL_DIR/bin" -type f -perm -111 -print0 2>/dev/null)
+          fi
+
+      - name: Strip toolchain binaries and remove extras (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
+          $stripTool = Join-Path $installDir "bin/llvm-strip.exe"
+          Get-ChildItem -Path $installDir -Recurse -Include *.pdb, *.la -File -ErrorAction SilentlyContinue | Remove-Item -Force
+          foreach ($dir in @("share/man", "share/info", "share/doc", "share/locale")) {
+            $full = Join-Path $installDir $dir
+            if (Test-Path $full) {
+              Remove-Item -Recurse -Force $full
+            }
+          }
+          if (Test-Path $stripTool) {
+            Get-ChildItem -Path (Join-Path $installDir "bin") -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Extension -in @(".exe", ".dll") } |
+              ForEach-Object {
+                & $stripTool $_.FullName 2>$null
+              }
+          }
+
+      - name: Verify toolchain install (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREFIX="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
+          "$PREFIX/bin/llvm-config" --version >/dev/null
+          for tool in clang llc ld.lld llvm-mc llvm-objdump llvm-objcopy llvm-readobj; do
+            test -x "$PREFIX/bin/$tool"
+          done
+          RES="$("$PREFIX/bin/clang" -print-resource-dir)/mcs51"
+          for f in mcs51-runtime.o libmcs51builtins.a cc2530_startup.o cc2530.ld; do
+            test -f "$RES/$f"
+          done
+
+      - name: Verify toolchain install (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
+          & (Join-Path $prefix "bin/llvm-config.exe") --version | Out-Null
+          foreach ($tool in @("clang.exe", "llc.exe", "ld.lld.exe", "llvm-mc.exe", "llvm-objdump.exe", "llvm-objcopy.exe", "llvm-readobj.exe")) {
+            if (-not (Test-Path (Join-Path $prefix "bin/$tool"))) {
+              throw "Missing toolchain binary: $tool"
+            }
+          }
+          $res = Join-Path $prefix "lib/clang"
+          foreach ($file in @("mcs51-runtime.o", "libmcs51builtins.a", "cc2530_startup.o", "cc2530.ld")) {
+            if (-not (Get-ChildItem -Path $res -Recurse -Filter $file -ErrorAction SilentlyContinue)) {
+              throw "Missing MCS-51 runtime file: $file"
+            }
+          }
+
+      # Compile a CC2530 firmware with the installed toolchain only: the driver
+      # links the runtime, startup and linker script from the resource dir.
+      - name: MCS-51 smoke test (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREFIX="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
+          TEST_DIR="$GITHUB_WORKSPACE/smoke/${{ matrix.host }}"
+          mkdir -p "$TEST_DIR"
+          "$PREFIX/bin/clang" --version
+          "$PREFIX/bin/llc" --version
+          "$PREFIX/bin/ld.lld" --version
+          cat > "$TEST_DIR/main.c" <<'EOF'
+          volatile unsigned char sink;
+          unsigned long counter;
+
+          void __attribute__((interrupt(0))) isr(void) { counter += 3; }
+
+          int main(void) {
+            unsigned short i;
+            for (i = 0; i < 100; i++)
+              counter = counter * 5 + i;
+            sink = (unsigned char)(counter >> 8);
+            for (;;) {
+            }
+          }
+          EOF
+          "$PREFIX/bin/clang" -target mcs51 -mcpu=cc2530 -Oz -c "$TEST_DIR/main.c" -o "$TEST_DIR/main.o"
+          "$PREFIX/bin/clang" -target mcs51 -mcpu=cc2530 -Oz "$TEST_DIR/main.c" -o "$TEST_DIR/firmware.elf"
+          "$PREFIX/bin/llvm-objcopy" --output-target=ihex "$TEST_DIR/firmware.elf" "$TEST_DIR/firmware.hex"
+          "$PREFIX/bin/llvm-objdump" -d "$TEST_DIR/firmware.elf" > "$TEST_DIR/firmware.dis"
+          "$PREFIX/bin/llvm-readobj" --file-headers "$TEST_DIR/firmware.elf" | tee "$TEST_DIR/readelf.txt"
+          test -s "$TEST_DIR/firmware.hex"
+          grep -Eq 'Machine:.*(8051|MCS51)' "$TEST_DIR/readelf.txt"
+
+      - name: MCS-51 smoke test (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
+          $testDir = Join-Path $env:GITHUB_WORKSPACE "smoke/${{ matrix.host }}"
+          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
+          & (Join-Path $prefix "bin/clang.exe") --version
+          & (Join-Path $prefix "bin/llc.exe") --version
+          & (Join-Path $prefix "bin/ld.lld.exe") --version
+          @'
+          volatile unsigned char sink;
+          unsigned long counter;
+
+          void __attribute__((interrupt(0))) isr(void) { counter += 3; }
+
+          int main(void) {
+            unsigned short i;
+            for (i = 0; i < 100; i++)
+              counter = counter * 5 + i;
+            sink = (unsigned char)(counter >> 8);
+            for (;;) {
+            }
+          }
+          '@ | Set-Content -Path (Join-Path $testDir "main.c") -NoNewline
+          & (Join-Path $prefix "bin/clang.exe") -target mcs51 -mcpu=cc2530 -Oz -c (Join-Path $testDir "main.c") -o (Join-Path $testDir "main.o")
+          & (Join-Path $prefix "bin/clang.exe") -target mcs51 -mcpu=cc2530 -Oz (Join-Path $testDir "main.c") -o (Join-Path $testDir "firmware.elf")
+          & (Join-Path $prefix "bin/llvm-objcopy.exe") --output-target=ihex (Join-Path $testDir "firmware.elf") (Join-Path $testDir "firmware.hex")
+          $header = & (Join-Path $prefix "bin/llvm-readobj.exe") --file-headers (Join-Path $testDir "firmware.elf")
+          $headerText = ($header -join "`n")
+          if ($headerText -notmatch 'Machine:.*(8051|MCS51)') {
+            throw "MCS-51 machine id was not found in llvm-readobj output."
+          }
+          if ((Get-Item (Join-Path $testDir "firmware.hex")).Length -eq 0) {
+            throw "firmware.hex is empty."
+          }
+
+      - name: Create size report and archive (Unix)
+        if: ${{ !matrix.is_windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
+          ARCHIVE="$GITHUB_WORKSPACE/mcs51-llvm-toolchain-${{ matrix.host }}.${{ matrix.archive_ext }}"
+          REPORT="$GITHUB_WORKSPACE/size-report-toolchain-${{ matrix.host }}.txt"
+          {
+            echo "Variant: toolchain"
+            echo "Host: ${{ matrix.host }}"
+            echo
+            du -sh "$INSTALL_DIR" "$INSTALL_DIR/bin" "$INSTALL_DIR/lib" "$INSTALL_DIR/share" 2>/dev/null
+            echo
+            echo "Top 30 largest files:"
+            find "$INSTALL_DIR" -type f -exec du -h {} + | sort -hr | sed -n '1,30p'
+          } > "$REPORT"
+          tar -C "$INSTALL_DIR" -czf "$ARCHIVE" .
+
+      - name: Create size report and archive (Windows)
+        if: matrix.is_windows
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
+          $archive = Join-Path $env:GITHUB_WORKSPACE "mcs51-llvm-toolchain-${{ matrix.host }}.${{ matrix.archive_ext }}"
+          $report = Join-Path $env:GITHUB_WORKSPACE "size-report-toolchain-${{ matrix.host }}.txt"
+          $files = Get-ChildItem -Path $installDir -Recurse -File | Sort-Object Length -Descending
+          @(
+            "Variant: toolchain"
+            "Host: ${{ matrix.host }}"
+            ""
+            "Total bytes: $((Get-ChildItem -Path $installDir -Recurse -File | Measure-Object Length -Sum).Sum)"
+            ""
+            "Top 30 largest files:"
+            $files | Select-Object -First 30 | ForEach-Object { "{0}`t{1}" -f $_.Length, $_.FullName }
+          ) | Set-Content -Path $report
+          if (Test-Path $archive) {
+            Remove-Item -Force $archive
+          }
+          Compress-Archive -Path (Join-Path $installDir '*') -DestinationPath $archive
+
+      - name: Upload toolchain artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcs51-llvm-toolchain-${{ matrix.host }}
+          path: mcs51-llvm-toolchain-${{ matrix.host }}.${{ matrix.archive_ext }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload size report
+        uses: actions/upload-artifact@v7
+        with:
+          name: size-report-toolchain-${{ matrix.host }}
+          path: size-report-toolchain-${{ matrix.host }}.txt
+          if-no-files-found: error
+
+  publish-prerelease:
+    needs: build-toolchain
+    if: github.event_name != 'pull_request'
+    name: Publish prerelease
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set release version and tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          source = Path("cmake/Modules/LLVMVersion.cmake").read_text()
+          values = dict(re.findall(
+              r"set\(LLVM_VERSION_(MAJOR|MINOR|PATCH) ([0-9]+)\)", source
+          ))
+          missing = {"MAJOR", "MINOR", "PATCH"} - values.keys()
+          if missing:
+              raise SystemExit(f"Missing LLVM version fields: {sorted(missing)}")
+          print(".".join(values[field] for field in ("MAJOR", "MINOR", "PATCH")))
+          PY
+          )"
+          TAG="${VERSION}-mcs51-$(date -u +%Y%m%d)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download toolchain archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: mcs51-llvm-toolchain-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Write release notes
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<EOF
+          MCS-51 LLVM toolchain prerelease ${RELEASE_VERSION}.
+
+          Source commit: \`${{ github.sha }}\`
+          Workflow run: \`${{ github.run_id }}\`
+
+          Included archives for Linux, macOS, and Windows:
+          - \`mcs51-llvm-toolchain-<host>.tar.gz\` or \`.zip\`: Clang, LLD and
+            the LLVM binutils for MCS-51 / CC2530, with the arithmetic runtime,
+            CC2530 startup object and linker script in the Clang resource
+            directory.
+
+          Tag: \`${RELEASE_TAG}\`
+          EOF
+
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: MCS-51 LLVM ${{ steps.release.outputs.version }} (${{ steps.release.outputs.tag }})
+          prerelease: true
+          generate_release_notes: false
+          overwrite_files: true
+          body_path: release-notes.md
+          files: release-artifacts/*
