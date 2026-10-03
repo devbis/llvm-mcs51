@@ -7,7 +7,12 @@ void copy_local_words(void) {
 }
 
 // CHECK-LABEL: copy_local_words:
-// CHECK: mov @r1, 130
-// CHECK: mov 130, @r1
-// CHECK: mov 131, @r1
+// The word locals are written and read through DPTR; the frame addresses are
+// kept in register pairs instead of being spilled to the stack.
+// CHECK: movx @dptr, a
+// CHECK: inc dptr
+// CHECK: movx @dptr, a
+// CHECK: movx a, @dptr
+// CHECK: inc dptr
+// CHECK: movx a, @dptr
 // CHECK: ret
