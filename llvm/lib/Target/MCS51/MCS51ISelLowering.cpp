@@ -272,7 +272,7 @@ static void emitDptrAddress(MachineBasicBlock &MBB,
     }
   }
   MachineInstr *Last;
-  if (Offset <= 4) {
+  if (Offset <= 6) {
     Last = BuildMI(MBB, At, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
                .addReg(Base)
                .getInstr();
