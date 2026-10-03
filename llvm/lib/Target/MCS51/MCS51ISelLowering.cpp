@@ -478,6 +478,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRL_PARTS, MVT::i16, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i16, Expand);
   setOperationAction(ISD::MULHU, MVT::i16, Expand);
+  setOperationAction(ISD::MULHU, MVT::i8, Expand);
+  setOperationAction(ISD::MULHS, MVT::i8, Expand);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i8, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i8, Expand);
   setOperationAction(ISD::ADD, MVT::i32, Custom);
   setOperationAction(ISD::SUB, MVT::i32, Custom);
   setOperationAction(ISD::SETCC, MVT::i8, Custom);
