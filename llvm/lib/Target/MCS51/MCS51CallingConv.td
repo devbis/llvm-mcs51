@@ -24,4 +24,4 @@ def RetCC_MCS51 : CallingConv<[
 // R2-R7 are callee-saved. This lets values remain in registers across calls
 // instead of spilling each one through the 8051's expensive SP-relative path.
 def CSR_MCS51 : CalleeSavedRegs<(add R2, R3, R4, R5, R6, R7,
-                                    (sequence "IM%d", 12, 23))>;
+                                    (sequence "IM%d", 8, 23))>;
