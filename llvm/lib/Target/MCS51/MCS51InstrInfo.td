@@ -2379,8 +2379,46 @@ class MCS51FixedSFRLoad<bits<8> address, string mnemonic,
   let Inst{7-0} = 0xE5;
   let Inst{15-8} = address;
 }
-def MOV_DPL_A : MCS51FixedSFRStore<0x82, "mov 130, a", DPTR>;
-def MOV_DPH_A : MCS51FixedSFRStore<0x83, "mov 131, a", DPTR>;
+def MOV_DPL_A : MCS51FixedSFRStore<0x82, "mov 130, a", DPL>;
+def MOV_DPH_A : MCS51FixedSFRStore<0x83, "mov 131, a", DPH>;
+// Byte copies between a register and one half of DPTR. They touch only that
+// half, unlike the generic direct moves that model a write to all of DPTR.
+class MCS51DptrHalfFromRn<bits<8> address, string mnemonic, Register Half>
+    : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$src);
+  let AsmString = "mov " # mnemonic # ", $src";
+  let Size = 2;
+  let hasSideEffects = 1;
+  let isCodeGenOnly = 1;
+  let Defs = [Half];
+  bits<3> src;
+  bits<16> Inst;
+  let Inst{7-3} = 0b10001;
+  let Inst{2-0} = src;
+  let Inst{15-8} = address;
+}
+class MCS51RnFromDptrHalf<bits<8> address, string mnemonic, Register Half>
+    : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins);
+  let AsmString = "mov $dst, " # mnemonic;
+  let Size = 2;
+  let hasSideEffects = 1;
+  let isCodeGenOnly = 1;
+  let Uses = [Half];
+  bits<3> dst;
+  bits<16> Inst;
+  let Inst{7-3} = 0b10101;
+  let Inst{2-0} = dst;
+  let Inst{15-8} = address;
+}
+def MOV_DPL_RN : MCS51DptrHalfFromRn<0x82, "130", DPL>;
+def MOV_DPH_RN : MCS51DptrHalfFromRn<0x83, "131", DPH>;
+def MOV_RN_DPL : MCS51RnFromDptrHalf<0x82, "130", DPL>;
+def MOV_RN_DPH : MCS51RnFromDptrHalf<0x83, "131", DPH>;
 class MCS51DptrByteLoad<bits<8> address, string mnemonic> : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51AReg:$dst);

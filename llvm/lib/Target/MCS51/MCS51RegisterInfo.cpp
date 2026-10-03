@@ -49,6 +49,9 @@ BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   Reserved.set(MCS51::PSW);
   // R1 is reserved as the indirect pointer for stack frame spill accesses.
   Reserved.set(MCS51::R1);
+  // The halves of DPTR are byte subregisters for copies only.
+  Reserved.set(MCS51::DPL);
+  Reserved.set(MCS51::DPH);
   return Reserved;
 }
 
