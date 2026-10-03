@@ -5,6 +5,8 @@
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/AsmPrinter.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -224,7 +226,16 @@ public:
   }
 
   void emitInstruction(const MachineInstr *MI) override {
-    if (MI->getOpcode() == MCS51::DEC_DPTR16) {
+    switch (MI->getOpcode()) {
+    case MCS51::SHL16_LOOP:
+    case MCS51::SRL16_LOOP:
+    case MCS51::SRA16_LOOP:
+    case MCS51::SHL32_LOOP:
+    case MCS51::SRL32_LOOP:
+    case MCS51::SRA32_LOOP:
+    case MCS51::SHL8_LOOP:
+    case MCS51::SRL8_LOOP:
+    case MCS51::SRA8_LOOP: {
       auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
         MCInst Inst;
         Inst.setOpcode(Opcode);
@@ -232,16 +243,106 @@ public:
           Inst.addOperand(Operand);
         EmitToStreamer(*OutStreamer, Inst);
       };
-      MCSymbol *SkipHighDecrement =
-          OutContext.createTempSymbol("mcs51_sub16_skip_high", true);
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      unsigned Opcode = MI->getOpcode();
+      bool IsLong = Opcode == MCS51::SHL32_LOOP || Opcode == MCS51::SRL32_LOOP ||
+                    Opcode == MCS51::SRA32_LOOP;
+      bool IsWord = Opcode == MCS51::SHL16_LOOP || Opcode == MCS51::SRL16_LOOP ||
+                    Opcode == MCS51::SRA16_LOOP;
+      bool IsLeft = Opcode == MCS51::SHL16_LOOP || Opcode == MCS51::SHL8_LOOP ||
+                    Opcode == MCS51::SHL32_LOOP;
+      bool IsArithmetic = Opcode == MCS51::SRA16_LOOP ||
+                          Opcode == MCS51::SRA8_LOOP ||
+                          Opcode == MCS51::SRA32_LOOP;
+      // The bytes of the value from least to most significant.
+      SmallVector<int64_t, 4> Bytes;
+      Register Count;
+      auto AddPair = [&](Register Pair) {
+        Bytes.push_back(
+            TRI->getEncodingValue(TRI->getSubReg(Pair, MCS51::sub_lo)));
+        Bytes.push_back(
+            TRI->getEncodingValue(TRI->getSubReg(Pair, MCS51::sub_hi)));
+      };
+      if (IsLong) {
+        AddPair(MI->getOperand(0).getReg());
+        AddPair(MI->getOperand(1).getReg());
+        Count = MI->getOperand(2).getReg();
+      } else if (IsWord) {
+        AddPair(MI->getOperand(0).getReg());
+        Count = MI->getOperand(1).getReg();
+      } else {
+        Bytes.push_back(TRI->getEncodingValue(MI->getOperand(0).getReg()));
+        Count = MI->getOperand(1).getReg();
+      }
+      MCSymbol *Loop = OutContext.createTempSymbol("mcs51_shift_loop", true);
+      auto Mov = [&](int64_t Address) {
+        Emit(MCS51::MOV_A_DIRECT,
+             {MCOperand::createReg(MCS51::A), MCOperand::createImm(Address)});
+      };
+      auto Store = [&](int64_t Address) {
+        Emit(MCS51::MOV_DIRECT_A, {MCOperand::createImm(Address)});
+      };
+      OutStreamer->emitLabel(Loop);
+      if (IsLeft) {
+        Emit(MCS51::CLR_C, {});
+        for (int64_t Address : Bytes) {
+          Mov(Address);
+          Emit(MCS51::RLC_A, {});
+          Store(Address);
+        }
+      } else {
+        bool First = true;
+        for (int64_t Address : llvm::reverse(Bytes)) {
+          Mov(Address);
+          if (First) {
+            if (IsArithmetic)
+              Emit(MCS51::MOV_C_BIT, {MCOperand::createImm(0xE7)});
+            else
+              Emit(MCS51::CLR_C, {});
+            First = false;
+          }
+          Emit(MCS51::RRC_A, {});
+          Store(Address);
+        }
+      }
+      Emit(MCS51::DJNZ_RN,
+           {MCOperand::createReg(Count), MCOperand::createReg(Count),
+            MCOperand::createExpr(MCSymbolRefExpr::create(Loop, OutContext))});
+      return;
+    }
+    default:
+      break;
+    }
+
+    if (MI->getOpcode() == MCS51::INC16 || MI->getOpcode() == MCS51::DEC16) {
+      // Expanded over the direct addresses of the pair's two bytes.
+      auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
+        MCInst Inst;
+        Inst.setOpcode(Opcode);
+        for (const MCOperand &Operand : Operands)
+          Inst.addOperand(Operand);
+        EmitToStreamer(*OutStreamer, Inst);
+      };
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      Register Pair = MI->getOperand(0).getReg();
+      int64_t Lo = TRI->getEncodingValue(TRI->getSubReg(Pair, MCS51::sub_lo));
+      int64_t Hi = TRI->getEncodingValue(TRI->getSubReg(Pair, MCS51::sub_hi));
+      bool IsInc = MI->getOpcode() == MCS51::INC16;
+      MCSymbol *Skip = OutContext.createTempSymbol("mcs51_word_skip", true);
+      Emit(IsInc ? MCS51::INC_DIRECT : MCS51::DEC_DIRECT,
+           {MCOperand::createImm(Lo)});
       Emit(MCS51::MOV_A_DIRECT,
-           {MCOperand::createReg(MCS51::A), MCOperand::createImm(0x82)});
-      Emit(MCS51::JNZ,
-           {MCOperand::createExpr(MCSymbolRefExpr::create(
-               SkipHighDecrement, OutContext))});
-      Emit(MCS51::DEC_DIRECT, {MCOperand::createImm(0x83)});
-      OutStreamer->emitLabel(SkipHighDecrement);
-      Emit(MCS51::DEC_DIRECT, {MCOperand::createImm(0x82)});
+           {MCOperand::createReg(MCS51::A), MCOperand::createImm(Lo)});
+      if (IsInc)
+        Emit(MCS51::JNZ,
+             {MCOperand::createExpr(MCSymbolRefExpr::create(Skip, OutContext))});
+      else
+        Emit(MCS51::CJNE_A_IMM,
+             {MCOperand::createImm(0xFF),
+              MCOperand::createExpr(MCSymbolRefExpr::create(Skip, OutContext))});
+      Emit(IsInc ? MCS51::INC_DIRECT : MCS51::DEC_DIRECT,
+           {MCOperand::createImm(Hi)});
+      OutStreamer->emitLabel(Skip);
       return;
     }
 

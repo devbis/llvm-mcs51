@@ -33,6 +33,10 @@ public:
 
   void initLibcallLoweringInfo(LibcallLoweringInfo &Info) const override;
 
+  // Word values are pairs of independent bytes, so liveness per byte lets the
+  // allocator build a result in the place of an operand half that is dead.
+  bool enableSubRegLiveness() const override { return true; }
+
   void ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU,
                               StringRef FS);
 
