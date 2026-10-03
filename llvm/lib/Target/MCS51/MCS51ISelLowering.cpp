@@ -450,6 +450,11 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
   setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Custom);
+  for (MVT VT : {MVT::i8, MVT::i16}) {
+    setLoadExtAction({ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD}, VT, MVT::i1,
+                     Custom);
+    setTruncStoreAction(VT, MVT::i1, Custom);
+  }
   // The 8051 has no indirect branch instruction; avoid jump-table lowering.
   setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
@@ -487,6 +492,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SRL_PARTS, MVT::i16, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i16, Expand);
   setOperationAction(ISD::MULHU, MVT::i16, Expand);
+  setOperationAction(ISD::MULHS, MVT::i16, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i16, Expand);
   setOperationAction(ISD::MULHU, MVT::i8, Expand);
   setOperationAction(ISD::MULHS, MVT::i8, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i8, Expand);
@@ -618,6 +625,39 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
       Amount = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, Amount);
     return DAG.getNode(MCS51ISD::SRA8, DL, MVT::i8, Op.getOperand(0),
                        Amount);
+  }
+  // A boolean lives in memory as a byte holding 0 or 1: access the byte and
+  // keep only its low bit.
+  if (Op.getOpcode() == ISD::LOAD) {
+    auto *Load = cast<LoadSDNode>(Op);
+    if (Load->getMemoryVT() == MVT::i1 &&
+        Load->getExtensionType() != ISD::NON_EXTLOAD) {
+      EVT VT = Load->getValueType(0);
+      SDValue Byte = DAG.getExtLoad(ISD::EXTLOAD, DL, MVT::i8,
+                                    Load->getChain(), Load->getBasePtr(),
+                                    Load->getPointerInfo(), MVT::i8,
+                                    Load->getAlign(),
+                                    Load->getMemOperand()->getFlags());
+      SDValue Bit = DAG.getNode(ISD::AND, DL, MVT::i8, Byte,
+                                DAG.getConstant(1, DL, MVT::i8));
+      SDValue Result = DAG.getZExtOrTrunc(Bit, DL, VT);
+      if (Load->getExtensionType() == ISD::SEXTLOAD)
+        Result = DAG.getNode(ISD::SIGN_EXTEND_INREG, DL, VT, Result,
+                             DAG.getValueType(MVT::i1));
+      return DAG.getMergeValues({Result, Byte.getValue(1)}, DL);
+    }
+  }
+  if (Op.getOpcode() == ISD::STORE) {
+    auto *Store = cast<StoreSDNode>(Op);
+    if (Store->getMemoryVT() == MVT::i1 && Store->isTruncatingStore()) {
+      SDValue Bit = DAG.getNode(ISD::AND, DL, MVT::i8,
+                                DAG.getZExtOrTrunc(Store->getValue(), DL,
+                                                   MVT::i8),
+                                DAG.getConstant(1, DL, MVT::i8));
+      return DAG.getStore(Store->getChain(), DL, Bit, Store->getBasePtr(),
+                          Store->getPointerInfo(), Store->getAlign(),
+                          Store->getMemOperand()->getFlags());
+    }
   }
   if (Op.getOpcode() == ISD::VASTART)
     return LowerVASTART(Op, DAG);
