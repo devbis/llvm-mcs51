@@ -18,35 +18,32 @@ unsigned char signed_less_than_constant(void) {
   return signed_lhs < 0x01020304L;
 }
 
-// Snapshot each loaded word before the following XDATA load reuses DPTR.
+// Each loaded word goes straight into a pair of direct bytes before the next
+// XDATA load reuses DPTR, and the arithmetic then runs over those bytes.
 // CHECK-LABEL: add_words:
 // CHECK: mov dptr, #lhs+2
-// CHECK: mov a, 131
-// CHECK: mov r{{[0-7]}}, a
-// CHECK: mov a, 130
-// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov 48, a
+// CHECK: mov 49, a
 // CHECK: mov dptr, #lhs
-// CHECK: mov a, 131
-// CHECK: mov r{{[0-7]}}, a
-// CHECK: mov a, 130
-// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov 50, a
+// CHECK: mov 51, a
 // CHECK: mov dptr, #rhs+2
-// CHECK: mov a, 131
-// CHECK: mov r{{[0-7]}}, a
-// CHECK: mov a, 130
-// CHECK: mov r{{[0-7]}}, a
+// CHECK: mov 52, a
+// CHECK: mov 53, a
 // CHECK: mov dptr, #rhs
-// CHECK: add a, r{{[0-7]}}
-// CHECK-COUNT-3: addc a, r{{[0-7]}}
+// CHECK: mov 54, a
+// CHECK: mov 55, a
+// CHECK: add a, 50
+// CHECK-COUNT-3: addc a, {{[0-9]+}}
 // CHECK-LABEL: subtract_words:
 // CHECK: mov dptr, #lhs+2
 // CHECK: mov dptr, #lhs
 // CHECK: mov dptr, #rhs+2
 // CHECK: mov dptr, #rhs
-// CHECK: subb a, r{{[0-7]}}
-// CHECK-COUNT-3: subb a, r{{[0-7]}}
+// CHECK: subb a, 54
+// CHECK-COUNT-3: subb a, {{[0-9]+}}
 // CHECK-LABEL: equals_all_ones:
-// CHECK-COUNT-4: cjne a, #255,
+// CHECK-COUNT-4: xrl a, #255
 // CHECK-LABEL: less_than_word_pair:
 // CHECK: lcall __mcs51_xdata_ult32
 // CHECK-LABEL: less_than_constant:
