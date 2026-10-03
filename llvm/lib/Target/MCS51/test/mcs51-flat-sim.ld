@@ -7,7 +7,7 @@ MEMORY {
 }
 
 SECTIONS {
-  .text 0 : { *(.text .text.*) *(.rodata .rodata.*) } > CODE
+  .text 0 : { KEEP(*(.text.0start)) *(.text .text.*) *(.rodata .rodata.*) } > CODE
   .data 0 : { *(.data .data.*) } > XRAM AT> CODE
   .bss (NOLOAD) : { *(.bss .bss.*) *(COMMON) } > XRAM
   .mcs51_pdata 0 : { *(.mcs51.pdata) } > XRAM AT> CODE

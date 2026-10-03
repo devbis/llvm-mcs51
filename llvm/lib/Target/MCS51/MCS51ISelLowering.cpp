@@ -191,12 +191,13 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::SINT_TO_FP, MVT::i64, LibCall);
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, LibCall);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
-  setOperationAction(ISD::SHL_PARTS, MVT::i16, Custom);
-  setOperationAction(ISD::SRA_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::MUL, MVT::i16, Custom);
+  // Variable 32-bit shifts use the runtime helpers.
+  setOperationAction(ISD::SHL_PARTS, MVT::i16, Expand);
+  setOperationAction(ISD::SRA_PARTS, MVT::i16, Expand);
+  setOperationAction(ISD::SRL_PARTS, MVT::i16, Expand);
   setOperationAction(ISD::UMUL_LOHI, MVT::i16, Expand);
   setOperationAction(ISD::MULHU, MVT::i16, Expand);
-  setOperationAction(ISD::SRL_PARTS, MVT::i16, Custom);
   setOperationAction(ISD::ADD, MVT::i32, Custom);
   setOperationAction(ISD::SUB, MVT::i32, Custom);
   setOperationAction(ISD::SETCC, MVT::i8, Custom);

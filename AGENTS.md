@@ -76,6 +76,11 @@ builds a flat test image with the MCS-51 runtime, executes an IDATA byte and
 PDATA, DATA, and IDATA generic pointers, then checks the XDATA result byte.
 This is an optional runtime check in addition to the lit suite; the simulator
 is not used as the SDCC compiler.
+`llvm/lib/Target/MCS51/verify-arith32-runtime.sh` runs the same kind of check
+for variable 32-bit shifts: the hand-written `__ashlsi3`, `__lshrsi3` and
+`__ashrsi3` helpers (and inline 32-bit multiplication) are compared with
+reference loops in uCsim. Variable 32-bit shifts call these helpers; constant
+shifts stay inline.
 
 For code-size comparisons against SDCC, IAR, and Keil, use the companion
 benchmark checkout at `/Users/ivan.belokobylskiy/projects/ti/mcs51-bench`.
