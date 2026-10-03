@@ -13,15 +13,19 @@ void call_sum4(unsigned short a, unsigned short b,
   result = sum4(a, b, c, d, e);
 }
 
-// Loading a 16-bit stack argument steps from its high byte to its low byte.
-// Use the one-byte register decrement instead of routing through A.
+// A 16-bit stack argument is read with a step from its low byte to its high
+// byte through R1, without recomputing the address from SP or routing it
+// through A.
 // CHECK-LABEL: sum4:
-// CHECK: mov r0, a
-// CHECK: mov a, @r0
-// CHECK: dec r0
-// CHECK-NOT: mov a, r0
-// CHECK-NOT: dec a
-// CHECK: mov a, @r0
+// CHECK: mov a, 129
+// CHECK: add a, #250
+// CHECK: mov r1, a
+// CHECK: mov a, @r1
+// CHECK: inc r1
+// CHECK-NOT: add a, #
+// CHECK: mov a, @r1
 // CHECK-LABEL: call_sum4:
-// CHECK: push 131
-// CHECK-NEXT: push 130
+// CHECK: mov 57, r0
+// CHECK: push 57
+// CHECK-NEXT: push 56
+// CHECK-NEXT: lcall sum4

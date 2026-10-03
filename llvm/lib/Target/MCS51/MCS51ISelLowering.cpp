@@ -517,8 +517,9 @@ MCS51TargetLowering::getRegForInlineAsmConstraint(
         return {0, &MCS51::MCS51ARegRegClass};
       break;
     case 'd':
+      // DPTR is not allocatable, so name it as a fixed register.
       if (VT == MVT::i16)
-        return {0, &MCS51::MCS51GPR16RegClass};
+        return {MCS51::DPTR, &MCS51::MCS51PTRRegClass};
       break;
     case 'r':
       if (VT == MVT::i8)
