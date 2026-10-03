@@ -142,18 +142,24 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     }
     unsigned Pushed = 0;
     if (PreserveA) {
-      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT))
+          .addImm(0xE0)
+          .addReg(MCS51::A, RegState::Implicit);
       ++Pushed;
     }
     if (PreserveC) {
-      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+      BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW))
+          .addReg(MCS51::C, RegState::Implicit);
       ++Pushed;
     }
     EmitAddressAtOffset(OffsetAfterPush(Pushed));
     if (PreserveC)
-      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW))
+          .addReg(MCS51::C, RegState::ImplicitDefine);
     if (PreserveA)
-      BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
+      BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT))
+          .addImm(0xE0)
+          .addReg(MCS51::A, RegState::ImplicitDefine);
   };
 
   if (MI->getOpcode() == MCS51::FRAMEADDR8) {
@@ -201,6 +207,21 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     return true;
   }
 
+  if (MI->getOpcode() == MCS51::SPILL_LOAD_IM) {
+    EmitSpillAddress();
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IM_R1_IND),
+            MI->getOperand(0).getReg());
+    MI->eraseFromParent();
+    return true;
+  }
+  if (MI->getOpcode() == MCS51::SPILL_STORE_IM) {
+    EmitSpillAddress();
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_R1_IND_IM))
+        .addReg(MI->getOperand(FIOperandNum + 2).getReg());
+    MI->eraseFromParent();
+    return true;
+  }
+
   if (MI->getOpcode() == MCS51::SPILL_LOAD8 ||
       MI->getOpcode() == MCS51::SPILL_LOAD_INDIRECT8 ||
       MI->getOpcode() == MCS51::LOAD_FRAME8 ||
@@ -212,9 +233,11 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       if (Offset >= -4 && Offset <= 4) {
         EmitDirectStackAddress(Offset);
       } else {
-        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW))
+          .addReg(MCS51::C, RegState::Implicit);
         EmitAddressAtOffset(OffsetAfterPush(1));
-        BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
+        BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW))
+          .addReg(MCS51::C, RegState::ImplicitDefine);
       }
     } else if (MI->getOpcode() == MCS51::LOAD_FRAME8 ||
                MI->getOpcode() == MCS51::LOAD_FRAME16) {
@@ -298,11 +321,17 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       } else {
         // Save A and PSW while forming the address so the spill preserves
         // both the accumulator value and live condition flags.
-        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT)).addImm(0xE0);
-        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW));
+        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT))
+          .addImm(0xE0)
+          .addReg(MCS51::A, RegState::Implicit);
+        BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_PSW))
+          .addReg(MCS51::C, RegState::Implicit);
         EmitAddressAtOffset(OffsetAfterPush(2));
-        BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW));
-        BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT)).addImm(0xE0);
+        BuildMI(MBB, I, DL, TII.get(MCS51::POP_PSW))
+          .addReg(MCS51::C, RegState::ImplicitDefine);
+        BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT))
+          .addImm(0xE0)
+          .addReg(MCS51::A, RegState::ImplicitDefine);
       }
       BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IND_RI_A)).addReg(MCS51::R1);
     } else if (MI->getOpcode() == MCS51::SPILL_STORE8 ||

@@ -99,9 +99,7 @@ def IP8 : MCS51ImagPair<8, IM16, IM17>;
 def IP9 : MCS51ImagPair<9, IM18, IM19>;
 def IP10 : MCS51ImagPair<10, IM20, IM21>;
 def IP11 : MCS51ImagPair<11, IM22, IM23>;
-def MCS51Imag8 : RegisterClass<"MCS51", [i8], 8, (sequence "IM%d", 0, 23)> {
-  let isAllocatable = 0;
-}
+def MCS51Imag8 : RegisterClass<"MCS51", [i8], 8, (sequence "IM%d", 0, 23)>;
 
 // DPL and DPH are members so that the halves of DPTR count as byte
 // subregisters of a word; they are reserved and never allocated to bytes.
