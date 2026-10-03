@@ -92,18 +92,13 @@ unsigned char less_than_signed_long(long lhs, long rhs) {
 // CHECK: mul ab
 // CHECK: ret
 // CHECK-LABEL: shift_right_long:
-// CHECK: jz
-// CHECK-COUNT-4: rrc a
-// CHECK: djnz 240,
+// CHECK: lcall __lshrsi3
 // CHECK: ret
 // CHECK-LABEL: shift_left_long:
-// CHECK-COUNT-4: rlc a
-// CHECK: djnz 240,
+// CHECK: lcall __ashlsi3
 // CHECK: ret
 // CHECK-LABEL: shift_right_signed_long:
-// CHECK: mov c, 231
-// CHECK-COUNT-4: rrc a
-// CHECK: djnz 240,
+// CHECK: lcall __ashrsi3
 // CHECK: ret
 // CHECK-LABEL: shift_right_word:
 // CHECK: ret
