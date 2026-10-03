@@ -450,6 +450,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VAEND, MVT::Other, Expand);
   setOperationAction(ISD::ANY_EXTEND, MVT::i16, Custom);
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Custom);
+  setOperationAction(ISD::BSWAP, MVT::i16, Legal);
   for (MVT VT : {MVT::i8, MVT::i16}) {
     setLoadExtAction({ISD::EXTLOAD, ISD::ZEXTLOAD, ISD::SEXTLOAD}, VT, MVT::i1,
                      Custom);
@@ -3970,6 +3971,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     }
     Hi = saveAToImag(*MBB, MII, DL, TII, MRI);
     buildWord(*MBB, MII, DL, TII, Dst, Lo, Hi);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::TRUNC16HI8) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register Src = MI.getOperand(1).getReg();
+    BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
+        .addReg(Src, {}, MCS51::sub_hi);
     MI.eraseFromParent();
     return MBB;
   }
