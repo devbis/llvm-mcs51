@@ -23,24 +23,19 @@ static uint8_t copy_payload(void) {
 
 void main(void) { result = copy_payload(); }
 
-// Frame slots holding the XDATA cursors are adjacent. Track direct R1 steps
-// through the loop instead of rebuilding each address from SP.
+// The XDATA cursors live in pairs of direct bytes for the whole loop: they
+// are loaded from symbols once and only stepped inside it, with no frame slots.
 // CHECK-LABEL: main:
-// CHECK: mov dptr, #output
-// CHECK: mov r1, 129
-// CHECK-NEXT: dec r1
-// CHECK: mov @r1, 130
-// CHECK: inc r1
-// CHECK: mov @r1, 131
-// CHECK: mov dptr, #packet+2
-// CHECK-COUNT-3: dec r1
-// CHECK: mov 130, @r1
-// CHECK: inc r1
-// CHECK: mov 131, @r1
+// CHECK: mov 48, #lo8(output)
+// CHECK: mov 49, #hi8(output)
+// CHECK: mov 50, #lo8(packet+2)
+// CHECK: mov 51, #hi8(packet+2)
+// CHECK-NOT: @r1
+// CHECK: mov 130, 50
+// CHECK: mov 131, 51
 // CHECK: movx a, @dptr
-// CHECK: mov r1, 129
-// CHECK-NEXT: dec r1
-// CHECK: mov 130, @r1
-// CHECK: inc r1
-// CHECK: mov 131, @r1
+// CHECK: mov 130, 48
+// CHECK: mov 131, 49
 // CHECK: movx @dptr, a
+// CHECK: inc 50
+// CHECK: inc 48
