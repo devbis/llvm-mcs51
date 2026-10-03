@@ -24,6 +24,65 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   if (DestReg == SrcReg)
     return;
   unsigned Opcode;
+  auto IsPair = [](Register Reg) {
+    return Reg == MCS51::R2R3 || Reg == MCS51::R4R5 || Reg == MCS51::R6R7;
+  };
+  auto Lo = [&](Register Pair) {
+    return Pair == MCS51::R2R3 ? MCS51::R2
+                               : Pair == MCS51::R4R5 ? MCS51::R4 : MCS51::R6;
+  };
+  auto Hi = [&](Register Pair) {
+    return Pair == MCS51::R2R3 ? MCS51::R3
+                               : Pair == MCS51::R4R5 ? MCS51::R5 : MCS51::R7;
+  };
+  if (DestReg == MCS51::DPTR && IsPair(SrcReg)) {
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_RN))
+        .addImm(0x82)
+        .addReg(Lo(SrcReg), getKillRegState(KillSrc))
+        .addReg(MCS51::DPTR, RegState::ImplicitDefine);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_RN))
+        .addImm(0x83)
+        .addReg(Hi(SrcReg), getKillRegState(KillSrc))
+        .addReg(MCS51::DPTR, RegState::ImplicitDefine);
+    return;
+  }
+  if (IsPair(DestReg) && SrcReg == MCS51::DPTR) {
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DIRECT), Lo(DestReg))
+        .addImm(0x82)
+        .addReg(MCS51::DPTR, RegState::Implicit);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DIRECT), Hi(DestReg))
+        .addImm(0x83)
+        .addReg(MCS51::DPTR, RegState::Implicit);
+    return;
+  }
+  if (IsPair(DestReg) && IsPair(SrcReg)) {
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+        .addReg(Lo(SrcReg), getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), Lo(DestReg));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+        .addReg(Hi(SrcReg), getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), Hi(DestReg));
+    return;
+  }
+  // A byte copy from a word register takes the low byte, as it does for DPTR.
+  if (IsPair(SrcReg) && (DestReg == MCS51::A ||
+                         MCS51::MCS51GPR8RegClass.contains(DestReg))) {
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+        .addReg(Lo(SrcReg), getKillRegState(KillSrc));
+    if (DestReg != MCS51::A)
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
+    return;
+  }
+  if (IsPair(DestReg) && (SrcReg == MCS51::A ||
+                          MCS51::MCS51GPR8RegClass.contains(SrcReg))) {
+    if (SrcReg != MCS51::A)
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+          .addReg(SrcReg, getKillRegState(KillSrc));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), Lo(DestReg));
+    BuildMI(MBB, MI, DL, get(MCS51::CLR_A));
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), Hi(DestReg));
+    return;
+  }
   if (DestReg == MCS51::A && MCS51::MCS51GPR8RegClass.contains(SrcReg)) {
     Opcode = MCS51::MOV_A_RN;
     BuildMI(MBB, MI, DL, get(Opcode)).addReg(SrcReg, getKillRegState(KillSrc));
@@ -69,7 +128,8 @@ void MCS51InstrInfo::storeRegToStackSlot(
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
   bool IsIndirectByte = RC == &MCS51::MCS51Indirect8RegClass;
   bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
-  bool IsWord = RC == &MCS51::MCS51PTRRegClass;
+  bool IsWord = RC == &MCS51::MCS51PTRRegClass ||
+                RC == &MCS51::MCS51GPR16RegClass;
   if (!IsByte && !IsIndirectByte && !IsAccumulator && !IsWord)
     llvm_unreachable("unsupported MCS-51 spill register class");
   MachineFunction &MF = *MBB.getParent();
@@ -97,7 +157,8 @@ void MCS51InstrInfo::loadRegFromStackSlot(
   bool IsByte = RC == &MCS51::MCS51GPR8RegClass;
   bool IsIndirectByte = RC == &MCS51::MCS51Indirect8RegClass;
   bool IsAccumulator = RC == &MCS51::MCS51ARegRegClass;
-  bool IsWord = RC == &MCS51::MCS51PTRRegClass;
+  bool IsWord = RC == &MCS51::MCS51PTRRegClass ||
+                RC == &MCS51::MCS51GPR16RegClass;
   if ((!IsByte && !IsIndirectByte && !IsAccumulator && !IsWord) || SubReg)
     llvm_unreachable("unsupported MCS-51 reload register class");
   MachineFunction &MF = *MBB.getParent();
@@ -119,6 +180,26 @@ void MCS51InstrInfo::loadRegFromStackSlot(
 
 bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
+  if (Opcode == MCS51::LDI16) {
+    MachineBasicBlock &MBB = *MI.getParent();
+    const DebugLoc &DL = MI.getDebugLoc();
+    Register Dst = MI.getOperand(0).getReg();
+    int64_t Imm = MI.getOperand(1).getImm() & 0xffff;
+    if (Dst == MCS51::DPTR) {
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_DPTR_IMM), MCS51::DPTR).addImm(Imm);
+    } else {
+      Register Lo = Dst == MCS51::R2R3 ? MCS51::R2
+                                       : Dst == MCS51::R4R5 ? MCS51::R4
+                                                            : MCS51::R6;
+      Register Hi = Dst == MCS51::R2R3 ? MCS51::R3
+                                       : Dst == MCS51::R4R5 ? MCS51::R5
+                                                            : MCS51::R7;
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_IMM), Lo).addImm(Imm & 0xff);
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_IMM), Hi).addImm(Imm >> 8);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
   if (Opcode == MCS51::RET_A) {
     MachineBasicBlock &MBB = *MI.getParent();
     MachineBasicBlock::iterator I = MI.getIterator();

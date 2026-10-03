@@ -366,8 +366,8 @@ def RET_ZEXT8 : MCS51RetExt8Pseudo;
 def RET_SEXT8 : MCS51RetExt8Pseudo;
 def SRL16_8 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -376,8 +376,8 @@ def SRL16_8 : Instruction {
 }
 def SHL16_8 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -386,8 +386,8 @@ def SHL16_8 : Instruction {
 }
 def SRL16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src, MCS51PTR:$amount);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src, MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -396,8 +396,8 @@ def SRL16 : Instruction {
 }
 def SHL16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src, MCS51PTR:$amount);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src, MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -406,8 +406,8 @@ def SHL16 : Instruction {
 }
 def SRA16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src, MCS51PTR:$amount);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src, MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -416,7 +416,7 @@ def SRA16 : Instruction {
 }
 def BUILDPAIR16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51GPR8:$lo, MCS51GPR8:$hi);
   let AsmString = "";
   let Size = 0;
@@ -437,9 +437,9 @@ def SELECT8 : Instruction {
 }
 def SELECT16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51GPR8:$cond, MCS51PTR:$true,
-                           MCS51PTR:$false);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR8:$cond, MCS51GPR16:$true,
+                           MCS51GPR16:$false);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -971,7 +971,7 @@ def BR_SGE8rr : MCS51BrCCRegPseudo<MCS51br_sge>;
 def LOADX8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51PTR:$addr);
+  let InOperandList = (ins MCS51GPR16:$addr);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -998,7 +998,7 @@ def LOADXABS8 : Instruction {
 
 def LOADXABS16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51Imm16:$addr);
   let AsmString = "";
   let Size = 0;
@@ -1011,8 +1011,8 @@ def LOADXABS16 : Instruction {
 
 def LOADX16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$addr);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$addr);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1024,7 +1024,7 @@ def LOADX16 : Instruction {
 def LOADCODE8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51PTR:$addr);
+  let InOperandList = (ins MCS51GPR16:$addr);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1048,8 +1048,8 @@ def LOADCODEABS8 : Instruction {
 
 def LOADCODE16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$addr);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$addr);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1060,7 +1060,7 @@ def LOADCODE16 : Instruction {
 
 def LOADCODEABS16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51Imm16:$addr);
   let AsmString = "";
   let Size = 0;
@@ -1085,7 +1085,7 @@ def LOADDIRECT8 : Instruction {
 
 def LOADDIRECT16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51Direct8:$addr);
   let AsmString = "";
   let Size = 0;
@@ -1110,7 +1110,7 @@ def STOREDIRECT8 : Instruction {
 def STOREDIRECT16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51Direct8:$addr, MCS51PTR:$src);
+  let InOperandList = (ins MCS51Direct8:$addr, MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1148,7 +1148,7 @@ def STOREBIT8 : Instruction {
 def STOREX8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51PTR:$addr, MCS51GPR8:$src);
+  let InOperandList = (ins MCS51GPR16:$addr, MCS51GPR8:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1160,7 +1160,7 @@ def STOREX8 : Instruction {
 def STOREX16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51PTR:$addr, MCS51PTR:$src);
+  let InOperandList = (ins MCS51GPR16:$addr, MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1209,7 +1209,7 @@ def STOREXABS16_IMM : Instruction {
 def STOREXABS16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51Imm16:$addr, MCS51PTR:$src);
+  let InOperandList = (ins MCS51Imm16:$addr, MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1308,7 +1308,7 @@ def STOREPDATA_GLOBAL8 : Instruction {
 
 def LOADPDATA_GLOBAL16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51Imm8:$addr);
   let AsmString = "";
   let Size = 0;
@@ -1322,7 +1322,7 @@ def LOADPDATA_GLOBAL16 : Instruction {
 def STOREPDATA_GLOBAL16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51Imm8:$addr, MCS51PTR:$src);
+  let InOperandList = (ins MCS51Imm8:$addr, MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1334,7 +1334,7 @@ def STOREPDATA_GLOBAL16 : Instruction {
 
 def LOADIDATA_GLOBAL16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51Imm8:$addr);
   let AsmString = "";
   let Size = 0;
@@ -1348,7 +1348,7 @@ def LOADIDATA_GLOBAL16 : Instruction {
 def STOREIDATA_GLOBAL16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51Imm8:$addr, MCS51PTR:$src);
+  let InOperandList = (ins MCS51Imm8:$addr, MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1360,10 +1360,10 @@ def STOREIDATA_GLOBAL16 : Instruction {
 
 class MCS51IndirectWordPseudo<bits<1> IsLoad> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = !if(IsLoad, (outs MCS51PTR:$dst), (outs));
+  let OutOperandList = !if(IsLoad, (outs MCS51GPR16:$dst), (outs));
   let InOperandList = !if(IsLoad,
                           (ins MCS51Indirect8:$addr),
-                          (ins MCS51Indirect8:$addr, MCS51PTR:$src));
+                          (ins MCS51Indirect8:$addr, MCS51GPR16:$src));
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1499,7 +1499,20 @@ def MOV_DPTR_IMM : Instruction {
   bits<24> Inst;
   let Inst{7-0} = 0x90;
   let Inst{23-8} = imm;
-  let Pattern = [(set MCS51PTR:$dst, MCS51Imm16BE:$imm)];
+}
+// A 16-bit constant in DPTR or a register pair. Expanded after allocation.
+def LDI16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51Imm16BE:$imm);
+  let AsmString = "";
+  let Size = 4;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 0;
+  let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
+  let Pattern = [(set MCS51GPR16:$dst, MCS51Imm16BE:$imm)];
 }
 
 def : Pat<(i16 tglobaladdr:$addr), (MOV_DPTR_IMM tglobaladdr:$addr)>;
@@ -1519,7 +1532,7 @@ def LOADSTACKARG8 : Instruction {
 
 def LOADSTACKARG16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51Imm8:$spadjust);
   let AsmString = "";
   let Size = 0;
@@ -1547,7 +1560,7 @@ def PUSHARG8 : Instruction {
 def PUSHARG16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
-  let InOperandList = (ins MCS51PTR:$src);
+  let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1629,7 +1642,7 @@ def SPILL_STORE_INDIRECT8 : Instruction {
 
 def SPILL_LOAD16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
   let AsmString = "";
   let Size = 0;
@@ -1657,7 +1670,7 @@ def SPILL_STORE16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
-                           MCS51PTR:$src);
+                           MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1750,7 +1763,7 @@ def STORE_FRAME8 : Instruction {
 
 def LOAD_FRAME16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset);
   let AsmString = "";
   let Size = 0;
@@ -1765,7 +1778,7 @@ def STORE_FRAME16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins MCS51FrameIndex:$fi, MCS51Imm8:$offset,
-                           MCS51PTR:$src);
+                           MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1806,33 +1819,33 @@ def STORE_FRAME8_INDEX : Instruction {
 
 def INCDPTR16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
-  let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$src, (i16 1)))];
+  let Pattern = [(set MCS51GPR16:$dst, (add MCS51GPR16:$src, (i16 1)))];
 }
 
 def ADDDPTR16ri : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src, MCS51Imm16NotOne:$imm);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src, MCS51Imm16NotOne:$imm);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
-  let Pattern = [(set MCS51PTR:$dst,
-                      (add MCS51PTR:$src, MCS51Imm16NotOne:$imm))];
+  let Pattern = [(set MCS51GPR16:$dst,
+                      (add MCS51GPR16:$src, MCS51Imm16NotOne:$imm))];
 }
 
 class MCS51WordArithmetic : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1843,60 +1856,72 @@ class MCS51WordArithmetic : Instruction {
 
 class MCS51WordLogic<SDPatternOperator Op> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst,
-                      (Op MCS51PTR:$lhs, MCS51PTR:$rhs))];
+  let Pattern = [(set MCS51GPR16:$dst,
+                      (Op MCS51GPR16:$lhs, MCS51GPR16:$rhs))];
 }
 
 def AND16rr : MCS51WordLogic<and>;
 def OR16rr : MCS51WordLogic<or>;
 def XOR16rr : MCS51WordLogic<xor>;
 
-let Pattern = [(set MCS51PTR:$dst, (add MCS51PTR:$lhs, MCS51PTR:$rhs))] in
+let Pattern = [(set MCS51GPR16:$dst, (add MCS51GPR16:$lhs, MCS51GPR16:$rhs))] in
 def ADD16rr : MCS51WordArithmetic;
 def ADD16ri : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src, MCS51Imm16:$imm);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src, MCS51Imm16:$imm);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst,
-                      (MCS51add16_imm MCS51PTR:$src, MCS51Imm16:$imm))];
+  let Pattern = [(set MCS51GPR16:$dst,
+                      (MCS51add16_imm MCS51GPR16:$src, MCS51Imm16:$imm))];
 }
 def SUB16DEC : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$src);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
-  // AsmPrinter emits MOV A,82; JNZ skip; DEC 83; skip: DEC 82.
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Pattern = [(set MCS51GPR16:$dst,
+                      (MCS51sub16_dec MCS51GPR16:$src))];
+}
+// DPTR - 1. The AsmPrinter emits MOV A,82; JNZ skip; DEC 83; skip: DEC 82.
+def DEC_DPTR16 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "";
   let Size = 8;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let hasSideEffects = 1;
-  let Constraints = "$dst = $src";
-  let Pattern = [(set MCS51PTR:$dst,
-                      (MCS51sub16_dec MCS51PTR:$src))];
+  let Defs = [DPTR, A];
+  let Uses = [DPTR];
 }
-let Pattern = [(set MCS51PTR:$dst, (sub MCS51PTR:$lhs, MCS51PTR:$rhs))] in
+let Pattern = [(set MCS51GPR16:$dst, (sub MCS51GPR16:$lhs, MCS51GPR16:$rhs))] in
 def SUB16rr : MCS51WordArithmetic;
 
-let Pattern = [(set MCS51PTR:$dst,
-                    (MCS51mul16 MCS51PTR:$lhs, MCS51PTR:$rhs))] in
+let Pattern = [(set MCS51GPR16:$dst,
+                    (MCS51mul16 MCS51GPR16:$lhs, MCS51GPR16:$rhs))] in
 def MUL16rr : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1907,7 +1932,7 @@ def MUL16rr : Instruction {
 
 def MUL8TO16rr : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR8:$rhs);
   let AsmString = "";
   let Size = 0;
@@ -1915,67 +1940,67 @@ def MUL8TO16rr : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst,
+  let Pattern = [(set MCS51GPR16:$dst,
                       (MCS51mul8to16 MCS51GPR8:$lhs, MCS51GPR8:$rhs))];
 }
 
 def SRL32_PARTS : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
-  let InOperandList = (ins MCS51PTR:$srclo, MCS51PTR:$srchi,
-                           MCS51PTR:$amount);
+  let OutOperandList = (outs MCS51GPR16:$dstlo, MCS51GPR16:$dsthi);
+  let InOperandList = (ins MCS51GPR16:$srclo, MCS51GPR16:$srchi,
+                           MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
-                      (MCS51srl32_parts MCS51PTR:$srclo,
-                                        MCS51PTR:$srchi,
-                                        MCS51PTR:$amount))];
+  let Pattern = [(set MCS51GPR16:$dstlo, MCS51GPR16:$dsthi,
+                      (MCS51srl32_parts MCS51GPR16:$srclo,
+                                        MCS51GPR16:$srchi,
+                                        MCS51GPR16:$amount))];
 }
 def SHL32_PARTS : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
-  let InOperandList = (ins MCS51PTR:$srclo, MCS51PTR:$srchi,
-                           MCS51PTR:$amount);
+  let OutOperandList = (outs MCS51GPR16:$dstlo, MCS51GPR16:$dsthi);
+  let InOperandList = (ins MCS51GPR16:$srclo, MCS51GPR16:$srchi,
+                           MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
-                      (MCS51shl32_parts MCS51PTR:$srclo,
-                                        MCS51PTR:$srchi,
-                                        MCS51PTR:$amount))];
+  let Pattern = [(set MCS51GPR16:$dstlo, MCS51GPR16:$dsthi,
+                      (MCS51shl32_parts MCS51GPR16:$srclo,
+                                        MCS51GPR16:$srchi,
+                                        MCS51GPR16:$amount))];
 }
 def SRA32_PARTS : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
-  let InOperandList = (ins MCS51PTR:$srclo, MCS51PTR:$srchi,
-                           MCS51PTR:$amount);
+  let OutOperandList = (outs MCS51GPR16:$dstlo, MCS51GPR16:$dsthi);
+  let InOperandList = (ins MCS51GPR16:$srclo, MCS51GPR16:$srchi,
+                           MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
-                      (MCS51sra32_parts MCS51PTR:$srclo,
-                                        MCS51PTR:$srchi,
-                                        MCS51PTR:$amount))];
+  let Pattern = [(set MCS51GPR16:$dstlo, MCS51GPR16:$dsthi,
+                      (MCS51sra32_parts MCS51GPR16:$srclo,
+                                        MCS51GPR16:$srchi,
+                                        MCS51GPR16:$amount))];
 }
 
-let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
-                    (MCS51add32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                                MCS51PTR:$rhslo, MCS51PTR:$rhshi))] in
+let Pattern = [(set MCS51GPR16:$dstlo, MCS51GPR16:$dsthi,
+                    (MCS51add32 MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                                MCS51GPR16:$rhslo, MCS51GPR16:$rhshi))] in
 def ADD32rr : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
-  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let OutOperandList = (outs MCS51GPR16:$dstlo, MCS51GPR16:$dsthi);
+  let InOperandList = (ins MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                           MCS51GPR16:$rhslo, MCS51GPR16:$rhshi);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1984,14 +2009,14 @@ def ADD32rr : Instruction {
   let hasSideEffects = 1;
 }
 
-let Pattern = [(set MCS51PTR:$dstlo, MCS51PTR:$dsthi,
-                    (MCS51sub32 MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                                MCS51PTR:$rhslo, MCS51PTR:$rhshi))] in
+let Pattern = [(set MCS51GPR16:$dstlo, MCS51GPR16:$dsthi,
+                    (MCS51sub32 MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                                MCS51GPR16:$rhslo, MCS51GPR16:$rhshi))] in
 def SUB32rr : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dstlo, MCS51PTR:$dsthi);
-  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let OutOperandList = (outs MCS51GPR16:$dstlo, MCS51GPR16:$dsthi);
+  let InOperandList = (ins MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                           MCS51GPR16:$rhslo, MCS51GPR16:$rhshi);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2004,8 +2029,8 @@ def ADD32_BYTESrr : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst0, MCS51GPR8:$dst1,
                              MCS51GPR8:$dst2, MCS51GPR8:$dst3);
-  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let InOperandList = (ins MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                           MCS51GPR16:$rhslo, MCS51GPR16:$rhshi);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2014,18 +2039,18 @@ def ADD32_BYTESrr : Instruction {
   let hasSideEffects = 1;
   let Pattern = [(set MCS51GPR8:$dst0, MCS51GPR8:$dst1,
                        MCS51GPR8:$dst2, MCS51GPR8:$dst3,
-                       (MCS51add32_bytes MCS51PTR:$lhslo,
-                                         MCS51PTR:$lhshi,
-                                         MCS51PTR:$rhslo,
-                                         MCS51PTR:$rhshi))];
+                       (MCS51add32_bytes MCS51GPR16:$lhslo,
+                                         MCS51GPR16:$lhshi,
+                                         MCS51GPR16:$rhslo,
+                                         MCS51GPR16:$rhshi))];
 }
 
 def SUB32_BYTESrr : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst0, MCS51GPR8:$dst1,
                              MCS51GPR8:$dst2, MCS51GPR8:$dst3);
-  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                           MCS51PTR:$rhslo, MCS51PTR:$rhshi);
+  let InOperandList = (ins MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                           MCS51GPR16:$rhslo, MCS51GPR16:$rhshi);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2034,16 +2059,16 @@ def SUB32_BYTESrr : Instruction {
   let hasSideEffects = 1;
   let Pattern = [(set MCS51GPR8:$dst0, MCS51GPR8:$dst1,
                        MCS51GPR8:$dst2, MCS51GPR8:$dst3,
-                       (MCS51sub32_bytes MCS51PTR:$lhslo,
-                                         MCS51PTR:$lhshi,
-                                         MCS51PTR:$rhslo,
-                                         MCS51PTR:$rhshi))];
+                       (MCS51sub32_bytes MCS51GPR16:$lhslo,
+                                         MCS51GPR16:$lhshi,
+                                         MCS51GPR16:$rhslo,
+                                         MCS51GPR16:$rhshi))];
 }
 
 def CMP16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51PTR:$lhs, MCS51PTR:$rhs,
+  let InOperandList = (ins MCS51GPR16:$lhs, MCS51GPR16:$rhs,
                            MCS51Imm8:$signed);
   let AsmString = "";
   let Size = 0;
@@ -2078,8 +2103,8 @@ def CMP8I : Instruction {
 def CMP32 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51PTR:$lhslo, MCS51PTR:$lhshi,
-                           MCS51PTR:$rhslo, MCS51PTR:$rhshi,
+  let InOperandList = (ins MCS51GPR16:$lhslo, MCS51GPR16:$lhshi,
+                           MCS51GPR16:$rhslo, MCS51GPR16:$rhshi,
                            MCS51Imm8:$kind);
   let AsmString = "";
   let Size = 0;
@@ -2703,7 +2728,7 @@ def SRA8ri : Instruction {
 def SRA8rr : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51GPR8:$lhs, MCS51PTR:$amount);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2712,12 +2737,12 @@ def SRA8rr : Instruction {
   let hasSideEffects = 1;
   let Defs = [B];
   let Pattern = [(set MCS51GPR8:$dst,
-                      (MCS51sra8 MCS51GPR8:$lhs, MCS51PTR:$amount))];
+                      (MCS51sra8 MCS51GPR8:$lhs, MCS51GPR16:$amount))];
 }
 def SRL8rr : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51GPR8:$lhs, MCS51PTR:$amount);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2726,12 +2751,12 @@ def SRL8rr : Instruction {
   let hasSideEffects = 1;
   let Defs = [B];
   let Pattern = [(set MCS51GPR8:$dst,
-                      (MCS51srl8 MCS51GPR8:$lhs, MCS51PTR:$amount))];
+                      (MCS51srl8 MCS51GPR8:$lhs, MCS51GPR16:$amount))];
 }
 def SHL8rr : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
-  let InOperandList = (ins MCS51GPR8:$lhs, MCS51PTR:$amount);
+  let InOperandList = (ins MCS51GPR8:$lhs, MCS51GPR16:$amount);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -2740,7 +2765,7 @@ def SHL8rr : Instruction {
   let hasSideEffects = 1;
   let Defs = [B];
   let Pattern = [(set MCS51GPR8:$dst,
-                      (MCS51shl8 MCS51GPR8:$lhs, MCS51PTR:$amount))];
+                      (MCS51shl8 MCS51GPR8:$lhs, MCS51GPR16:$amount))];
 }
 class MCS51Shift8RegPseudo<SDNode node> : Instruction {
   let Namespace = "MCS51";
@@ -2762,7 +2787,7 @@ def SHL8rrReg : MCS51Shift8RegPseudo<MCS51shl8_reg>;
 
 def ZEXT8TO16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51GPR8:$src);
   let AsmString = "";
   let Size = 0;
@@ -2770,12 +2795,12 @@ def ZEXT8TO16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst, (zext MCS51GPR8:$src))];
+  let Pattern = [(set MCS51GPR16:$dst, (zext MCS51GPR8:$src))];
 }
 
 def SEXT8TO16 : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51GPR8:$src);
   let AsmString = "";
   let Size = 0;
@@ -2783,12 +2808,12 @@ def SEXT8TO16 : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst, (sext MCS51GPR8:$src))];
+  let Pattern = [(set MCS51GPR16:$dst, (sext MCS51GPR8:$src))];
 }
 
 class MCS51AddExtendedByteImmediatePseudo<SDNode Op> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
+  let OutOperandList = (outs MCS51GPR16:$dst);
   let InOperandList = (ins MCS51GPR8:$src, MCS51Imm16:$imm);
   let AsmString = "";
   let Size = 0;
@@ -2796,7 +2821,7 @@ class MCS51AddExtendedByteImmediatePseudo<SDNode Op> : Instruction {
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst,
+  let Pattern = [(set MCS51GPR16:$dst,
                       (Op MCS51GPR8:$src, MCS51Imm16:$imm))];
 }
 
@@ -2805,16 +2830,16 @@ def ADD_SEXT8_IMM : MCS51AddExtendedByteImmediatePseudo<MCS51add_sext8_imm>;
 
 class MCS51AddExtendedBytePseudo<SDNode Op> : Instruction {
   let Namespace = "MCS51";
-  let OutOperandList = (outs MCS51PTR:$dst);
-  let InOperandList = (ins MCS51PTR:$base, MCS51GPR8:$src);
+  let OutOperandList = (outs MCS51GPR16:$dst);
+  let InOperandList = (ins MCS51GPR16:$base, MCS51GPR8:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51PTR:$dst,
-                      (Op MCS51PTR:$base, MCS51GPR8:$src))];
+  let Pattern = [(set MCS51GPR16:$dst,
+                      (Op MCS51GPR16:$base, MCS51GPR8:$src))];
 }
 
 def ADD_ZEXT8_16 : MCS51AddExtendedBytePseudo<MCS51add_zext8_16>;
@@ -2825,12 +2850,12 @@ def SUB_SEXT8_16 : MCS51AddExtendedBytePseudo<MCS51sub_sext8_16>;
 def TRUNC16TO8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51AReg:$dst);
-  let InOperandList = (ins MCS51PTR:$src);
+  let InOperandList = (ins MCS51GPR16:$src);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
   let isCodeGenOnly = 1;
   let usesCustomInserter = 1;
   let hasSideEffects = 1;
-  let Pattern = [(set MCS51AReg:$dst, (trunc MCS51PTR:$src))];
+  let Pattern = [(set MCS51AReg:$dst, (trunc MCS51GPR16:$src))];
 }
