@@ -25,6 +25,8 @@ class MCS51Operand final : public MCParsedAsmOperand {
   const MCExpr *Expr = nullptr;
 
 public:
+  // 1 for lo8(expr), 2 for hi8(expr): a byte of a symbol's address.
+  unsigned SymByte = 0;
   MCS51Operand(SMLoc Loc, StringRef Token)
       : Loc(Loc), Token(Token), Reg() {}
   MCS51Operand(SMLoc Loc, MCRegister Reg) : Loc(Loc), Reg(Reg) {}
@@ -119,9 +121,27 @@ class MCS51AsmParser final : public MCTargetAsmParser {
         Operands.push_back(std::make_unique<MCS51Operand>(ImmLoc, "#"));
         Parser.Lex();
         const MCExpr *Expr = nullptr;
-        if (Parser.parseExpression(Expr))
+        unsigned SymByte = 0;
+        if (Parser.getTok().is(AsmToken::Identifier) &&
+            (Parser.getTok().getString().equals_insensitive("lo8") ||
+             Parser.getTok().getString().equals_insensitive("hi8"))) {
+          AsmToken Name = Parser.getTok();
+          if (getLexer().peekTok().is(AsmToken::LParen)) {
+            SymByte = Name.getString().equals_insensitive("lo8") ? 1 : 2;
+            Parser.Lex();
+            Parser.Lex();
+            if (Parser.parseExpression(Expr))
+              return true;
+            if (!Parser.getTok().is(AsmToken::RParen))
+              return Parser.Error(Parser.getTok().getLoc(), "expected ')'");
+            Parser.Lex();
+          }
+        }
+        if (!Expr && Parser.parseExpression(Expr))
           return true;
-        Operands.push_back(std::make_unique<MCS51Operand>(ImmLoc, Expr));
+        auto Operand = std::make_unique<MCS51Operand>(ImmLoc, Expr);
+        Operand->SymByte = SymByte;
+        Operands.push_back(std::move(Operand));
         continue;
       }
       if (Tok.is(AsmToken::Slash)) {
@@ -175,6 +195,26 @@ class MCS51AsmParser final : public MCTargetAsmParser {
                                MCStreamer &Out, uint64_t &ErrorInfo,
                                bool MatchingInlineAsm) override {
     MCInst Inst;
+    // mov direct, #lo8(sym) / #hi8(sym): the byte of an address, loaded into
+    // one of the imaginary registers.
+    if (Operands.size() == 4 &&
+        static_cast<MCS51Operand &>(*Operands[3]).SymByte &&
+        static_cast<MCS51Operand &>(*Operands[0]).getToken().equals_insensitive(
+            "mov") &&
+        Operands[1]->isImm()) {
+      auto &Direct = static_cast<MCS51Operand &>(*Operands[1]);
+      int64_t Address = 0;
+      if (!Direct.getImm()->evaluateAsAbsolute(Address) || Address < 48 ||
+          Address > 71)
+        return Parser.Error(IDLoc, "lo8/hi8 needs a direct address 48-71");
+      auto &Byte = static_cast<MCS51Operand &>(*Operands[3]);
+      Inst.setOpcode(Byte.SymByte == 1 ? MCS51::MOV_IM_SYMLO
+                                       : MCS51::MOV_IM_SYMHI);
+      Inst.addOperand(MCOperand::createReg(MCS51::IM0 + (Address - 48)));
+      Inst.addOperand(MCOperand::createExpr(Byte.getImm()));
+      Out.emitInstruction(Inst, getSTI());
+      return false;
+    }
     auto Result = MatchInstructionImpl(Operands, Inst, ErrorInfo,
                                        MatchingInlineAsm);
     if (Result != Match_Success)
