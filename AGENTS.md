@@ -114,7 +114,7 @@ memory-mapped SFRs, the information page, and the selectable 32 KiB flash-bank
 window. Linker symbols also describe the DATA alias in the top 256 bytes of
 SRAM. Static XDATA `.data` and `.bss` outputs are linker-checked to stay below
 `0x1f00`, preserving that alias for the CPU's DATA/IDATA space. The linker
-assigns explicit DATA/IDATA globals offsets `0x30` through `0x7f`; startup adds
+assigns explicit DATA/IDATA globals offsets `0x48` through `0x7f` (`0x30`-`0x47` hold the imaginary registers described below); startup adds
 the SRAM alias base when copying their initial values. DATA-space globals use
 direct accesses, while IDATA globals support byte and word accesses through
 `@R0`. Lower offsets remain available for register banks and bit-addressable
@@ -158,6 +158,26 @@ the interrupted register-bank-0 state and SFR registers, then returns with
 at `0x03 + 8*N`, keeps reset at address zero, reserves the vector table, and
 rejects duplicate handlers for a vector. Interrupt handlers must reside in
 common flash and cannot be called directly.
+
+Register model and calling convention. Word-sized values live in pairs of
+direct-RAM bytes ("imaginary registers"): `IM0`-`IM23` are the direct addresses
+`0x30`-`0x47` (48-71) and `IP0`-`IP11` are their pairs. DPTR is reserved for
+single expansions (memory accesses, address arithmetic) and is never allocated
+across instructions. i16 values, and i32/i64/float split into i16 parts, are
+passed in `IP0`-`IP3` (low word first) and returned the same way; i8 arguments
+use `R7`-`R4` and an i8 result is returned in `A`; everything that does not fit,
+including i64 values and variadic arguments, goes on the stack. `R2`-`R7` and
+`IM8`-`IM23` are callee-saved, `IM0`-`IM7` are caller-saved. Prologues and
+epilogues save three or more registers of a group through the shared routines
+`__mcs51_save_{r,im}N` / `__mcs51_restore_{r,im}N` / `__mcs51_return_{r,im}N`
+in the runtime; these live in `.text.__mcs51_*` sections so LLD keeps them in
+common flash. Interrupt handlers save the imaginary registers they use. Locals
+live in IDATA and are accessed with `@R0`/`@R1`; the default address space is
+XDATA, so a pointer to a local that escapes through a default-space cast keeps
+its numeric value. Assembly source can name address bytes with
+`mov 48, #lo8(sym)` / `#hi8(sym)` (relocations `R_8051_LO8`/`R_8051_HI8`).
+The sim-based checks `verify-generic-pointer-runtime.sh` and
+`verify-arith32-runtime.sh` expect `s51` on `PATH` or in `MCS51_SIM`.
 
 Trivial aggregate arguments and return values of up to 8 bytes are coerced to
 integer packets of 8, 16, 32, or 64 bits and use the scalar register/stack ABI.
