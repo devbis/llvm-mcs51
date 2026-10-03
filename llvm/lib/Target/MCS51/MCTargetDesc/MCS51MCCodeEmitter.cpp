@@ -51,6 +51,34 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     report_fatal_error("unsupported MCS-51 immediate operand");
   }
 
+  // The byte of a symbol address held in the third byte of
+  // MOV direct,#imm style instructions.
+  uint32_t getSymByteOpValue(const MCInst &MI, unsigned OpNo,
+                             SmallVectorImpl<MCFixup> &Fixups, bool High) const {
+    const MCOperand &Op = MI.getOperand(OpNo);
+    if (Op.isImm())
+      return static_cast<uint8_t>(High ? Op.getImm() >> 8 : Op.getImm());
+    int64_t Value = 0;
+    if (Op.isExpr() && Op.getExpr()->evaluateAsAbsolute(Value))
+      return static_cast<uint8_t>(High ? Value >> 8 : Value);
+    if (Op.isExpr()) {
+      Fixups.push_back(MCFixup::create(
+          2, Op.getExpr(), High ? MCS51::fixup_hi8 : MCS51::fixup_lo8));
+      return 0;
+    }
+    report_fatal_error("unsupported MCS-51 symbol byte operand");
+  }
+  uint32_t getSymLo8OpValue(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &) const {
+    return getSymByteOpValue(MI, OpNo, Fixups, false);
+  }
+  uint32_t getSymHi8OpValue(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &) const {
+    return getSymByteOpValue(MI, OpNo, Fixups, true);
+  }
+
   uint32_t getImm16OpValue(const MCInst &MI, unsigned OpNo,
                            SmallVectorImpl<MCFixup> &Fixups,
                            const MCSubtargetInfo &) const {

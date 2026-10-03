@@ -8,3 +8,6 @@ ELF_RELOC(R_8051_PCREL8, 3)
 ELF_RELOC(R_8051_11, 4)
 ELF_RELOC(R_8051_16_BE, 5)
 ELF_RELOC(R_8051_DPTR16, 6)
+// Low and high byte of an absolute address, for 8-bit immediate fields.
+ELF_RELOC(R_8051_LO8, 7)
+ELF_RELOC(R_8051_HI8, 8)
