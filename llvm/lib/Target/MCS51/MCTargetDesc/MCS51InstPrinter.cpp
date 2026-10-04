@@ -5,12 +5,12 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/ADT/Twine.h"
 
 using namespace llvm;
 
 #define PRINT_ALIAS_INSTR
 #include "MCS51GenAsmWriter.inc"
-#include "llvm/ADT/Twine.h"
 
 void MCS51InstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) {
   OS << getRegisterName(Reg);
