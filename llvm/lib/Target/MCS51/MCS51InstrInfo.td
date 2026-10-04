@@ -635,6 +635,11 @@ def MCS51Addr16BE : Operand<OtherVT> {
   let DecoderMethod = "DecodeImm16BE";
 }
 
+def MCS51Addr24 : Operand<OtherVT> {
+  let ParserMatchClass = ImmAsmOperand;
+  let EncoderMethod = "getImm24OpValue";
+}
+
 def MCS51Addr11 : Operand<OtherVT> {
   let ParserMatchClass = ImmAsmOperand;
   let EncoderMethod = "getAddr11OpValue";
@@ -662,6 +667,19 @@ def MCS51Rel8 : Operand<OtherVT> {
   let EncoderMethod = "getRel8OpValue";
   let DecoderMethod = "DecodeRel8";
   let PrintMethod = "printPCRelImm";
+}
+
+// Data pointer emitted by the IAR listing converter for a banked code target.
+// It is encoded as address-low, address-high, bank and fixed by R_8051_24.
+def BANKADDR24 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51Addr24:$addr);
+  let AsmString = "bankaddr24 $addr";
+  let Size = 3;
+  bits<24> addr;
+  bits<24> Inst;
+  let Inst{23-0} = addr;
 }
 
 class MCS51RelBranch<bits<8> opcode, string mnemonic> : Instruction {

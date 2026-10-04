@@ -171,6 +171,7 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   case R_8051_DPTR16:
   case R_8051_DPTR16_XDATA:
   case R_8051_DPTR16_CODE:
+  case R_8051_24:
     return R_ABS;
   case R_8051_PCREL8:
     return R_PC;
@@ -387,6 +388,12 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_8051_LO8_CODE:
     *loc = static_cast<uint8_t>(val);
     break;
+  case R_8051_24:
+    checkUInt(ctx, loc, val, 24, rel);
+    loc[0] = static_cast<uint8_t>(val);
+    loc[1] = static_cast<uint8_t>(val >> 8);
+    loc[2] = static_cast<uint8_t>(val >> 16);
+    break;
   case R_8051_16:
     checkUInt(ctx, loc, val, 16, rel);
     write16le(loc, val);
@@ -465,7 +472,7 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     }
     bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
     bool isAutoBankThunk = sec.name.starts_with(".text.autobankthunks.");
-    if (rel.sym && !isBankThunk && !isAutoBankThunk)
+    if (rel.sym && rel.type != R_8051_24 && !isBankThunk && !isAutoBankThunk)
       if (const Defined *direct =
               getCommonTargetOfExternalBankThunk(ctx, *rel.sym))
         val = direct->getVA(ctx, rel.addend);
@@ -478,6 +485,11 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
           target ? dyn_cast_or_null<InputSection>(target->section) : nullptr;
       if (targetInput && (targetInput->flags & SHF_EXECINSTR))
         targetBank = getMCS51CodeBank(targetInput->getOutputSection());
+    }
+    if (rel.type == R_8051_24 && rel.sym) {
+      val = (static_cast<uint64_t>(targetBank) << 16) | (val & 0xffff);
+      relocate(loc, rel, val);
+      continue;
     }
     if (rel.sym && rel.sym->isFunc()) {
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());

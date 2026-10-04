@@ -35,11 +35,35 @@ python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \
   --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
 ```
 
-The initial converter accepts only selected, zero-initialized public objects in
+The initial data converter accepts only selected, zero-initialized public objects in
 IAR `XDATA_Z` segments. It emits `.bss.*` ELF sections and packages them into
 an archive with `llvm-ar`; this subset can resolve ordinary MCS-51 XDATA
 references in Clang objects. It rejects code, initialized data, and emitted
-relocations. Most Z-Stack library code is banked and still needs UBROF
-relocation decoding plus IAR-to-Clang calling-convention and banking support.
-The output is therefore a deliberately narrow prototype, not a converted
-Z-Stack library suitable for firmware execution.
+relocations.
+
+For the first executable slice, produce an XLIB listing of `ecc.r51` and
+convert one public banked function together with its relay and referenced code
+segments:
+
+```sh
+python3 -m iar2llvm convert-code-listing /private/tmp/iar2llvm-ecc.lst \
+  --module eccapi --symbol ZSE_ECDSASign \
+  --out /tmp/libiar-ecc.a \
+  --llvm-mc ../../../../llvm-mcs51-build/bin/llvm-mc \
+  --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
+```
+
+This code subset preserves the machine bytes and translates the ECC listing's
+`SJMP`, `LCALL`/`LJMP`, and 24-bit banked-code pointer records. The new
+`R_8051_24` linker relocation writes address-low, address-high, and the final
+flash bank number, after CC2530 automatic bank placement. Symbols with IAR-only
+punctuation are exported under stable `__iar_sym_<hex-name>` ELF names; JSON
+output lists those mappings and unresolved IAR runtime names.
+
+This does not adapt an IAR function body to the Clang calling convention. The
+converted relay still depends on IAR bank-switching runtime routines, and
+banked functions use IAR's 24-bit return-address convention. Clang keeps its
+standard ABI unless a future, explicit `-mabi=iar` option is selected. This
+archive is therefore a linker-input milestone, not yet callable Z-Stack code
+or a deployable firmware library. Other UBROF records and initialized data are
+still unsupported by the converter.
