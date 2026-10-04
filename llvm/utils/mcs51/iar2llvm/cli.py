@@ -6,7 +6,11 @@ from pathlib import Path
 import sys
 
 from .archive import UBROFError, extract_library, inspect_library
-from .listing import ListingError, convert_listing_to_archive
+from .listing import (
+    ListingError,
+    convert_code_listing_to_archive,
+    convert_listing_to_archive,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +40,18 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--llvm-mc", type=Path)
     convert.add_argument("--llvm-ar", type=Path)
     convert.add_argument("--json", action="store_true")
+
+    convert_code = subparsers.add_parser(
+        "convert-code-listing",
+        help="convert selected IAR BANKED_CODE functions and their relays",
+    )
+    convert_code.add_argument("listing", type=Path)
+    convert_code.add_argument("--module", required=True)
+    convert_code.add_argument("--symbol", action="append", required=True, dest="symbols")
+    convert_code.add_argument("--out", type=Path, required=True)
+    convert_code.add_argument("--llvm-mc", type=Path)
+    convert_code.add_argument("--llvm-ar", type=Path)
+    convert_code.add_argument("--json", action="store_true")
     return parser
 
 
@@ -46,8 +62,17 @@ def main(argv: list[str] | None = None) -> int:
             payload = inspect_library(args.library)
         elif args.command == "extract":
             payload = extract_library(args.library, args.out_dir)
-        else:
+        elif args.command == "convert-listing":
             payload = convert_listing_to_archive(
+                args.listing,
+                args.module,
+                args.symbols,
+                args.out,
+                args.llvm_mc,
+                args.llvm_ar,
+            )
+        else:
+            payload = convert_code_listing_to_archive(
                 args.listing,
                 args.module,
                 args.symbols,
@@ -59,15 +84,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"iar2llvm: error: {error}", file=sys.stderr)
         return 1
 
-    if args.command == "convert-listing":
+    if args.command in ("convert-listing", "convert-code-listing"):
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
             print(f"Archive: {payload['output']}")
             print(f"Format: {payload['format']}")
             print(f"Scope: {payload['scope']}")
-            for symbol in payload["symbols"]:
-                print(f"  {symbol['name']:<24} {symbol['size']:>8} bytes")
+            if args.command == "convert-code-listing":
+                for name, alias in payload["symbols"].items():
+                    print(f"  {name} -> {alias}")
+                print("  Unresolved IAR symbols: " + ", ".join(payload["unresolved"]))
+            else:
+                for symbol in payload["symbols"]:
+                    print(f"  {symbol['name']:<24} {symbol['size']:>8} bytes")
         return 0
 
     if args.json:

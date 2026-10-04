@@ -22,3 +22,5 @@ ELF_RELOC(R_8051_LO8_XDATA, 12)
 ELF_RELOC(R_8051_HI8_XDATA, 13)
 ELF_RELOC(R_8051_LO8_CODE, 14)
 ELF_RELOC(R_8051_HI8_CODE, 15)
+// Little-endian banked code pointer: address low, address high, bank number.
+ELF_RELOC(R_8051_24, 16)

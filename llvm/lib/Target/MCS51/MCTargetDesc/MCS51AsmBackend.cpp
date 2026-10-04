@@ -84,6 +84,8 @@ public:
       return {"fixup_lo8", 0, 8, 0};
     if (Kind == MCS51::fixup_hi8)
       return {"fixup_hi8", 0, 8, 0};
+    if (Kind == MCS51::fixup_24)
+      return {"fixup_24", 0, 24, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 
@@ -130,6 +132,12 @@ public:
     if (Fixup.getKind() == MCS51::fixup_hi8_xdata ||
         Fixup.getKind() == MCS51::fixup_hi8_code) {
       Data[0] |= static_cast<uint8_t>(Value >> 8);
+      return;
+    }
+    if (Fixup.getKind() == MCS51::fixup_24) {
+      Data[0] |= static_cast<uint8_t>(Value);
+      Data[1] |= static_cast<uint8_t>(Value >> 8);
+      Data[2] |= static_cast<uint8_t>(Value >> 16);
       return;
     }
     if (Fixup.getKind() == MCS51::fixup_16_be ||
