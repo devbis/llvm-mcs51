@@ -829,7 +829,7 @@ def _code_group(segment: Segment) -> str | None:
     if segment.address_space == "CODE" and segment.name == "BANK_RELAYS":
         return "relays"
     if segment.address_space == "CODE" and segment.name == "CODE_C":
-        return "common"
+        return "common_const"
     return None
 
 
@@ -1408,7 +1408,8 @@ def convert_code_listing_to_archive(
     expressions to ELF relocations, and does not adapt the IAR calling
     convention to Clang's ABI.
     """
-    modules = _modules(listing_path.read_text(encoding="latin1"))
+    listing_text = listing_path.read_text(encoding="latin1")
+    modules = _modules(listing_text)
     if module_name not in modules:
         raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
 
@@ -1507,7 +1508,58 @@ def convert_code_listing_to_archive(
                 raise ListingError(f"nonzero symbol offset is unsupported for {name}")
             requested[name] = symbol
 
+    public_bss: list[tuple[Symbol, Segment, int, list[str]]] = []
+    public_initialized: list[tuple[Symbol, bytes]] = []
+    unsupported_public_data: dict[str, str] = {}
+    if all_public_banked:
+        public_xdata_z = [
+            name
+            for name, symbol in symbols.items()
+            if segments.get(symbol.segment) == Segment(symbol.segment, "XDATA", "XDATA_Z")
+        ]
+        public_xdata_i = [
+            name
+            for name, symbol in symbols.items()
+            if segments.get(symbol.segment) == Segment(symbol.segment, "XDATA", "XDATA_I")
+        ]
+        if public_xdata_z:
+            try:
+                public_bss = _selected_bss(listing_text, module_name, public_xdata_z)
+            except ListingError:
+                for name in public_xdata_z:
+                    try:
+                        public_bss.extend(
+                            _selected_bss(listing_text, module_name, [name])
+                        )
+                    except ListingError as symbol_error:
+                        unsupported_public_data[name] = str(symbol_error)
+        if public_xdata_i:
+            try:
+                public_initialized = _selected_initialized_xdata(
+                    listing_text, module_name, public_xdata_i
+                )
+            except ListingError:
+                for name in public_xdata_i:
+                    try:
+                        public_initialized.extend(
+                            _selected_initialized_xdata(
+                                listing_text, module_name, [name]
+                            )
+                        )
+                    except ListingError as symbol_error:
+                        unsupported_public_data[name] = str(symbol_error)
+    bundled_public_data_names = {
+        symbol.name
+        for symbol, _segment, _size, _ops in public_bss
+    } | {symbol.name for symbol, _contents in public_initialized}
+
     selected_segments = {symbol.segment for symbol in requested.values()}
+    if all_public_banked:
+        selected_segments.update(
+            symbol.segment
+            for symbol in symbols.values()
+            if _code_group(segments[symbol.segment]) == "common_const"
+        )
     relay_exports: dict[str, Symbol] = {}
     for name in requested:
         relay = symbols.get(name + "::?relay")
@@ -1524,6 +1576,12 @@ def convert_code_listing_to_archive(
     # references remain ELF symbol relocations and are resolved by other
     # converted archive members.
     selected_constant_segments: set[str] = set()
+    if all_public_banked:
+        selected_constant_segments.update(
+            symbol.segment
+            for symbol in symbols.values()
+            if _constant_segment(segments[symbol.segment])
+        )
     selected_xdata_segments: set[str] = set()
     pending = list(selected_segments)
     while pending:
@@ -1599,7 +1657,15 @@ def convert_code_listing_to_archive(
         name: (_asm_name(name), True) for name in external_names.values()
     }
     for name, symbol in symbols.items():
-        if name in requested or name in relay_exports:
+        if (
+            name in requested
+            or name in relay_exports
+            or (
+                symbol.segment in selected_segments
+                and _code_group(segments[symbol.segment]) == "common_const"
+            )
+            or symbol.segment in selected_constant_segments
+        ):
             source_aliases[name] = (_asm_name(name), False)
             continue
         label = segment_labels.get(symbol.segment)
@@ -1642,6 +1708,7 @@ def convert_code_listing_to_archive(
     }
 
     exports_by_segment: dict[str, list[str]] = {}
+    constant_exports_by_segment: dict[str, list[Symbol]] = {}
     exported_originals: dict[str, str] = {}
     for original, symbol in requested.items():
         alias = _asm_name(original)
@@ -1651,11 +1718,28 @@ def convert_code_listing_to_archive(
         alias = _asm_name(symbol.name)
         exports_by_segment.setdefault(symbol.segment, []).append(alias)
         exported_originals[symbol.name] = alias
+    for name, symbol in symbols.items():
+        if symbol.segment in selected_constant_segments:
+            constant_exports_by_segment.setdefault(symbol.segment, []).append(symbol)
+            exported_originals[name] = _asm_name(name)
+            continue
+        if (
+            symbol.segment not in selected_segments
+            or _code_group(segments[symbol.segment]) != "common_const"
+        ):
+            continue
+        if symbol.offset != 0:
+            raise ListingError(
+                f"nonzero CODE_C data-symbol offset is unsupported for {name}"
+            )
+        alias = _asm_name(name)
+        exports_by_segment.setdefault(symbol.segment, []).append(alias)
+        exported_originals[name] = alias
 
     section_names = {
         "banked": f".mcs51.autobank.iar_{module_token}",
         "relays": f".text.__mcs51_iarrelay_{module_token}",
-        "common": f".text.__mcs51_iarcommon_{module_token}",
+        "common_const": f".rodata.__mcs51_iarconst_{module_token}",
     }
     lines = ["; Generated from an IAR XLIB listing by iar2llvm."]
     external_aliases = sorted(
@@ -1684,6 +1768,7 @@ def convert_code_listing_to_archive(
         for symbol in symbols.values()
         if symbol.segment not in selected_segments
         and symbol.segment not in selected_constant_segments
+        and symbol.name not in bundled_public_data_names
         and _asm_name(symbol.name) in external_alias_set
     )
     unresolved_names = sorted(unresolved)
@@ -1691,7 +1776,7 @@ def convert_code_listing_to_archive(
         lines.append(f".globl {alias}")
 
     selected_order = [ident for ident in segment_order if ident in selected_segments]
-    for group in ("banked", "relays", "common"):
+    for group in ("banked", "relays", "common_const"):
         group_segments = [
             ident
             for ident in selected_order
@@ -1699,16 +1784,26 @@ def convert_code_listing_to_archive(
         ]
         if not group_segments:
             continue
-        lines.extend(
-            [
-                f'.section {section_names[group]},"ax",@progbits',
-                ".balign 1",
-            ]
-        )
+        section_flags = "a" if group == "common_const" else "ax"
+        if group != "banked":
+            lines.extend(
+                [
+                    f'.section {section_names[group]},"{section_flags}",@progbits',
+                    ".balign 1",
+                ]
+            )
         for ident in group_segments:
+            if group == "banked":
+                lines.extend(
+                    [
+                        f'.section {section_names[group]}_{ident.lower()},"ax",@progbits',
+                        ".balign 1",
+                    ]
+                )
             exports = exports_by_segment.get(ident, [])
             for alias in exports:
-                lines.extend([f".globl {alias}", f".type {alias},@function", f"{alias}:"])
+                symbol_type = "object" if group == "common_const" else "function"
+                lines.extend([f".globl {alias}", f".type {alias},@{symbol_type}", f"{alias}:"])
             lines.append(f"{segment_labels[ident]}:")
             items = decoded[ident]
             if not items and exports:
@@ -1767,13 +1862,88 @@ def convert_code_listing_to_archive(
                 continue
             contents = decoded_constants[ident]
             lines.append(f"{segment_labels[ident]}:")
-            lines.extend(
-                ".byte "
-                + ", ".join(
-                    f"0x{byte:02x}" for byte in contents[offset : offset + 16]
+            exports_at_offset: dict[int, list[Symbol]] = {}
+            for symbol in constant_exports_by_segment.get(ident, []):
+                if symbol.offset < 0 or symbol.offset >= len(contents):
+                    raise ListingError(
+                        f"public constant {symbol.name} has an invalid offset "
+                        f"in segment {ident}"
+                    )
+                exports_at_offset.setdefault(symbol.offset, []).append(symbol)
+            ordered_offsets = sorted(exports_at_offset)
+            sizes = {
+                offset: (
+                    ordered_offsets[index + 1]
+                    if index + 1 < len(ordered_offsets)
+                    else len(contents)
                 )
-                for offset in range(0, len(contents), 16)
+                - offset
+                for index, offset in enumerate(ordered_offsets)
+            }
+            cursor = 0
+            for offset in ordered_offsets:
+                for start in range(cursor, offset, 16):
+                    lines.append(
+                        ".byte "
+                        + ", ".join(
+                            f"0x{byte:02x}"
+                            for byte in contents[start : min(start + 16, offset)]
+                        )
+                    )
+                for symbol in exports_at_offset[offset]:
+                    alias = _asm_name(symbol.name)
+                    lines.extend(
+                        [
+                            f".globl {alias}",
+                            f".type {alias},@object",
+                            f"{alias}:",
+                        ]
+                    )
+                cursor = offset
+            for start in range(cursor, len(contents), 16):
+                lines.append(
+                    ".byte "
+                    + ", ".join(
+                        f"0x{byte:02x}"
+                        for byte in contents[start : start + 16]
+                    )
+                )
+            for offset in ordered_offsets:
+                for symbol in exports_at_offset[offset]:
+                    lines.append(f".size {_asm_name(symbol.name)}, {sizes[offset]}")
+
+    for symbol, _segment, size, _ops in public_bss:
+        alias = _asm_name(symbol.name)
+        lines.extend(
+            [
+                f'.section .bss.{alias},"aw",@nobits',
+                ".balign 1",
+                f".globl {alias}",
+                f".type {alias},@object",
+                f"{alias}:",
+                f".zero {size}",
+                f".size {alias}, {size}",
+            ]
+        )
+    for symbol, contents in public_initialized:
+        alias = _asm_name(symbol.name)
+        lines.extend(
+            [
+                f'.section .data.{alias},"aw",@progbits',
+                ".balign 1",
+                f".globl {alias}",
+                f".type {alias},@object",
+                f"{alias}:",
+            ]
+        )
+        lines.extend(
+            ".byte "
+            + ", ".join(
+                f"0x{byte:02x}" for byte in contents[offset : offset + 16]
             )
+            for offset in range(0, len(contents), 16)
+        )
+        lines.append(f".size {alias}, {len(contents)}")
 
     private_bss = {
         ident: size
@@ -1823,6 +1993,11 @@ def convert_code_listing_to_archive(
             )
             lines.append(f".size {label}, {len(contents)}")
 
+    for symbol, _segment, size, _ops in public_bss:
+        exported_originals[symbol.name] = _asm_name(symbol.name)
+    for symbol, _contents in public_initialized:
+        exported_originals[symbol.name] = _asm_name(symbol.name)
+
     llvm_mc = llvm_mc or _default_tool("llvm-mc")
     llvm_ar = llvm_ar or _default_tool("llvm-ar")
     output = output.resolve()
@@ -1862,11 +2037,13 @@ def convert_code_listing_to_archive(
         "symbols": exported_originals,
         "segments": selected_order,
         "unresolved": unresolved_names,
+        "unsupported_public_data": unsupported_public_data,
         "unresolved_elf_symbols": external_aliases,
         "format": "ELF32 MCS-51 archive",
         "scope": (
-            "all public IAR BANKED_CODE/BANK_RELAYS code, literal referenced constants, "
-            "private XDATA objects, and supported address relocations"
+            "all public IAR BANKED_CODE/BANK_RELAYS code, literal constants, "
+            "public XDATA_Z/XDATA_I objects, private XDATA references, and supported "
+            "address relocations"
             if all_public_banked
             else "selected IAR BANKED_CODE/BANK_RELAYS code and supported relocation records"
         ),

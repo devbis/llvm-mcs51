@@ -148,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
                 for name, alias in payload["symbols"].items():
                     print(f"  {name} -> {alias}")
                 print("  Unresolved IAR symbols: " + ", ".join(payload["unresolved"]))
+                for name, reason in payload["unsupported_public_data"].items():
+                    print(f"  Unsupported public data {name}: {reason}")
             else:
                 for symbol in payload["symbols"]:
                     print(f"  {symbol['name']:<24} {symbol['size']:>8} bytes")
