@@ -27,6 +27,44 @@ class Symbol:
     offset: int
 
 
+@dataclass(frozen=True, slots=True)
+class _InitializerRelocation:
+    symbol: str
+    addend: int = 0
+
+
+_InitializerAtom = int | _InitializerRelocation
+
+
+def _initializer_size(contents: list[_InitializerAtom]) -> int:
+    return sum(2 if isinstance(atom, _InitializerRelocation) else 1 for atom in contents)
+
+
+def _emit_initializer(lines: list[str], contents: list[_InitializerAtom]) -> None:
+    literal_bytes: list[int] = []
+
+    def flush_literal_bytes() -> None:
+        for offset in range(0, len(literal_bytes), 16):
+            lines.append(
+                ".byte "
+                + ", ".join(
+                    f"0x{byte:02x}" for byte in literal_bytes[offset : offset + 16]
+                )
+            )
+        literal_bytes.clear()
+
+    for atom in contents:
+        if isinstance(atom, int):
+            literal_bytes.append(atom)
+            continue
+        flush_literal_bytes()
+        operand = _asm_name(atom.symbol)
+        if atom.addend:
+            operand += f"+{atom.addend}" if atom.addend > 0 else str(atom.addend)
+        lines.append(f".short {operand}")
+    flush_literal_bytes()
+
+
 def _records(lines: list[str]) -> Iterator[tuple[str, str]]:
     """Yield XLIB listing records with wrapped continuation lines joined."""
     index = 0
@@ -514,7 +552,7 @@ def convert_const_listing_to_archive(
 
 def _selected_initialized_xdata(
     listing: str, module_name: str, symbol_names: list[str]
-) -> list[tuple[Symbol, bytes]]:
+) -> list[tuple[Symbol, list[_InitializerAtom]]]:
     modules = _modules(listing)
     if module_name not in modules:
         raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
@@ -650,11 +688,13 @@ def _selected_initialized_xdata(
     if len(set(initializer_for.values())) != len(initializer_for):
         raise ListingError("multiple XDATA_I symbols share one initializer segment")
 
-    result: list[tuple[Symbol, bytes]] = []
+    result: list[tuple[Symbol, list[_InitializerAtom]]] = []
     for symbol in requested:
         initializer = initializer_for[symbol.name]
         cursor = 0
-        emitted: dict[int, int] = {}
+        emitted: dict[int, _InitializerAtom] = {}
+        occupied: set[int] = set()
+        pending_relocation: tuple[str, int] | None = None
         for tag, text in records_by_segment.get(initializer, []):
             if tag == "t_org_rel1":
                 match = re.search(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
@@ -673,28 +713,82 @@ def _selected_initialized_xdata(
                 if not re.fullmatch(r"[0-9A-Fa-f]{%d}" % digits, text):
                     raise ListingError(
                         f"malformed {tag} record in initializer segment {initializer}"
-                    )
+                )
                 data = bytes.fromhex(text)
                 for offset, value in enumerate(data, cursor):
-                    if offset in emitted:
+                    if offset in occupied:
                         raise ListingError(
                             f"overlapping initializer bytes in segment {initializer}"
                         )
                     emitted[offset] = value
+                    occupied.add(offset)
                 cursor += len(data)
+            elif tag == "t_push_rel":
+                match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+                if not match or pending_relocation is not None:
+                    raise ListingError(
+                        f"unsupported relocation expression in XDATA_ID segment "
+                        f"{initializer}"
+                    )
+                pending_relocation = (match.group(1).upper(), int(match.group(2), 16))
+            elif tag == "t_pop_16":
+                if pending_relocation is None:
+                    raise ListingError(
+                        f"16-bit initializer relocation has no target in segment {initializer}"
+                    )
+                target_segment, addend = pending_relocation
+                target = segments.get(target_segment)
+                if target is None or (target.address_space, target.name) != (
+                    "CODE",
+                    "CODE_C",
+                ):
+                    raise ListingError(
+                        f"16-bit initializer relocation in segment {initializer} "
+                        f"does not target a common CODE_C segment"
+                    )
+                target_symbols = [
+                    candidate
+                    for candidate in symbols.values()
+                    if candidate.segment == target_segment and candidate.offset == 0
+                ]
+                if len(target_symbols) != 1:
+                    raise ListingError(
+                        f"16-bit initializer target segment {target_segment} does not "
+                        "have one public base symbol"
+                    )
+                if cursor in occupied or cursor + 1 in occupied:
+                    raise ListingError(
+                        f"overlapping initializer relocation in segment {initializer}"
+                    )
+                emitted[cursor] = _InitializerRelocation(
+                    target_symbols[0].name, addend
+                )
+                occupied.update((cursor, cursor + 1))
+                cursor += 2
+                pending_relocation = None
             elif tag not in ("t_asm_mode_change", "t_stack_error", "t_end"):
                 raise ListingError(
                     f"unsupported XLIB record {tag} in XDATA_ID segment "
-                    f"{initializer}; relocatable initializers are not supported"
+                    f"{initializer}"
                 )
-        if not emitted:
+        if pending_relocation is not None:
+            raise ListingError(
+                f"unterminated initializer relocation in segment {initializer}"
+            )
+        if not occupied:
             raise ListingError(f"initializer for {symbol.name} contains no bytes")
-        size = max(emitted) + 1
-        if set(emitted) != set(range(size)):
+        size = max(occupied) + 1
+        if occupied != set(range(size)):
             raise ListingError(
                 f"initializer for {symbol.name} contains uninitialized gaps"
             )
-        result.append((symbol, bytes(emitted[offset] for offset in range(size))))
+        contents: list[_InitializerAtom] = []
+        offset = 0
+        while offset < size:
+            atom = emitted[offset]
+            contents.append(atom)
+            offset += 2 if isinstance(atom, _InitializerRelocation) else 1
+        result.append((symbol, contents))
     return result
 
 
@@ -706,7 +800,7 @@ def convert_initialized_listing_to_archive(
     llvm_mc: Path | None = None,
     llvm_ar: Path | None = None,
 ) -> dict[str, object]:
-    """Convert literal XDATA_I initializers into native ELF .data sections."""
+    """Convert supported XDATA_I initializers into native ELF .data sections."""
     selected = _selected_initialized_xdata(
         listing_path.read_text(encoding="latin1"), module_name, symbol_names
     )
@@ -725,14 +819,8 @@ def convert_initialized_listing_to_archive(
                 f"{alias}:",
             ]
         )
-        assembly.extend(
-            ".byte "
-            + ", ".join(
-                f"0x{byte:02x}" for byte in contents[offset : offset + 16]
-            )
-            for offset in range(0, len(contents), 16)
-        )
-        assembly.append(f".size {alias}, {len(contents)}")
+        _emit_initializer(assembly, contents)
+        assembly.append(f".size {alias}, {_initializer_size(contents)}")
 
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -778,11 +866,11 @@ def convert_initialized_listing_to_archive(
         "module": module_name,
         "output": str(output),
         "symbols": [
-            {"name": symbol.name, "size": len(contents)}
+            {"name": symbol.name, "size": _initializer_size(contents)}
             for symbol, contents in selected
         ],
         "format": "ELF32 MCS-51 archive",
-        "scope": "literal XDATA_I initializers through XDATA_ID; relocations rejected",
+        "scope": "literal XDATA_I initializers and 16-bit CODE_C pointer relocations",
     }
 
 
@@ -1509,7 +1597,7 @@ def convert_code_listing_to_archive(
             requested[name] = symbol
 
     public_bss: list[tuple[Symbol, Segment, int, list[str]]] = []
-    public_initialized: list[tuple[Symbol, bytes]] = []
+    public_initialized: list[tuple[Symbol, list[_InitializerAtom]]] = []
     unsupported_public_data: dict[str, str] = {}
     if all_public_banked:
         public_xdata_z = [
@@ -1936,14 +2024,8 @@ def convert_code_listing_to_archive(
                 f"{alias}:",
             ]
         )
-        lines.extend(
-            ".byte "
-            + ", ".join(
-                f"0x{byte:02x}" for byte in contents[offset : offset + 16]
-            )
-            for offset in range(0, len(contents), 16)
-        )
-        lines.append(f".size {alias}, {len(contents)}")
+        _emit_initializer(lines, contents)
+        lines.append(f".size {alias}, {_initializer_size(contents)}")
 
     private_bss = {
         ident: size
@@ -1984,14 +2066,8 @@ def convert_code_listing_to_archive(
             label = segment_labels[ident]
             lines.append(f".type {label},@object")
             lines.append(f"{label}:")
-            lines.extend(
-                ".byte "
-                + ", ".join(
-                    f"0x{byte:02x}" for byte in contents[offset : offset + 16]
-                )
-                for offset in range(0, len(contents), 16)
-            )
-            lines.append(f".size {label}, {len(contents)}")
+            _emit_initializer(lines, [*contents])
+            lines.append(f".size {label}, {_initializer_size([*contents])}")
 
     for symbol, _segment, size, _ops in public_bss:
         exported_originals[symbol.name] = _asm_name(symbol.name)
