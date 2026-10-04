@@ -55,6 +55,16 @@ public:
     return createMCS51ELFObjectWriter(ELF::ELFOSABI_STANDALONE);
   }
 
+  std::optional<MCFixupKind> getFixupKind(StringRef Name) const override {
+    if (Name == "fixup_lo8")
+      return MCS51::fixup_lo8;
+    if (Name == "fixup_hi8")
+      return MCS51::fixup_hi8;
+    if (Name == "fixup_bit8")
+      return MCS51::fixup_bit8;
+    return MCAsmBackend::getFixupKind(Name);
+  }
+
   MCFixupKindInfo getFixupKindInfo(MCFixupKind Kind) const override {
     if (Kind == MCS51::fixup_8)
       return {"fixup_8", 0, 8, 0};
@@ -84,6 +94,8 @@ public:
       return {"fixup_lo8", 0, 8, 0};
     if (Kind == MCS51::fixup_hi8)
       return {"fixup_hi8", 0, 8, 0};
+    if (Kind == MCS51::fixup_bit8)
+      return {"fixup_bit8", 0, 8, 0};
     if (Kind == MCS51::fixup_24)
       return {"fixup_24", 0, 24, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
@@ -132,6 +144,15 @@ public:
     if (Fixup.getKind() == MCS51::fixup_hi8_xdata ||
         Fixup.getKind() == MCS51::fixup_hi8_code) {
       Data[0] |= static_cast<uint8_t>(Value >> 8);
+      return;
+    }
+    if (Fixup.getKind() == MCS51::fixup_bit8) {
+      uint64_t Base = Value - Target.getConstant();
+      uint64_t BitAddress = (Base * 8 + Target.getConstant()) & 0xff;
+      if (IsResolved && BitAddress > 0x7f)
+        getContext().reportError(Fixup.getLoc(),
+                                 "IAR virtual-bit address is out of range");
+      Data[0] |= static_cast<uint8_t>(BitAddress);
       return;
     }
     if (Fixup.getKind() == MCS51::fixup_24) {

@@ -79,8 +79,10 @@ IAR initialization metadata are rejected.
 `convert-code-listing` can select one function with `--symbol`, or collect all
 public `BANKED_CODE` functions in a module with `--all-public-banked`. The
 latter also keeps referenced banked segments, relays, literal private
-constants, and private `XDATA_Z`/literal `XDATA_I` objects in the same ELF
-member. For example, all currently supported code in `cGP_stub`:
+constants, common `CODE_C` segments, and private `XDATA_Z`/literal `XDATA_I`
+objects in the same ELF member. `CODE_C` is emitted into a common-flash section;
+banked code remains eligible for the CC2530 bank placement pass. For example,
+all currently supported code in `cGP_stub`:
 
 ```sh
 python3 -m iar2llvm convert-code-listing /private/tmp/Router-Pro.lst \
@@ -90,9 +92,12 @@ python3 -m iar2llvm convert-code-listing /private/tmp/Router-Pro.lst \
   --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
 ```
 
-This remains a partial record decoder. The `nwk` module currently stops on an
-unsupported `t_load_ind` expression; the converter reports such records and
-does not write a partial archive.
+This remains a partial record decoder. In the selected Z-Stack RouterEB
+libraries, module-wide conversion can still stop on unsupported records or
+unresolved symbol forms. The converter reports the first unsupported record
+and does not write a partial archive. The generated objects preserve the IAR
+machine code and supported relocations, but do not adapt IAR calling
+conventions or runtime symbols to Clang's ABI.
 
 For the first executable slice, produce an XLIB listing of `ecc.r51` and
 convert one public banked function together with its relay and referenced code
@@ -107,10 +112,11 @@ python3 -m iar2llvm convert-code-listing /private/tmp/iar2llvm-ecc.lst \
 ```
 
 The code subset preserves machine bytes and translates supported `SJMP`,
-`LCALL`/`LJMP`, DPTR-address, and one-byte data relocations, as well as
-24-bit banked-code pointers. The new
-`R_8051_24` linker relocation writes address-low, address-high, and the final
-flash bank number, after CC2530 automatic bank placement. Symbols with IAR-only
+`LCALL`/`LJMP`, DPTR-address, 8/16-bit data, high/low-byte, IAR `?VB` virtual
+bit-address, and 24-bit banked-code relocations. `R_8051_24` writes
+address-low, address-high, and the final flash bank number after CC2530
+automatic bank placement. `R_8051_BIT8` converts the IAR virtual-bit byte
+address and bit offset into the 8051 bit address. Symbols with IAR-only
 punctuation are exported under stable `__iar_sym_<hex-name>` ELF names; JSON
 output lists those mappings and unresolved IAR runtime names.
 

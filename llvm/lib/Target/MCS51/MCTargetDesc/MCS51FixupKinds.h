@@ -29,6 +29,7 @@ enum Fixups {
   fixup_11,
   fixup_lo8,
   fixup_hi8,
+  fixup_bit8,
   fixup_24,
   NumTargetFixupKinds
 };
