@@ -45,11 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     convert_code = subparsers.add_parser(
         "convert-code-listing",
-        help="convert selected IAR BANKED_CODE functions and their relays",
+        help="convert selected or all public IAR BANKED_CODE functions and relays",
     )
     convert_code.add_argument("listing", type=Path)
     convert_code.add_argument("--module", required=True)
-    convert_code.add_argument("--symbol", action="append", required=True, dest="symbols")
+    convert_code.add_argument("--symbol", action="append", dest="symbols", default=[])
+    convert_code.add_argument("--all-public-banked", action="store_true")
     convert_code.add_argument("--out", type=Path, required=True)
     convert_code.add_argument("--llvm-mc", type=Path)
     convert_code.add_argument("--llvm-ar", type=Path)
@@ -107,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 args.llvm_mc,
                 args.llvm_ar,
+                args.all_public_banked,
             )
         elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
