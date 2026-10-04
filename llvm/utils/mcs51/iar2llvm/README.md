@@ -76,6 +76,24 @@ The generated `.data.*` objects use XDATA VMAs and are intended for Clang's
 CC2530 startup copy from CODE. Initializers with relocations or unsupported
 IAR initialization metadata are rejected.
 
+`convert-code-listing` can select one function with `--symbol`, or collect all
+public `BANKED_CODE` functions in a module with `--all-public-banked`. The
+latter also keeps referenced banked segments, relays, literal private
+constants, and private `XDATA_Z`/literal `XDATA_I` objects in the same ELF
+member. For example, all currently supported code in `cGP_stub`:
+
+```sh
+python3 -m iar2llvm convert-code-listing /private/tmp/Router-Pro.lst \
+  --module cGP_stub --all-public-banked \
+  --out /tmp/libzstack-cgp-code.a \
+  --llvm-mc ../../../../llvm-mcs51-build/bin/llvm-mc \
+  --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
+```
+
+This remains a partial record decoder. The `nwk` module currently stops on an
+unsupported `t_load_ind` expression; the converter reports such records and
+does not write a partial archive.
+
 For the first executable slice, produce an XLIB listing of `ecc.r51` and
 convert one public banked function together with its relay and referenced code
 segments:
@@ -88,8 +106,9 @@ python3 -m iar2llvm convert-code-listing /private/tmp/iar2llvm-ecc.lst \
   --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
 ```
 
-This code subset preserves the machine bytes and translates the ECC listing's
-`SJMP`, `LCALL`/`LJMP`, and 24-bit banked-code pointer records. The new
+The code subset preserves machine bytes and translates supported `SJMP`,
+`LCALL`/`LJMP`, DPTR-address, and one-byte data relocations, as well as
+24-bit banked-code pointers. The new
 `R_8051_24` linker relocation writes address-low, address-high, and the final
 flash bank number, after CC2530 automatic bank placement. Symbols with IAR-only
 punctuation are exported under stable `__iar_sym_<hex-name>` ELF names; JSON
@@ -100,6 +119,6 @@ converted relay still depends on IAR bank-switching runtime routines, and
 banked functions use IAR's 24-bit return-address convention. Clang keeps its
 standard ABI unless a future, explicit `-mabi=iar` option is selected. This
 archive is therefore a linker-input milestone, not yet callable Z-Stack code
-or a deployable firmware library. Other UBROF records, relocatable constants,
-and initialized XDATA data outside the literal `XDATA_ID` subset are still
-unsupported by the converter.
+or a deployable firmware library. Other UBROF expression records, relocatable
+constants, and initialized XDATA data outside the literal `XDATA_ID` subset
+are still unsupported by the converter.
