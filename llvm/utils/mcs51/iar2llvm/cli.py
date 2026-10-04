@@ -9,6 +9,7 @@ from .archive import UBROFError, extract_library, inspect_library
 from .listing import (
     ListingError,
     convert_code_listing_to_archive,
+    convert_const_listing_to_archive,
     convert_listing_to_archive,
 )
 
@@ -52,6 +53,18 @@ def build_parser() -> argparse.ArgumentParser:
     convert_code.add_argument("--llvm-mc", type=Path)
     convert_code.add_argument("--llvm-ar", type=Path)
     convert_code.add_argument("--json", action="store_true")
+
+    convert_const = subparsers.add_parser(
+        "convert-const-listing",
+        help="convert selected absolute CONST/XDATA_ROM_C objects from an XLIB listing",
+    )
+    convert_const.add_argument("listing", type=Path)
+    convert_const.add_argument("--module", required=True)
+    convert_const.add_argument("--symbol", action="append", required=True, dest="symbols")
+    convert_const.add_argument("--out", type=Path, required=True)
+    convert_const.add_argument("--llvm-mc", type=Path)
+    convert_const.add_argument("--llvm-ar", type=Path)
+    convert_const.add_argument("--json", action="store_true")
     return parser
 
 
@@ -71,8 +84,17 @@ def main(argv: list[str] | None = None) -> int:
                 args.llvm_mc,
                 args.llvm_ar,
             )
-        else:
+        elif args.command == "convert-code-listing":
             payload = convert_code_listing_to_archive(
+                args.listing,
+                args.module,
+                args.symbols,
+                args.out,
+                args.llvm_mc,
+                args.llvm_ar,
+            )
+        else:
+            payload = convert_const_listing_to_archive(
                 args.listing,
                 args.module,
                 args.symbols,
@@ -84,7 +106,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"iar2llvm: error: {error}", file=sys.stderr)
         return 1
 
-    if args.command in ("convert-listing", "convert-code-listing"):
+    if args.command in (
+        "convert-listing",
+        "convert-code-listing",
+        "convert-const-listing",
+    ):
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:

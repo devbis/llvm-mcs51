@@ -41,6 +41,25 @@ an archive with `llvm-ar`; this subset can resolve ordinary MCS-51 XDATA
 references in Clang objects. It rejects code, initialized data, and emitted
 relocations.
 
+Absolute constants in IAR `CONST/XDATA_ROM_C` segments can also be converted
+when they contain only literal bytes and have no relocations. For example, the
+four scalar constants in `cGP_stub`:
+
+```sh
+python3 -m iar2llvm convert-const-listing /private/tmp/Router-Pro.lst \
+  --module cGP_stub \
+  --symbol gpTxOffset --symbol gpRxOffset \
+  --symbol gpMaxTxOffsetVariation --symbol gpTxDuration \
+  --out /tmp/libzstack-const.a \
+  --llvm-mc ../../../../llvm-mcs51-build/bin/llvm-mc \
+  --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
+```
+
+The resulting objects are emitted into ELF `.rodata.*` sections in CODE space.
+The converter rejects constant tables that contain address relocations; for
+example, `nwkMsgProcs` remains unsupported until those IAR relocation records
+are decoded.
+
 For the first executable slice, produce an XLIB listing of `ecc.r51` and
 convert one public banked function together with its relay and referenced code
 segments:
@@ -65,5 +84,5 @@ converted relay still depends on IAR bank-switching runtime routines, and
 banked functions use IAR's 24-bit return-address convention. Clang keeps its
 standard ABI unless a future, explicit `-mabi=iar` option is selected. This
 archive is therefore a linker-input milestone, not yet callable Z-Stack code
-or a deployable firmware library. Other UBROF records and initialized data are
-still unsupported by the converter.
+or a deployable firmware library. Other UBROF records, relocatable constants,
+and initialized XDATA data are still unsupported by the converter.
