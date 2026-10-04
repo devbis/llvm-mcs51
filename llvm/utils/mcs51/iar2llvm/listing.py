@@ -302,6 +302,216 @@ def convert_listing_to_archive(
     }
 
 
+def _selected_code_constants(
+    listing: str, module_name: str, symbol_names: list[str]
+) -> list[tuple[Symbol, int, bytes]]:
+    modules = _modules(listing)
+    if module_name not in modules:
+        raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
+
+    records = modules[module_name]
+    segments: dict[str, Segment] = {}
+    symbols: dict[str, Symbol] = {}
+    definitions_by_segment: dict[str, list[str]] = {}
+    for tag, text in records:
+        if tag == "t_seg":
+            match = re.search(
+                r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+<rel,([A-Z0-9_]+)>\s+'([^']+)'",
+                text,
+            )
+            if match:
+                ident, address_space, name = match.groups()
+                segments[ident.upper()] = Segment(ident.upper(), address_space, name)
+        elif tag == "t_symbol_def2":
+            match = re.search(
+                r"([A-Z_]+_REL)\s+\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)\s+"
+                r"N[0-9A-Fa-f]+\"([^\"]+)\"",
+                text,
+            )
+            if match:
+                kind, segment, offset, name = match.groups()
+                segment = segment.upper()
+                definitions_by_segment.setdefault(segment, []).append(name)
+                if kind == "PUBLIC_REL":
+                    symbols[name] = Symbol(name, segment, int(offset, 16))
+
+    if not symbol_names:
+        raise ListingError("select at least one public constant")
+    requested: list[Symbol] = []
+    for name in symbol_names:
+        symbol = symbols.get(name)
+        if symbol is None:
+            raise ListingError(f"public constant {name!r} was not found")
+        segment = segments.get(symbol.segment)
+        if segment is None or (segment.address_space, segment.name) != (
+            "CONST",
+            "XDATA_ROM_C",
+        ):
+            raise ListingError(
+                f"{name} is not in an IAR CONST/XDATA_ROM_C segment"
+            )
+        if symbol.offset != 0:
+            raise ListingError(f"nonzero symbol offset is unsupported for {name}")
+        if definitions_by_segment.get(symbol.segment) != [name]:
+            raise ListingError(
+                f"segment {symbol.segment} has additional relative symbols; "
+                "their individual sizes are not known in this prototype"
+            )
+        requested.append(symbol)
+
+    selected_segments = {symbol.segment for symbol in requested}
+    extents: dict[str, int] = {}
+    bytes_by_segment: dict[str, dict[int, int]] = {}
+    current_segment: str | None = None
+    cursor = 0
+    for tag, text in records:
+        if tag == "t_org_rel1":
+            match = re.search(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+            if not match:
+                current_segment = None
+                continue
+            current_segment = match.group(1).upper()
+            cursor = int(match.group(2), 16)
+            if current_segment in selected_segments:
+                extents[current_segment] = max(
+                    extents.get(current_segment, 0), cursor
+                )
+                bytes_by_segment.setdefault(current_segment, {})
+            continue
+        if current_segment not in selected_segments:
+            continue
+        if tag in ("t_abs_8", "t_abs_16", "t_abs_24", "t_abs_32"):
+            digits = {
+                "t_abs_8": 2,
+                "t_abs_16": 4,
+                "t_abs_24": 6,
+                "t_abs_32": 8,
+            }[tag]
+            if not re.fullmatch(r"[0-9A-Fa-f]{%d}" % digits, text):
+                raise ListingError(
+                    f"malformed {tag} record in constant segment {current_segment}"
+                )
+            emitted = bytes.fromhex(text)
+            target = bytes_by_segment[current_segment]
+            for offset, value in enumerate(emitted, cursor):
+                if offset in target:
+                    raise ListingError(
+                        f"overlapping constant bytes in segment {current_segment}"
+                    )
+                target[offset] = value
+            cursor += len(emitted)
+            extents[current_segment] = max(extents[current_segment], cursor)
+        elif tag not in ("t_asm_mode_change", "t_stack_error"):
+            raise ListingError(
+                f"unsupported XLIB record {tag} in selected constant segment "
+                f"{current_segment}; relocatable constants are not supported"
+            )
+
+    result: list[tuple[Symbol, int, bytes]] = []
+    for symbol in requested:
+        end = extents.get(symbol.segment, 0)
+        size = end - symbol.offset
+        if size <= 0:
+            raise ListingError(f"could not determine a nonzero size for {symbol.name}")
+        contents = bytes_by_segment.get(symbol.segment, {})
+        if any(offset not in contents for offset in range(symbol.offset, end)):
+            raise ListingError(
+                f"constant {symbol.name} has uninitialized gaps in segment "
+                f"{symbol.segment}"
+            )
+        result.append(
+            (symbol, size, bytes(contents[offset] for offset in range(symbol.offset, end)))
+        )
+    return result
+
+
+def convert_const_listing_to_archive(
+    listing_path: Path,
+    module_name: str,
+    symbol_names: list[str],
+    output: Path,
+    llvm_mc: Path | None = None,
+    llvm_ar: Path | None = None,
+) -> dict[str, object]:
+    """Convert selected absolute IAR CONST/XDATA_ROM_C data to ELF CODE sections."""
+    selected = _selected_code_constants(
+        listing_path.read_text(encoding="latin1"), module_name, symbol_names
+    )
+    llvm_mc = llvm_mc or _default_tool("llvm-mc")
+    llvm_ar = llvm_ar or _default_tool("llvm-ar")
+
+    assembly: list[str] = ["; Generated from an IAR XLIB listing by iar2llvm."]
+    for symbol, size, contents in selected:
+        alias = _asm_name(symbol.name)
+        assembly.extend(
+            [
+                f'.section .rodata.{alias},"a",@progbits',
+                ".balign 1",
+                f".globl {alias}",
+                f".type {alias},@object",
+                f"{alias}:",
+            ]
+        )
+        assembly.extend(
+            ".byte "
+            + ", ".join(
+                f"0x{byte:02x}" for byte in contents[offset : offset + 16]
+            )
+            for offset in range(0, size, 16)
+        )
+        assembly.append(f".size {alias}, {size}")
+
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="iar2llvm-", dir=output.parent) as temp:
+        temp_dir = Path(temp)
+        module_token = module_name.encode("utf-8").hex()
+        asm_path = temp_dir / f"{module_token}.s"
+        object_path = temp_dir / f"{module_token}.o"
+        archive_path = temp_dir / output.name
+        asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
+
+        assemble = subprocess.run(
+            [
+                str(llvm_mc),
+                "-triple",
+                "mcs51",
+                "-filetype=obj",
+                str(asm_path),
+                "-o",
+                str(object_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if assemble.returncode:
+            raise ListingError(
+                f"llvm-mc failed ({assemble.returncode}):\n{assemble.stderr.strip()}"
+            )
+        archive = subprocess.run(
+            [str(llvm_ar), "rcs", str(archive_path), str(object_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if archive.returncode:
+            raise ListingError(
+                f"llvm-ar failed ({archive.returncode}):\n{archive.stderr.strip()}"
+            )
+        archive_path.replace(output)
+
+    return {
+        "module": module_name,
+        "output": str(output),
+        "symbols": [
+            {"name": symbol.name, "size": size} for symbol, size, _ in selected
+        ],
+        "format": "ELF32 MCS-51 archive",
+        "scope": "absolute CONST/XDATA_ROM_C objects in CODE; relocations rejected",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class _CodeItem:
     kind: str
