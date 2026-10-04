@@ -79,9 +79,10 @@ unsigned char less_than_signed_long(long lhs, long rhs) {
 // CHECK-LABEL: multiply_bytes:
 // CHECK-COUNT-1: mul ab
 // CHECK: ret
+// A 32-bit multiply is a call into the runtime, not hundreds of inline bytes.
 // CHECK-LABEL: multiply_long:
-// CHECK: mul ab
-// CHECK: ret
+// CHECK-NOT: mul ab
+// CHECK: lcall __mulsi3
 // CHECK-LABEL: shift_right_long:
 // CHECK: lcall __lshrsi3
 // CHECK: ret

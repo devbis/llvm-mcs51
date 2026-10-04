@@ -187,10 +187,11 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   if (DestReg == MCS51::DPTR &&
       (SrcReg == MCS51::A || MCS51::MCS51GPR8RegClass.contains(SrcReg))) {
-    if (SrcReg != MCS51::A)
-      BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+    if (SrcReg == MCS51::A)
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_DPL_A));
+    else
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_DPL_RN))
           .addReg(SrcReg, getKillRegState(KillSrc));
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_DPL_A));
     BuildMI(MBB, MI, DL, get(MCS51::MOV_DIRECT_IMM))
         .addImm(0x83)
         .addImm(0)
@@ -204,15 +205,24 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   }
   if (SrcReg == MCS51::DPTR &&
       MCS51::MCS51GPR8RegClass.contains(DestReg)) {
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_DPL), MCS51::A).addReg(SrcReg);
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DPL), DestReg);
     return;
   }
   if (MCS51::MCS51GPR8RegClass.contains(DestReg) &&
       MCS51::MCS51GPR8RegClass.contains(SrcReg)) {
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
-        .addReg(SrcReg, getKillRegState(KillSrc));
-    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
+    // Through A when A is dead (two one-byte instructions the peepholes can
+    // chain); otherwise MOV Rn,direct reads the source by its address in
+    // register bank 0 and leaves a live A alone.
+    if (MBB.computeRegisterLiveness(&RI, MCS51::A, MI, 16) ==
+        MachineBasicBlock::LQR_Dead) {
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_A_RN))
+          .addReg(SrcReg, getKillRegState(KillSrc));
+      BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_A), DestReg);
+      return;
+    }
+    BuildMI(MBB, MI, DL, get(MCS51::MOV_RN_DIRECT), DestReg)
+        .addImm(RI.getEncodingValue(SrcReg))
+        .addReg(SrcReg, getKillRegState(KillSrc) | RegState::Implicit);
     return;
   }
   llvm_unreachable("unsupported MCS-51 physical register copy");
