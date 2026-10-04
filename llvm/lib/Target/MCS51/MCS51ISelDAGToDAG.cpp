@@ -5,6 +5,9 @@
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/ADT/Twine.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/Support/Casting.h"
 
 #define DEBUG_TYPE "mcs51-isel"
 
@@ -237,6 +240,32 @@ public:
     if (N->getOpcode() == ISD::BUILD_PAIR &&
         N->getValueType(0) == MVT::i16) {
       SDValue Ops[] = {N->getOperand(0), N->getOperand(1)};
+      // A byte read from a DATA/SFR address goes straight into the pair.
+      for (SDValue &Op : Ops) {
+        auto *LD = dyn_cast<LoadSDNode>(Op.getNode());
+        if (!LD || Op.getResNo() != 0 || !Op.hasOneUse() ||
+            LD->isIndexed() || LD->getExtensionType() != ISD::NON_EXTLOAD ||
+            LD->getMemoryVT() != MVT::i8 ||
+            (LD->getAddressSpace() != MCS51::Data &&
+             LD->getAddressSpace() != MCS51::SFR))
+          continue;
+        SDValue Addr = LD->getBasePtr();
+        if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+          Addr = CurDAG->getTargetGlobalAddress(GA->getGlobal(), DL, MVT::i8,
+                                                GA->getOffset(),
+                                                GA->getTargetFlags());
+        else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+          Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
+        else
+          continue;
+        SDValue LoadOps[] = {Addr, LD->getChain()};
+        SDNode *Load = CurDAG->getMachineNode(
+            MCS51::LOADDIRECT8IM, DL, LD->getVTList(), LoadOps);
+        CurDAG->setNodeMemRefs(cast<MachineSDNode>(Load),
+                               {LD->getMemOperand()});
+        ReplaceUses(SDValue(LD, 1), SDValue(Load, 1));
+        Op = SDValue(Load, 0);
+      }
       SDNode *Res = CurDAG->getMachineNode(MCS51::BUILDPAIR16, DL,
                                            N->getVTList(), Ops);
       ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
@@ -860,9 +889,6 @@ public:
 
 #define GET_DAGISEL_BODY MCS51DAGToDAGISel
 #include "MCS51GenDAGISel.inc"
-#include "llvm/ADT/Twine.h"
-#include "llvm/IR/InlineAsm.h"
-#include "llvm/Support/Casting.h"
 
 char MCS51DAGToDAGISelLegacy::ID = 0;
 
