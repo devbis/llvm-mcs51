@@ -22,6 +22,7 @@ using namespace llvm;
 
 #define GET_CALLING_CONV_IMPL
 #include "MCS51GenCallingConv.inc"
+#include "llvm/Support/Casting.h"
 
 static bool isWordImmediate(const MachineInstr &MI) {
   return (MI.getOpcode() == MCS51::MOV_DPTR_IMM ||

@@ -37,6 +37,7 @@
 #include <utility>
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
@@ -2234,12 +2235,11 @@ public:
             continue;
           }
           if (J->isInlineAsm() || J->readsRegister(MCS51::A, TRI) ||
-              J->isCall() || J->getNumExplicitOperands() > 0 &&
-                                 llvm::any_of(J->explicit_operands(),
-                                              [](const MachineOperand &MO) {
-                                                return MO.isImm() &&
-                                                       MO.getImm() == 0xe0;
-                                              })) {
+              J->isCall() ||
+              llvm::any_of(J->explicit_operands(),
+                           [](const MachineOperand &MO) {
+                             return MO.isImm() && MO.getImm() == 0xe0;
+                           })) {
             ADead = J->isCall() && !J->readsRegister(MCS51::A, TRI) &&
                     J->definesRegister(MCS51::A, TRI);
             break;
