@@ -17,12 +17,12 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include <algorithm>
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
 #define GET_CALLING_CONV_IMPL
 #include "MCS51GenCallingConv.inc"
-#include "llvm/Support/Casting.h"
 
 static bool isWordImmediate(const MachineInstr &MI) {
   return (MI.getOpcode() == MCS51::MOV_DPTR_IMM ||
@@ -1607,17 +1607,40 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
   // A word assembled from two bytes, (hi << 8) | lo, is just the pair.
   if ((N->getOpcode() == ISD::OR || N->getOpcode() == ISD::ADD) &&
       N->getValueType(0) == MVT::i16) {
-    auto ByteOf = [](SDValue V) -> SDValue {
+    SelectionDAG &ByteDAG = DCI.DAG;
+    // The byte behind a zero or any extension, including a load that was
+    // already folded into an extending load (not changed unless both halves
+    // turn out to be bytes; see below).
+    auto IsByte = [](SDValue V) {
       if (V.getOpcode() == ISD::ZERO_EXTEND || V.getOpcode() == ISD::ANY_EXTEND)
-        if (V.getOperand(0).getValueType() == MVT::i8)
-          return V.getOperand(0);
-      return SDValue();
+        return V.getOperand(0).getValueType() == MVT::i8;
+      auto *LD = dyn_cast<LoadSDNode>(V.getNode());
+      return LD && V.getResNo() == 0 && V.hasOneUse() && !LD->isIndexed() &&
+             LD->getMemoryVT() == MVT::i8 &&
+             (LD->getExtensionType() == ISD::ZEXTLOAD ||
+              LD->getExtensionType() == ISD::EXTLOAD);
+    };
+    auto ByteOf = [&](SDValue V) -> SDValue {
+      if (V.getOpcode() == ISD::ZERO_EXTEND || V.getOpcode() == ISD::ANY_EXTEND)
+        return V.getOperand(0);
+      auto *LD = cast<LoadSDNode>(V.getNode());
+      SDLoc LDL(LD);
+      SDValue Byte = ByteDAG.getLoad(MVT::i8, LDL, LD->getChain(),
+                                     LD->getBasePtr(), LD->getPointerInfo(),
+                                     LD->getAlign(),
+                                     LD->getMemOperand()->getFlags());
+      ByteDAG.ReplaceAllUsesOfValueWith(SDValue(LD, 1), Byte.getValue(1));
+      return Byte;
     };
     for (unsigned I = 0; I != 2; ++I) {
       SDValue Shl = N->getOperand(I), Low = N->getOperand(1 - I);
       if (Shl.getOpcode() != ISD::SHL || !isa<ConstantSDNode>(Shl.getOperand(1)) ||
           Shl.getConstantOperandVal(1) != 8)
         continue;
+      if (!IsByte(Shl.getOperand(0)) || !IsByte(Low))
+        continue;
+      // Order the loads as the original expression read them: the high half
+      // first when it is the left operand.
       SDValue HighByte = ByteOf(Shl.getOperand(0));
       SDValue LowByte = ByteOf(Low);
       if (HighByte && LowByte) {
@@ -3591,6 +3614,16 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Load.addMemOperand(MMO);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::LOADDIRECT8IM) {
+    MachineInstrBuilder Load =
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_IM_DIRECT),
+                MI.getOperand(0).getReg())
+            .add(MI.getOperand(1));
+    for (MachineMemOperand *MMO : MI.memoperands())
+      Load.addMemOperand(MMO);
     MI.eraseFromParent();
     return MBB;
   }
