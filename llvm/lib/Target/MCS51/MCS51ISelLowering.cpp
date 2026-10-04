@@ -469,6 +469,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::ADD);
+  setTargetDAGCombine(ISD::OR);
   setTargetDAGCombine(ISD::SUB);
   setTargetDAGCombine(ISD::SHL);
   setTargetDAGCombine(ISD::SRL);
@@ -1603,6 +1604,29 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  // A word assembled from two bytes, (hi << 8) | lo, is just the pair.
+  if ((N->getOpcode() == ISD::OR || N->getOpcode() == ISD::ADD) &&
+      N->getValueType(0) == MVT::i16) {
+    auto ByteOf = [](SDValue V) -> SDValue {
+      if (V.getOpcode() == ISD::ZERO_EXTEND || V.getOpcode() == ISD::ANY_EXTEND)
+        if (V.getOperand(0).getValueType() == MVT::i8)
+          return V.getOperand(0);
+      return SDValue();
+    };
+    for (unsigned I = 0; I != 2; ++I) {
+      SDValue Shl = N->getOperand(I), Low = N->getOperand(1 - I);
+      if (Shl.getOpcode() != ISD::SHL || !isa<ConstantSDNode>(Shl.getOperand(1)) ||
+          Shl.getConstantOperandVal(1) != 8)
+        continue;
+      SDValue HighByte = ByteOf(Shl.getOperand(0));
+      SDValue LowByte = ByteOf(Low);
+      if (HighByte && LowByte) {
+        SDLoc DL(N);
+        return DCI.DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i16, LowByte,
+                               HighByte);
+      }
+    }
+  }
   // A constant added to a symbol address that was cast between memory spaces
   // is one relocated address: (symbol + C) cast.
   if (N->getOpcode() == ISD::ADD && N->getValueType(0) == MVT::i16 &&
