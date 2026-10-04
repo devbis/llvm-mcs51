@@ -42,7 +42,10 @@ def _records(lines: list[str]) -> Iterator[tuple[str, str]]:
         while index < len(lines) and not start_re.match(lines[index]):
             continuation = lines[index].strip()
             if continuation:
-                parts.append(continuation)
+                if parts and parts[-1].count('"') % 2:
+                    parts[-1] += continuation
+                else:
+                    parts.append(continuation)
             index += 1
         yield tag, " ".join(parts)
 
@@ -379,9 +382,17 @@ def _parse_code_item_records(
             rhs = pop_value(tag)
             lhs = pop_value(tag)
             if lhs.kind == "rel" and rhs.kind == "pcr":
-                stack.append(_IARValue("pcrel", lhs.value, lhs.addend - rhs.addend))
+                if rhs.addend:
+                    raise ListingError(
+                        f"nonzero PCR addend is unsupported in segment {segment_id}"
+                    )
+                stack.append(_IARValue("pcrel", lhs.value, lhs.addend))
             elif lhs.kind == "pcrel" and rhs.kind == "absolute":
-                stack.append(_IARValue("pcrel", lhs.value, lhs.addend - int(rhs.value)))
+                if int(rhs.value) != 1:
+                    raise ListingError(
+                        f"unsupported PC-relative adjustment in segment {segment_id}"
+                    )
+                stack.append(lhs)
             else:
                 raise ListingError(f"unsupported t_minus expression in segment {segment_id}")
         elif tag == "t_copy":
