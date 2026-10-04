@@ -73,8 +73,9 @@ python3 -m iar2llvm convert-init-listing /private/tmp/Router-Pro.lst \
 ```
 
 The generated `.data.*` objects use XDATA VMAs and are intended for Clang's
-CC2530 startup copy from CODE. Initializers with relocations or unsupported
-IAR initialization metadata are rejected.
+CC2530 startup copy from CODE. The converter supports 16-bit pointers to public
+`CODE_C` objects; other relocations and unsupported IAR initialization
+metadata are rejected.
 
 `convert-code-listing` can select one function with `--symbol`, or collect all
 public `BANKED_CODE` functions in a module with `--all-public-banked`. The
@@ -82,8 +83,9 @@ latter also keeps referenced banked segments, relays, literal private
 constants, all public `CODE_C` and literal `CONST/XDATA_ROM_C` objects, and
 public `XDATA_Z`/literal `XDATA_I` objects in the same ELF member. Public
 constant and data symbols are exported so other converted modules can
-reference them. Unsupported public data initializers are reported and remain
-unresolved. Each IAR banked code segment gets its own
+reference them. Literal initializers and 16-bit relocations to public
+`CODE_C` objects are supported. Other unsupported public data initializers
+are reported and remain unresolved. Each IAR banked code segment gets its own
 `.mcs51.autobank.*` section for independent CC2530 bank placement. `CODE_C`
 tables are exported in read-only common-flash sections. For example, all
 currently supported code in `cGP_stub`:
