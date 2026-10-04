@@ -35,11 +35,10 @@ python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \
   --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
 ```
 
-The initial data converter accepts only selected, zero-initialized public objects in
-IAR `XDATA_Z` segments. It emits `.bss.*` ELF sections and packages them into
-an archive with `llvm-ar`; this subset can resolve ordinary MCS-51 XDATA
-references in Clang objects. It rejects code, initialized data, and emitted
-relocations.
+The zero-initialized data converter accepts selected public objects in IAR
+`XDATA_Z` segments. It emits `.bss.*` ELF sections and packages them into an
+archive with `llvm-ar`; this subset can resolve ordinary MCS-51 XDATA
+references in Clang objects. It rejects emitted relocations.
 
 Absolute constants in IAR `CONST/XDATA_ROM_C` segments can also be converted
 when they contain only literal bytes and have no relocations. For example, the
@@ -59,6 +58,23 @@ The resulting objects are emitted into ELF `.rodata.*` sections in CODE space.
 The converter rejects constant tables that contain address relocations; for
 example, `nwkMsgProcs` remains unsupported until those IAR relocation records
 are decoded.
+
+Literal initializers for public `XDATA_I` objects can be converted from the
+paired `XDATA_ID` load-image segment into ELF `.data.*` sections. For example,
+the router module's one-byte beacon payload size and two-byte saved address:
+
+```sh
+python3 -m iar2llvm convert-init-listing /private/tmp/Router-Pro.lst \
+  --module nwk \
+  --symbol nwk_beaconPayloadSize --symbol _savedRejoinRspAddr \
+  --out /tmp/libzstack-init.a \
+  --llvm-mc ../../../../llvm-mcs51-build/bin/llvm-mc \
+  --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
+```
+
+The generated `.data.*` objects use XDATA VMAs and are intended for Clang's
+CC2530 startup copy from CODE. Initializers with relocations or unsupported
+IAR initialization metadata are rejected.
 
 For the first executable slice, produce an XLIB listing of `ecc.r51` and
 convert one public banked function together with its relay and referenced code
@@ -85,4 +101,5 @@ banked functions use IAR's 24-bit return-address convention. Clang keeps its
 standard ABI unless a future, explicit `-mabi=iar` option is selected. This
 archive is therefore a linker-input milestone, not yet callable Z-Stack code
 or a deployable firmware library. Other UBROF records, relocatable constants,
-and initialized XDATA data are still unsupported by the converter.
+and initialized XDATA data outside the literal `XDATA_ID` subset are still
+unsupported by the converter.
