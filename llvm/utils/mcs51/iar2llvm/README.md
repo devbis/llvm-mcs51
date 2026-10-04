@@ -28,6 +28,19 @@ docker exec iar8051 cat /tmp/Router-Pro.lst > /private/tmp/Router-Pro.lst
 Then run the prototype converter from `llvm/utils/mcs51`:
 
 ```sh
+python3 -m iar2llvm convert-library-listing /private/tmp/Router-Pro.lst \
+  --out /tmp/Router-Pro.clang.a \
+  --llvm-mc ../../../../llvm-mcs51-build/bin/llvm-mc \
+  --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
+```
+
+This scans the listing, converts each module with public `BANKED_CODE`
+functions, and combines their ELF objects into one archive. It reports
+unresolved IAR symbols that need another converted library or IAR runtime
+support. The module-specific commands below are useful for inspecting a
+smaller slice:
+
+```sh
 python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \
   --module cGP_stub --symbol gp_macReq \
   --out /tmp/libzstack-data.a \
