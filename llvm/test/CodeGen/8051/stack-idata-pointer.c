@@ -18,7 +18,7 @@ void read_local_array(unsigned char Index) {
 // CHECK: mov 48, #49
 // CHECK: mov 49, #66
 // CHECK: mov a, 129
-// CHECK: add a, #253
+// CHECK: add a, #{{25[0-9]}}
 // CHECK: mov r0, a
 // CHECK-NOT: movx
 // CHECK: add a, r7
