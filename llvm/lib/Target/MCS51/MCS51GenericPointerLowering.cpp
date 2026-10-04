@@ -23,6 +23,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <string>
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 

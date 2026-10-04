@@ -5,6 +5,7 @@
 
 #define GET_SDNODE_DESC
 #include "MCS51GenSDNodeInfo.inc"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 

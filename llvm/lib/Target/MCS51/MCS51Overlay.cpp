@@ -21,6 +21,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 

@@ -236,6 +236,7 @@ public:
 #define GET_REGISTER_MATCHER
 #define GET_MATCHER_IMPLEMENTATION
 #include "MCS51GenAsmMatcher.inc"
+#include "llvm/Support/Casting.h"
 
 extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
 LLVMInitializeMCS51AsmParser() {

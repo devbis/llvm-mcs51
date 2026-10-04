@@ -862,6 +862,7 @@ public:
 #include "MCS51GenDAGISel.inc"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/Support/Casting.h"
 
 char MCS51DAGToDAGISelLegacy::ID = 0;
 

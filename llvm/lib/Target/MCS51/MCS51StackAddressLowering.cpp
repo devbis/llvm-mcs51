@@ -10,6 +10,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
