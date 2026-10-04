@@ -23,6 +23,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include <initializer_list>
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 

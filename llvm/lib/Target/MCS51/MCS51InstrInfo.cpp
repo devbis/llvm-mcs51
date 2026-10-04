@@ -11,6 +11,7 @@
 #define GET_INSTRINFO_CTOR_DTOR
 #include "MCS51GenInstrInfo.inc"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
