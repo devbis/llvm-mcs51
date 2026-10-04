@@ -1629,6 +1629,25 @@ int32_t __ashrsi3(int32_t Value, int Count) {
 }
 #endif
 
+/* 32-bit multiply, called instead of expanding four word multiplies at every
+   use. Written over byte products so it needs no multiply of its own. */
+uint32_t __mulsi3(uint32_t LHS, uint32_t RHS) {
+  union {
+    uint32_t Value;
+    uint8_t Bytes[4];
+  } Left = {.Value = LHS}, Right = {.Value = RHS}, Product = {.Value = 0};
+  for (unsigned I = 0; I != 4; ++I) {
+    uint16_t Carry = 0;
+    for (unsigned J = 0; J != 4 - I; ++J) {
+      uint16_t Partial = (uint16_t)Left.Bytes[I] * Right.Bytes[J];
+      uint16_t Sum = Partial + Product.Bytes[I + J] + Carry;
+      Product.Bytes[I + J] = (uint8_t)Sum;
+      Carry = Sum >> 8;
+    }
+  }
+  return Product.Value;
+}
+
 uint64_t __muldi3(uint64_t LHS, uint64_t RHS) {
   Word64Bytes Left = {.Value = LHS};
   Word64Bytes Right = {.Value = RHS};
