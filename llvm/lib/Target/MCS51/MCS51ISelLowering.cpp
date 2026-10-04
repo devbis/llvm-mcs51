@@ -470,6 +470,8 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::ADD);
+  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::BR_EQ));
+  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::BR_NE));
   setTargetDAGCombine(ISD::OR);
   setTargetDAGCombine(ISD::SUB);
   setTargetDAGCombine(ISD::SHL);
@@ -1634,6 +1636,24 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  // A branch on a materialized equality (BR_NE (CMPEQ8 a, b), 1) tests the
+  // operands directly.
+  if ((N->getOpcode() == MCS51ISD::BR_EQ || N->getOpcode() == MCS51ISD::BR_NE) &&
+      N->getOperand(1).getOpcode() == MCS51ISD::CMPEQ8 &&
+      N->getOperand(1).hasOneUse() && isa<ConstantSDNode>(N->getOperand(2))) {
+    uint64_t Compare = N->getConstantOperandVal(2);
+    if (Compare <= 1) {
+      SDValue Eq = N->getOperand(1);
+      // The branch is taken when (a == b) != Compare for BR_NE and
+      // (a == b) == Compare for BR_EQ.
+      bool TakenWhenEqual =
+          (N->getOpcode() == MCS51ISD::BR_EQ) == (Compare == 1);
+      unsigned Opcode = TakenWhenEqual ? MCS51ISD::BR_EQ : MCS51ISD::BR_NE;
+      return DCI.DAG.getNode(Opcode, SDLoc(N), MVT::Other, N->getOperand(0),
+                             Eq.getOperand(0), Eq.getOperand(1),
+                             N->getOperand(3));
+    }
+  }
   // A word assembled from two bytes, (hi << 8) | lo, is just the pair.
   if ((N->getOpcode() == ISD::OR || N->getOpcode() == ISD::ADD) &&
       N->getValueType(0) == MVT::i16) {

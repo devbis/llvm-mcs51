@@ -2256,6 +2256,82 @@ public:
         Prev = &MI;
       }
     }
+    // A single-block loop that steps a register and tests it for zero becomes
+    // DJNZ: DEC Rn; MOV A,Rn; JNZ self, or the same counting up to zero from a
+    // constant (the start value is negated).
+    for (MachineBasicBlock &MBB : MF) {
+      if (MBB.succ_size() != 2 || !MBB.isSuccessor(&MBB))
+        continue;
+      auto Term = MBB.getFirstTerminator();
+      if (Term == MBB.end() || Term->getOpcode() != MCS51::JNZ ||
+          Term->getOperand(0).getMBB() != &MBB || Term == MBB.begin())
+        continue;
+      auto LoadA = std::prev(Term);
+      if (LoadA->getOpcode() != MCS51::MOV_A_RN || LoadA == MBB.begin())
+        continue;
+      auto Step = std::prev(LoadA);
+      Register R = LoadA->getOperand(0).getReg();
+      if ((Step->getOpcode() != MCS51::DEC_RN &&
+           Step->getOpcode() != MCS51::INC_RN) ||
+          Step->getOperand(0).getReg() != R)
+        continue;
+      // A is not live around the loop.
+      bool ALive = false;
+      for (MachineBasicBlock *Succ : MBB.successors())
+        ALive |= Succ->isLiveIn(MCS51::A);
+      if (ALive)
+        continue;
+      // The loop must be short enough for DJNZ's 8-bit reach.
+      unsigned Bytes = 0;
+      for (const MachineInstr &MI : MBB)
+        Bytes += TII.getInstSizeInBytes(MI);
+      if (Bytes > 100)
+        continue;
+      // R is not used elsewhere in the loop.
+      bool OtherUse = false;
+      for (MachineInstr &MI : MBB)
+        if (&MI != &*Step && &MI != &*LoadA && !MI.isDebugInstr() &&
+            (MI.readsRegister(R, TRI) || MI.modifiesRegister(R, TRI)))
+          OtherUse = true;
+      if (OtherUse)
+        continue;
+      MachineBasicBlock *Exit = nullptr;
+      for (MachineBasicBlock *Succ : MBB.successors())
+        if (Succ != &MBB)
+          Exit = Succ;
+      if (!Exit || Exit->isLiveIn(R))
+        continue;
+      if (Step->getOpcode() == MCS51::INC_RN) {
+        // Counting up to zero from a constant: count down from its negation.
+        MachineBasicBlock *Pre = nullptr;
+        for (MachineBasicBlock *P : MBB.predecessors())
+          if (P != &MBB)
+            Pre = Pre ? nullptr : P;
+        if (!Pre || MBB.pred_size() != 2)
+          continue;
+        MachineInstr *Init = nullptr;
+        for (auto It = Pre->rbegin(); It != Pre->rend(); ++It) {
+          if (It->isDebugInstr())
+            continue;
+          if (It->modifiesRegister(R, TRI) || It->readsRegister(R, TRI)) {
+            if (It->getOpcode() == MCS51::MOV_RN_IMM &&
+                It->getOperand(0).getReg() == R && It->getOperand(1).isImm())
+              Init = &*It;
+            break;
+          }
+        }
+        if (!Init)
+          continue;
+        Init->getOperand(1).setImm((-Init->getOperand(1).getImm()) & 0xff);
+      }
+      DebugLoc DL = Term->getDebugLoc();
+      MachineBasicBlock *Target = &MBB;
+      BuildMI(MBB, Term, DL, TII.get(MCS51::DJNZ_RN), R).addReg(R).addMBB(Target);
+      Term->eraseFromParent();
+      LoadA->eraseFromParent();
+      Step->eraseFromParent();
+      Changed = true;
+    }
     for (MachineBasicBlock &MBB : MF) {
       for (auto I = MBB.begin(); I != MBB.end(); ++I) {
         if (!isCandidate(*I))
