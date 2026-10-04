@@ -153,17 +153,25 @@ static void emitWordCompare(MachineBasicBlock &MBB,
     }
     // Flip the sign bits so the borrow of an unsigned subtraction orders the
     // operands as signed values.
+    // The bias of a constant is applied at compile time.
+    auto LoadBiasedA = [&](const WordByte &B) {
+      if (B.IsImm)
+        BuildMI(MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
+            .addImm((B.Imm ^ 0x80) & 0xff);
+      else {
+        LoadA(B);
+        BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A)
+            .addImm(0x80);
+      }
+    };
     if (R[I].IsImm) {
-      LoadA(L[I]);
-      BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A).addImm(0x80);
+      LoadBiasedA(L[I]);
       BuildMI(MBB, MII, DL, TII.get(MCS51::SUBB_A_IMM), MCS51::A)
-          .addImm(R[I].Imm ^ 0x80);
+          .addImm((R[I].Imm ^ 0x80) & 0xff);
     } else {
-      LoadA(R[I]);
-      BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A).addImm(0x80);
+      LoadBiasedA(R[I]);
       BuildMI(MBB, MII, DL, TII.get(MCS51::MOV_B_A));
-      LoadA(L[I]);
-      BuildMI(MBB, MII, DL, TII.get(MCS51::XRL_A_IMM), MCS51::A).addImm(0x80);
+      LoadBiasedA(L[I]);
       BuildMI(MBB, MII, DL, TII.get(MCS51::SUBB_A_DIRECT), MCS51::A)
           .addImm(0xF0);
     }
@@ -1779,6 +1787,21 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                              NarrowAmount ? Amount.getOperand(0) : Amount);
     }
     return SDValue();
+  }
+  // A branch on the inverse of a 0/1 byte tests the byte for zero instead of
+  // flipping it first.
+  if (N->getOpcode() == ISD::BRCOND && !DCI.isBeforeLegalize()) {
+    SDValue Cond = N->getOperand(1);
+    if (Cond.getOpcode() == ISD::XOR && Cond.getValueType() == MVT::i8 &&
+        isOneConstant(Cond.getOperand(1)) &&
+        DCI.DAG.MaskedValueIsZero(Cond.getOperand(0),
+                                  APInt::getHighBitsSet(8, 7))) {
+      SelectionDAG &DAG = DCI.DAG;
+      SDLoc DL(N);
+      return DAG.getNode(ISD::BR_CC, DL, MVT::Other, N->getOperand(0),
+                         DAG.getCondCode(ISD::SETEQ), Cond.getOperand(0),
+                         DAG.getConstant(0, DL, MVT::i8), N->getOperand(2));
+    }
   }
   // A branch on a 32-bit compare works on the four bytes of the operands
   // without materializing the outcome.
@@ -3746,10 +3769,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                               : MCS51::MOVX_A_IND_RI;
     BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(Addr);
     Register Lo = saveAToImag(*MBB, MII, DL, TII, MRI);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(AddrPlus1, RegState::Define);
+    // INC Rn is one byte and leaves A alone; it is a plain increment of the
+    // pointer when the original is dead afterwards.
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_RN), AddrPlus1).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(LoadOpcode)).addReg(AddrPlus1);
     Register Hi = saveAToImag(*MBB, MII, DL, TII, MRI);
     buildWord(*MBB, MII, DL, TII, Dst, Lo, Hi);
@@ -3767,10 +3789,9 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
         .addReg(Src, RegState{}, MCS51::sub_lo);
     BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(Addr);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Addr);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_A));
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A))
-        .addReg(AddrPlus1, RegState::Define);
+    // INC Rn is one byte and leaves A alone; it is a plain increment of the
+    // pointer when the original is dead afterwards.
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::INC_RN), AddrPlus1).addReg(Addr);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
         .addReg(Src, RegState{}, MCS51::sub_hi);
     BuildMI(*MBB, MII, DL, TII.get(StoreOpcode)).addReg(AddrPlus1);
