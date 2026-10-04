@@ -166,6 +166,7 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   case R_8051_HI8_XDATA:
   case R_8051_LO8_CODE:
   case R_8051_HI8_CODE:
+  case R_8051_BIT8:
   case R_8051_16:
   case R_8051_16_BE:
   case R_8051_DPTR16:
@@ -388,6 +389,16 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_8051_LO8_CODE:
     *loc = static_cast<uint8_t>(val);
     break;
+  case R_8051_BIT8: {
+    // The IAR virtual-bit register is specified as a byte address in the
+    // bit-addressable DATA area. Its bit address wraps after multiplying the
+    // byte address by eight; the RELA addend is already a bit offset.
+    uint64_t Base = val - rel.addend;
+    uint64_t BitAddress = (Base * 8 + rel.addend) & 0xff;
+    checkUInt(ctx, loc, BitAddress, 7, rel);
+    *loc = static_cast<uint8_t>(BitAddress);
+    break;
+  }
   case R_8051_24:
     checkUInt(ctx, loc, val, 24, rel);
     loc[0] = static_cast<uint8_t>(val);

@@ -797,6 +797,11 @@ class _CodeItem:
         return {
             "byte": 1,
             "byte_reloc": 1,
+            "byte_reloc_lo": 1,
+            "byte_reloc_hi": 1,
+            "byte_reloc_bit": 1,
+            "word": 2,
+            "word_reloc": 2,
             "branch": 2,
             "call": 3,
             "relcall": 3,
@@ -823,6 +828,8 @@ def _code_group(segment: Segment) -> str | None:
         return "banked"
     if segment.address_space == "CODE" and segment.name == "BANK_RELAYS":
         return "relays"
+    if segment.address_space == "CODE" and segment.name == "CODE_C":
+        return "common"
     return None
 
 
@@ -947,21 +954,109 @@ def _parse_code_item_records(
     external_segments: set[str],
     code_segments: set[str],
     banked_segments: set[str],
+    source_aliases: dict[str, tuple[str, bool]],
 ) -> list[_CodeItem]:
     items: list[_CodeItem] = []
     stack: list[_IARValue] = []
     pending_high: _IARValue | None = None
+    skipping_complex_expression = False
+    complex_expression_alias: tuple[str, bool] | None = None
+    skipping_bit_expression = False
+    pending_bit_address: _IARValue | None = None
 
     def pop_value(tag: str) -> _IARValue:
         if not stack:
             raise ListingError(f"{tag} underflows the expression stack in segment {segment_id}")
         return stack.pop()
 
+    def source_byte_relocation(
+        text: str, fallback: tuple[str, bool] | None
+    ) -> _IARValue | None:
+        if "Source:" not in text:
+            return None
+        source = text.split("Source:", 1)[1].strip().rstrip("'")
+        operand = re.search(r",\s*#(.*)$", source)
+        if not operand:
+            return None
+        expression = operand.group(1).strip()
+        shift = re.search(r">>\s*8", expression)
+        relocation_kind = "high" if shift else "low"
+        if shift:
+            expression = expression[: shift.start()]
+        elif not re.search(r"&\s*(?:0x)?ff\b", expression, re.IGNORECASE):
+            return None
+        expression = re.sub(r"&\s*(?:0x)?ff\b", "", expression, flags=re.IGNORECASE)
+        expression = expression.lstrip("(").rstrip(") ").strip()
+        symbol_match = re.fullmatch(
+            r"(`[^`]+`|[A-Za-z_?$][A-Za-z0-9_?$.:]*)"
+            r"\s*(?:([+-])\s*(\d+))?",
+            expression,
+        )
+        if not symbol_match:
+            return None
+        source_name = symbol_match.group(1).strip("`")
+        sign, digits = symbol_match.group(2), symbol_match.group(3)
+        addend = int(digits, 10) if digits else 0
+        if sign == "-":
+            addend = -addend
+        target = source_aliases.get(source_name)
+        if target is None:
+            target = fallback
+        if target is None:
+            return None
+        alias, is_external = target
+        kind = ("external_" if is_external else "relative_") + relocation_kind + "_single"
+        return _IARValue(kind, alias, addend)
+
     for tag, text in records:
-        if tag == "t_abs_8":
-            if not re.fullmatch(r"[0-9A-Fa-f]{2}", text):
-                raise ListingError(f"malformed t_abs_8 record in segment {segment_id}")
-            items.append(_CodeItem("byte", int(text, 16)))
+        if skipping_bit_expression:
+            if tag == "t_pop_8":
+                if pending_bit_address is None:
+                    raise ListingError(
+                        f"missing IAR bit-address expression in segment {segment_id}"
+                    )
+                alias = _asm_name(str(pending_bit_address.value))
+                operand = alias
+                if pending_bit_address.addend:
+                    operand += (
+                        f"+{pending_bit_address.addend}"
+                        if pending_bit_address.addend > 0
+                        else str(pending_bit_address.addend)
+                    )
+                items.append(_CodeItem("byte_reloc_bit", operand, alias))
+                pending_bit_address = None
+                skipping_bit_expression = False
+            elif tag.startswith("t_abs_") or tag == "t_org_rel1":
+                raise ListingError(
+                    f"unexpected code record inside IAR bit expression in segment {segment_id}"
+                )
+            continue
+        if skipping_complex_expression:
+            if tag == "t_stack_error" and "Source:" in text:
+                value = source_byte_relocation(text, complex_expression_alias)
+                if value is None:
+                    raise ListingError(
+                        f"cannot translate complex IAR byte expression in segment "
+                        f"{segment_id}: {text}"
+                    )
+                stack.append(value)
+                skipping_complex_expression = False
+                complex_expression_alias = None
+            elif tag.startswith("t_abs_") or tag == "t_org_rel1":
+                raise ListingError(
+                    f"unexpected code record inside complex expression in segment {segment_id}"
+                )
+            continue
+        if tag in ("t_abs_8", "t_abs_16", "t_abs_24", "t_abs_32"):
+            digits = {
+                "t_abs_8": 2,
+                "t_abs_16": 4,
+                "t_abs_24": 6,
+                "t_abs_32": 8,
+            }[tag]
+            if not re.fullmatch(r"[0-9A-Fa-f]{%d}" % digits, text):
+                raise ListingError(f"malformed {tag} record in segment {segment_id}")
+            items.extend(_CodeItem("byte", byte) for byte in bytes.fromhex(text))
         elif tag == "t_push_rel":
             match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
             if not match:
@@ -986,6 +1081,45 @@ def _parse_code_item_records(
             if not re.fullmatch(r"[0-9A-Fa-f]+", text):
                 raise ListingError(f"malformed t_push_abs record in segment {segment_id}")
             stack.append(_IARValue("absolute", int(text, 16)))
+        elif tag == "t_load_ind":
+            # IAR emits a longer linker-expression program for byte extraction
+            # from an address. Its diagnostic annotation retains the original
+            # assembler operand, which is sufficient to preserve the byte
+            # relocation without evaluating that internal expression VM.
+            for candidate in reversed(stack):
+                if candidate.kind == "external":
+                    complex_expression_alias = (_asm_name(str(candidate.value)), True)
+                    break
+                if candidate.kind == "rel":
+                    target = str(candidate.value).upper()
+                    alias = segment_labels.get(target)
+                    if alias is not None:
+                        complex_expression_alias = (
+                            alias,
+                            target in external_segments,
+                        )
+                        break
+            stack.clear()
+            skipping_complex_expression = True
+        elif tag == "t_plus":
+            rhs = pop_value(tag)
+            lhs = pop_value(tag)
+            if lhs.kind == "absolute" and rhs.kind == "absolute":
+                stack.append(_IARValue("absolute", int(lhs.value) + int(rhs.value)))
+            elif lhs.kind in ("rel", "external") and rhs.kind == "absolute":
+                stack.append(
+                    _IARValue(lhs.kind, lhs.value, lhs.addend + int(rhs.value))
+                )
+            elif rhs.kind in ("rel", "external") and lhs.kind == "absolute":
+                stack.append(
+                    _IARValue(rhs.kind, rhs.value, rhs.addend + int(lhs.value))
+                )
+            elif lhs.kind == "bit_address" and rhs.kind == "absolute":
+                stack.append(
+                    _IARValue(lhs.kind, lhs.value, lhs.addend + int(rhs.value))
+                )
+            else:
+                raise ListingError(f"unsupported t_plus expression in segment {segment_id}")
         elif tag == "t_minus":
             rhs = pop_value(tag)
             lhs = pop_value(tag)
@@ -1001,6 +1135,10 @@ def _parse_code_item_records(
                         f"unsupported PC-relative adjustment in segment {segment_id}"
                     )
                 stack.append(lhs)
+            elif lhs.kind in ("rel", "external") and rhs.kind == "absolute":
+                stack.append(
+                    _IARValue(lhs.kind, lhs.value, lhs.addend - int(rhs.value))
+                )
             else:
                 raise ListingError(f"unsupported t_minus expression in segment {segment_id}")
         elif tag == "t_and":
@@ -1017,7 +1155,26 @@ def _parse_code_item_records(
         elif tag == "t_copy":
             if not stack:
                 raise ListingError(f"t_copy underflows the expression stack in segment {segment_id}")
+            if stack[-1].kind == "bit_address":
+                pending_bit_address = stack[-1]
+                stack.clear()
+                skipping_bit_expression = True
+                continue
             stack.append(stack[-1])
+        elif tag == "t_mul":
+            rhs = pop_value(tag)
+            lhs = pop_value(tag)
+            if (
+                lhs.kind == "external"
+                and str(lhs.value) == "?VB"
+                and rhs.kind == "absolute"
+                and int(rhs.value) == 8
+            ):
+                stack.append(_IARValue("bit_address", lhs.value, lhs.addend))
+            elif lhs.kind == "absolute" and rhs.kind == "absolute":
+                stack.append(_IARValue("absolute", int(lhs.value) * int(rhs.value)))
+            else:
+                raise ListingError(f"unsupported t_mul expression in segment {segment_id}")
         elif tag == "t_lsr":
             if not re.fullmatch(r"[0-9A-Fa-f]+", text):
                 raise ListingError(f"malformed t_lsr record in segment {segment_id}")
@@ -1036,7 +1193,25 @@ def _parse_code_item_records(
             continue
         elif tag == "t_pop_8":
             value = pop_value(tag)
-            if value.kind == "pcrel":
+            if value.kind in (
+                "external_high_single",
+                "relative_high_single",
+                "external_low_single",
+                "relative_low_single",
+            ):
+                high = value.kind.endswith("high_single")
+                external = value.kind.startswith("external_")
+                operand = str(value.value)
+                if value.addend:
+                    operand += f"+{value.addend}" if value.addend > 0 else str(value.addend)
+                items.append(
+                    _CodeItem(
+                        "byte_reloc_hi" if high else "byte_reloc_lo",
+                        operand,
+                        str(value.value) if external else None,
+                    )
+                )
+            elif value.kind == "pcrel":
                 if pending_high is not None or not items or items[-1] != _CodeItem("byte", 0x80):
                     raise ListingError(
                         f"only SJMP PC-relative bytes are supported in segment {segment_id}"
@@ -1157,6 +1332,38 @@ def _parse_code_item_records(
             if value.addend:
                 operand += f"+{value.addend}" if value.addend > 0 else str(value.addend)
             items.append(_CodeItem("bankptr", operand))
+        elif tag == "t_pop_16":
+            value = pop_value(tag)
+            if value.kind == "absolute":
+                number = int(value.value)
+                if not 0 <= number <= 0xFFFF:
+                    raise ListingError(f"16-bit value is out of range in segment {segment_id}")
+                items.append(_CodeItem("word", number))
+            elif value.kind == "external":
+                alias = _asm_name(str(value.value))
+                operand = alias
+                if value.addend:
+                    operand += f"+{value.addend}" if value.addend > 0 else str(value.addend)
+                items.append(_CodeItem("word_reloc", operand, alias))
+            elif value.kind == "rel":
+                target = str(value.value).upper()
+                alias = segment_labels.get(target)
+                if alias is None:
+                    raise ListingError(
+                        f"16-bit relocation target segment {target} has no ELF symbol"
+                    )
+                operand = alias
+                if value.addend:
+                    operand += f"+{value.addend}" if value.addend > 0 else str(value.addend)
+                items.append(
+                    _CodeItem(
+                        "word_reloc",
+                        operand,
+                        alias if target in external_segments else None,
+                    )
+                )
+            else:
+                raise ListingError(f"unsupported t_pop_16 expression in segment {segment_id}")
         elif tag == "t_delete_tos":
             pop_value(tag)
         elif tag in (
@@ -1177,6 +1384,10 @@ def _parse_code_item_records(
         else:
             raise ListingError(f"unsupported XLIB record {tag} in code segment {segment_id}")
 
+    if skipping_bit_expression:
+        raise ListingError(f"unterminated IAR bit expression in segment {segment_id}")
+    if skipping_complex_expression:
+        raise ListingError(f"unterminated complex expression in segment {segment_id}")
     if stack or pending_high is not None:
         raise ListingError(f"unconsumed expression in code segment {segment_id}")
     return items
@@ -1203,6 +1414,7 @@ def convert_code_listing_to_archive(
 
     segments: dict[str, Segment] = {}
     symbols: dict[str, Symbol] = {}
+    local_symbols: dict[str, Symbol] = {}
     external_names: dict[str, str] = {}
     for tag, text in modules[module_name]:
         if tag == "t_seg":
@@ -1222,6 +1434,18 @@ def convert_code_listing_to_archive(
             if match:
                 ident, offset, name = match.groups()
                 symbols[name] = Symbol(name, ident.upper(), int(offset, 16))
+                continue
+            match = re.search(
+                r"LOCAL_REL\s+\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)\s+"
+                r"N[0-9A-Fa-f]+\"([^\"]+)\"",
+                text,
+            )
+            if match:
+                ident, offset, name = match.groups()
+                local_symbol = Symbol(name, ident.upper(), int(offset, 16))
+                local_symbols[name] = local_symbol
+                normalized = name.removeprefix("<internal>::")
+                local_symbols.setdefault(normalized, local_symbol)
                 continue
             match = re.search(
                 r"EXTERNAL\s+<([0-9A-Fa-f]+)>\s+[0-9A-Fa-f]+\s+"
@@ -1371,6 +1595,36 @@ def convert_code_listing_to_archive(
     banked_segments = {
         ident for ident in selected_segments if _code_group(segments[ident]) == "banked"
     }
+    source_aliases: dict[str, tuple[str, bool]] = {
+        name: (_asm_name(name), True) for name in external_names.values()
+    }
+    for name, symbol in symbols.items():
+        if name in requested or name in relay_exports:
+            source_aliases[name] = (_asm_name(name), False)
+            continue
+        label = segment_labels.get(symbol.segment)
+        if label is not None:
+            alias = label
+            if symbol.offset:
+                alias += f"+{symbol.offset}"
+            source_aliases[name] = (
+                alias,
+                symbol.segment in external_data_segments,
+            )
+        else:
+            source_aliases[name] = (_asm_name(name), True)
+    for name, symbol in local_symbols.items():
+        normalized = name.removeprefix("<internal>::")
+        label = segment_labels.get(symbol.segment)
+        if label is not None:
+            alias = label
+            if symbol.offset:
+                alias += f"+{symbol.offset}"
+            source_aliases[name] = (alias, False)
+            source_aliases.setdefault(normalized, (alias, False))
+    for name, target in list(source_aliases.items()):
+        if not name.startswith("??"):
+            source_aliases.setdefault("??" + name, target)
     for ident in selected_segments:
         decoded[ident] = _parse_code_item_records(
             code_records.get(ident, []),
@@ -1380,6 +1634,7 @@ def convert_code_listing_to_archive(
             external_data_segments,
             selected_segments,
             banked_segments,
+            source_aliases,
         )
     decoded_constants = {
         ident: _parse_literal_segment(code_records.get(ident, []), ident)
@@ -1400,6 +1655,7 @@ def convert_code_listing_to_archive(
     section_names = {
         "banked": f".mcs51.autobank.iar_{module_token}",
         "relays": f".text.__mcs51_iarrelay_{module_token}",
+        "common": f".text.__mcs51_iarcommon_{module_token}",
     }
     lines = ["; Generated from an IAR XLIB listing by iar2llvm."]
     external_aliases = sorted(
@@ -1407,7 +1663,15 @@ def convert_code_listing_to_archive(
             _asm_name(str(item.operand))
             for items in decoded.values()
             for item in items
-            if item.kind in ("call", "dptr", "byte_reloc")
+            if item.kind in (
+                "call",
+                "dptr",
+                "byte_reloc",
+                "byte_reloc_lo",
+                "byte_reloc_hi",
+                "byte_reloc_bit",
+                "word_reloc",
+            )
             and item.operand is not None
         }
     )
@@ -1427,7 +1691,7 @@ def convert_code_listing_to_archive(
         lines.append(f".globl {alias}")
 
     selected_order = [ident for ident in segment_order if ident in selected_segments]
-    for group in ("banked", "relays"):
+    for group in ("banked", "relays", "common"):
         group_segments = [
             ident
             for ident in selected_order
@@ -1456,6 +1720,25 @@ def convert_code_listing_to_archive(
                     lines.append(f".byte 0x{int(item.value):02x}")
                 elif item.kind == "byte_reloc":
                     lines.append(f".byte {item.value}")
+                elif item.kind in ("byte_reloc_lo", "byte_reloc_hi"):
+                    fixup = "fixup_lo8" if item.kind == "byte_reloc_lo" else "fixup_hi8"
+                    lines.extend(
+                        [
+                            ".byte 0",
+                            f".reloc .-1, {fixup}, {item.value}",
+                        ]
+                    )
+                elif item.kind == "byte_reloc_bit":
+                    lines.extend(
+                        [
+                            ".byte 0",
+                            f".reloc .-1, fixup_bit8, {item.value}",
+                        ]
+                    )
+                elif item.kind == "word":
+                    lines.append(f".short 0x{int(item.value):04x}")
+                elif item.kind == "word_reloc":
+                    lines.append(f".short {item.value}")
                 elif item.kind == "branch":
                     operand = str(item.value)
                     addend = int(item.operand or "0")
