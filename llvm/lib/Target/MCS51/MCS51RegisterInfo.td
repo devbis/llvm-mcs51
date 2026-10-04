@@ -105,6 +105,10 @@ def MCS51Imag8 : RegisterClass<"MCS51", [i8], 8, (sequence "IM%d", 0, 23)>;
 // subregisters of a word; they are reserved and never allocated to bytes.
 def MCS51GPR8 : RegisterClass<"MCS51", [i8], 8,
                               (add R0, R1, R2, R3, R4, R5, R6, R7, DPL, DPH)>;
+// Either kind of byte: lets an operand accept a byte already held in an
+// imaginary register without copying it into an R register first.
+def MCS51Byte : RegisterClass<"MCS51", [i8], 8,
+                              (add MCS51Imag8, MCS51GPR8)>;
 def MCS51Indirect8 : RegisterClass<"MCS51", [i8], 8, (add R0, R1)>;
 def MCS51AReg : RegisterClass<"MCS51", [i8], 8, (add A)>;
 def MCS51PTR : RegisterClass<"MCS51", [i16], 8, (add DPTR)>;

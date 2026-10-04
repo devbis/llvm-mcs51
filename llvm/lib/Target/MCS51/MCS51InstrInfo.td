@@ -399,7 +399,7 @@ def SRA16 : Instruction {
 def BUILDPAIR16 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR16:$dst);
-  let InOperandList = (ins MCS51GPR8:$lo, MCS51GPR8:$hi);
+  let InOperandList = (ins MCS51Byte:$lo, MCS51Byte:$hi);
   let AsmString = "";
   let Size = 0;
   let isPseudo = 1;
@@ -1120,6 +1120,19 @@ def LOADCODEABS16 : Instruction {
 def LOADDIRECT8 : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs MCS51GPR8:$dst);
+  let InOperandList = (ins MCS51Direct8:$addr);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+}
+
+// The same, straight into an imaginary register (part of a word).
+def LOADDIRECT8IM : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs MCS51Imag8:$dst);
   let InOperandList = (ins MCS51Direct8:$addr);
   let AsmString = "";
   let Size = 0;
