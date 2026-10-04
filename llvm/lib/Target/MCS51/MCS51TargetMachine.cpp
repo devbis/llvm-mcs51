@@ -2199,6 +2199,46 @@ public:
             continue;
           }
         }
+        // MOV A,Rn; INC/DEC A; MOV Rn,A with A dead afterwards: INC/DEC Rn.
+        if (MI.getOpcode() == MCS51::MOV_RN_A && Prev &&
+            (Prev->getOpcode() == MCS51::INC_A ||
+             Prev->getOpcode() == MCS51::DEC_A)) {
+          MachineInstr *Load = Prev->getPrevNode();
+          while (Load && Load->isDebugInstr())
+            Load = Load->getPrevNode();
+          Register R = MI.getOperand(0).getReg();
+          if (Load && Load->getOpcode() == MCS51::MOV_A_RN &&
+              Load->getOperand(0).getReg() == R) {
+            // A must be dead after the sequence.
+            bool ADead = true;
+            auto It = std::next(MI.getIterator());
+            for (; It != MBB.end(); ++It) {
+              if (It->isDebugInstr())
+                continue;
+              if (It->readsRegister(MCS51::A, TRI)) {
+                ADead = false;
+                break;
+              }
+              if (It->isCall() || It->modifiesRegister(MCS51::A, TRI))
+                break;
+            }
+            if (ADead && It == MBB.end())
+              for (MachineBasicBlock *Succ : MBB.successors())
+                ADead &= !Succ->isLiveIn(MCS51::A);
+            if (ADead) {
+              bool IsInc = Prev->getOpcode() == MCS51::INC_A;
+              BuildMI(MBB, MI, MI.getDebugLoc(),
+                      TII.get(IsInc ? MCS51::INC_RN : MCS51::DEC_RN), R)
+                  .addReg(R);
+              MI.eraseFromParent();
+              Prev->eraseFromParent();
+              Load->eraseFromParent();
+              Changed = true;
+              Prev = nullptr;
+              continue;
+            }
+          }
+        }
         // MOV Rn,#imm followed by MOV A,Rn with Rn dead: load A directly.
         if (Prev && Prev->getOpcode() == MCS51::MOV_RN_IMM &&
             Opc == MCS51::MOV_A_RN && Prev->getOperand(1).isImm() &&
