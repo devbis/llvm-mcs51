@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+
+from .archive import UBROFError, extract_library, inspect_library
+from .listing import ListingError, convert_listing_to_archive
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="iar2llvm",
+        description="Inspect, extract, and partially convert IAR UBROF 11 MCS-51 libraries.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    inspect = subparsers.add_parser("inspect", help="list modules and byte ranges")
+    inspect.add_argument("library", type=Path)
+    inspect.add_argument("--json", action="store_true")
+
+    extract = subparsers.add_parser("extract", help="extract complete .r51 module files")
+    extract.add_argument("library", type=Path)
+    extract.add_argument("--out-dir", type=Path, required=True)
+    extract.add_argument("--json", action="store_true")
+
+    convert = subparsers.add_parser(
+        "convert-listing",
+        help="convert selected zero-initialized XDATA_Z symbols from an XLIB listing",
+    )
+    convert.add_argument("listing", type=Path)
+    convert.add_argument("--module", required=True)
+    convert.add_argument("--symbol", action="append", required=True, dest="symbols")
+    convert.add_argument("--out", type=Path, required=True)
+    convert.add_argument("--llvm-mc", type=Path)
+    convert.add_argument("--llvm-ar", type=Path)
+    convert.add_argument("--json", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.command == "inspect":
+            payload = inspect_library(args.library)
+        elif args.command == "extract":
+            payload = extract_library(args.library, args.out_dir)
+        else:
+            payload = convert_listing_to_archive(
+                args.listing,
+                args.module,
+                args.symbols,
+                args.out,
+                args.llvm_mc,
+                args.llvm_ar,
+            )
+    except (OSError, UBROFError, ListingError) as error:
+        print(f"iar2llvm: error: {error}", file=sys.stderr)
+        return 1
+
+    if args.command == "convert-listing":
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"Archive: {payload['output']}")
+            print(f"Format: {payload['format']}")
+            print(f"Scope: {payload['scope']}")
+            for symbol in payload["symbols"]:
+                print(f"  {symbol['name']:<24} {symbol['size']:>8} bytes")
+        return 0
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print(f"Library: {payload['library']}")
+        print(f"Format: {payload['format']}")
+        print(f"Modules: {len(payload['modules'])}")
+        if args.command == "extract":
+            print(f"Output: {payload['output_dir']}")
+        for module in payload["modules"]:
+            print(f"  {module['name']:<24} {module['size']:>8} bytes")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
