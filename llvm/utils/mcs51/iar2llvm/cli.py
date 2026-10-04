@@ -11,6 +11,7 @@ from .listing import (
     convert_code_listing_to_archive,
     convert_const_listing_to_archive,
     convert_initialized_listing_to_archive,
+    convert_library_listing_to_archive,
     convert_listing_to_archive,
 )
 
@@ -45,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     convert_code = subparsers.add_parser(
         "convert-code-listing",
-        help="convert selected or all public IAR BANKED_CODE functions and relays",
+        help="convert selected or all public IAR banked code and supported module data",
     )
     convert_code.add_argument("listing", type=Path)
     convert_code.add_argument("--module", required=True)
@@ -55,6 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
     convert_code.add_argument("--llvm-mc", type=Path)
     convert_code.add_argument("--llvm-ar", type=Path)
     convert_code.add_argument("--json", action="store_true")
+
+    convert_library = subparsers.add_parser(
+        "convert-library-listing",
+        help="convert public BANKED_CODE modules from an XLIB listing into one archive",
+    )
+    convert_library.add_argument("listing", type=Path)
+    convert_library.add_argument("--out", type=Path, required=True)
+    convert_library.add_argument("--llvm-mc", type=Path)
+    convert_library.add_argument("--llvm-ar", type=Path)
+    convert_library.add_argument("--json", action="store_true")
 
     convert_const = subparsers.add_parser(
         "convert-const-listing",
@@ -70,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     convert_initialized = subparsers.add_parser(
         "convert-init-listing",
-        help="convert literal XDATA_I initializers from XDATA_ID records",
+        help="convert XDATA_I initializers and supported CODE_C pointer relocations",
     )
     convert_initialized.add_argument("listing", type=Path)
     convert_initialized.add_argument("--module", required=True)
@@ -110,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
                 args.llvm_ar,
                 args.all_public_banked,
             )
+        elif args.command == "convert-library-listing":
+            payload = convert_library_listing_to_archive(
+                args.listing,
+                args.out,
+                args.llvm_mc,
+                args.llvm_ar,
+            )
         elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
                 args.listing,
@@ -131,6 +149,20 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, UBROFError, ListingError) as error:
         print(f"iar2llvm: error: {error}", file=sys.stderr)
         return 1
+
+    if args.command == "convert-library-listing":
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"Archive: {payload['output']}")
+            print(f"Format: {payload['format']}")
+            print("Converted modules: " + ", ".join(payload["modules"]))
+            if payload["skipped_modules"]:
+                print("Skipped public modules: " + ", ".join(payload["skipped_modules"]))
+            print(f"Unresolved IAR symbols: {len(payload['unresolved'])}")
+            for module, symbols in payload["unsupported_public_data"].items():
+                print(f"Unsupported public data in {module}: " + ", ".join(symbols))
+        return 0
 
     if args.command in (
         "convert-listing",

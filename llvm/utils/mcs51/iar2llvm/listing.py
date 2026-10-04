@@ -2125,3 +2125,133 @@ def convert_code_listing_to_archive(
         ),
         "abi": "IAR calling convention preserved; no Clang ABI adaptation",
     }
+
+
+def convert_library_listing_to_archive(
+    listing_path: Path,
+    output: Path,
+    llvm_mc: Path | None = None,
+    llvm_ar: Path | None = None,
+) -> dict[str, object]:
+    """Convert each public BANKED_CODE module in one XLIB listing to an archive."""
+    listing_text = listing_path.read_text(encoding="latin1")
+    modules = _modules(listing_text)
+    llvm_mc = (llvm_mc or _default_tool("llvm-mc")).resolve()
+    llvm_ar = (llvm_ar or _default_tool("llvm-ar")).resolve()
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    converted_modules: list[str] = []
+    skipped_modules: list[str] = []
+    module_unresolved: list[set[str]] = []
+    defined_symbols: set[str] = set()
+    unsupported_public_data: dict[str, dict[str, str]] = {}
+
+    with tempfile.TemporaryDirectory(prefix="iar2llvm-lib-", dir=output.parent) as temp:
+        temp_dir = Path(temp)
+        member_objects: list[Path] = []
+        for module_name, records in modules.items():
+            segments: dict[str, Segment] = {}
+            public_symbols: list[tuple[str, str]] = []
+            for tag, text in records:
+                if tag == "t_seg":
+                    match = re.search(
+                        r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+<rel,([A-Z0-9_]+)>\s+'([^']+)'",
+                        text,
+                    )
+                    if match:
+                        ident, address_space, name = match.groups()
+                        segments[ident.upper()] = Segment(
+                            ident.upper(), address_space, name
+                        )
+                elif tag == "t_symbol_def2":
+                    match = re.search(
+                        r"PUBLIC_REL\s+\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+\s+"
+                        r"N[0-9A-Fa-f]+\"([^\"]+)\"",
+                        text,
+                    )
+                    if match:
+                        public_symbols.append(
+                            (match.group(1).upper(), match.group(2))
+                        )
+
+            if any(
+                ident in segments and _code_group(segments[ident]) == "banked"
+                for ident, _name in public_symbols
+            ):
+                module_archive = temp_dir / f"{module_name.encode('utf-8').hex()}.a"
+                result = convert_code_listing_to_archive(
+                    listing_path,
+                    module_name,
+                    [],
+                    module_archive,
+                    llvm_mc,
+                    llvm_ar,
+                    True,
+                )
+                converted_modules.append(module_name)
+                module_unresolved.append(set(result["unresolved"]))
+                defined_symbols.update(result["symbols"].values())
+                module_unsupported = result["unsupported_public_data"]
+                if module_unsupported:
+                    unsupported_public_data[module_name] = module_unsupported
+
+                extract_dir = temp_dir / f"extract-{module_name.encode('utf-8').hex()}"
+                extract_dir.mkdir()
+                extract = subprocess.run(
+                    [str(llvm_ar), "x", str(module_archive)],
+                    cwd=extract_dir,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if extract.returncode:
+                    raise ListingError(
+                        f"llvm-ar extraction failed for {module_name} "
+                        f"({extract.returncode}):\n{extract.stderr.strip()}"
+                    )
+                objects = sorted(extract_dir.glob("*.o"))
+                if len(objects) != 1:
+                    raise ListingError(
+                        f"expected one ELF object in converted module {module_name}, "
+                        f"found {len(objects)}"
+                    )
+                member_objects.extend(objects)
+            elif public_symbols:
+                skipped_modules.append(module_name)
+
+        if not member_objects:
+            raise ListingError("XLIB listing has no convertible public BANKED_CODE modules")
+
+        archive_path = temp_dir / output.name
+        archive = subprocess.run(
+            [str(llvm_ar), "rcs", str(archive_path), *(str(path) for path in member_objects)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if archive.returncode:
+            raise ListingError(
+                f"llvm-ar archive creation failed ({archive.returncode}):\n"
+                f"{archive.stderr.strip()}"
+            )
+        archive_path.replace(output)
+
+    unresolved = sorted(
+        {
+            name
+            for names in module_unresolved
+            for name in names
+            if _asm_name(name) not in defined_symbols
+        }
+    )
+    return {
+        "output": str(output),
+        "modules": converted_modules,
+        "skipped_modules": skipped_modules,
+        "unresolved": unresolved,
+        "unsupported_public_data": unsupported_public_data,
+        "format": "ELF32 MCS-51 archive",
+        "scope": "module-wide public BANKED_CODE subsets and supported public data",
+        "abi": "IAR calling convention preserved; no Clang ABI adaptation",
+    }
