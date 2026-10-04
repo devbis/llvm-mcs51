@@ -18,6 +18,7 @@
 #include "llvm/Support/MathExtras.h"
 #include <algorithm>
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/KnownBits.h"
 
 using namespace llvm;
 
@@ -497,6 +498,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, LibCall);
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
   setOperationAction(ISD::MUL, MVT::i16, Custom);
+  setOperationAction(ISD::MUL, MVT::i32, Custom);
   // Variable 32-bit shifts use the runtime helpers.
   setOperationAction(ISD::SHL_PARTS, MVT::i16, Expand);
   setOperationAction(ISD::SRA_PARTS, MVT::i16, Expand);
@@ -579,6 +581,34 @@ MCS51TargetLowering::preferredShiftLegalizationStrategy(
 
 void MCS51TargetLowering::ReplaceNodeResults(
     SDNode *N, SmallVectorImpl<SDValue> &Results, SelectionDAG &DAG) const {
+  // A 32-bit multiply is a call to the runtime; expanding it inline costs
+  // hundreds of bytes at every use.
+  if (N->getOpcode() == ISD::MUL && N->getValueType(0) == MVT::i32) {
+    SDLoc DL(N);
+    // A product of two values that fit in 16 bits is cheaper inline; the
+    // default expansion handles it.
+    bool Narrow = true;
+    for (SDValue Op : N->ops())
+      Narrow &= DAG.computeKnownBits(Op).countMinLeadingZeros() >= 16;
+    if (Narrow)
+      return;
+    TargetLowering::ArgListTy Args;
+    for (SDValue Op : N->ops()) {
+      TargetLowering::ArgListEntry Entry(
+          Op, Op.getValueType().getTypeForEVT(*DAG.getContext()));
+      Args.push_back(Entry);
+    }
+    TargetLowering::CallLoweringInfo CLI(DAG);
+    CLI.setDebugLoc(DL)
+        .setChain(DAG.getEntryNode())
+        .setLibCallee(CallingConv::C,
+                      Type::getInt32Ty(*DAG.getContext()),
+                      DAG.getExternalSymbol("__mulsi3", MVT::i16),
+                      std::move(Args))
+        .setNoReturn(false);
+    Results.push_back(LowerCallTo(CLI).first);
+    return;
+  }
   if ((N->getOpcode() == ISD::ADD || N->getOpcode() == ISD::SUB) &&
       N->getValueType(0) == MVT::i32) {
     SDLoc DL(N);
