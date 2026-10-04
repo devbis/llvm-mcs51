@@ -10,6 +10,7 @@ from .listing import (
     ListingError,
     convert_code_listing_to_archive,
     convert_const_listing_to_archive,
+    convert_initialized_listing_to_archive,
     convert_listing_to_archive,
 )
 
@@ -65,6 +66,20 @@ def build_parser() -> argparse.ArgumentParser:
     convert_const.add_argument("--llvm-mc", type=Path)
     convert_const.add_argument("--llvm-ar", type=Path)
     convert_const.add_argument("--json", action="store_true")
+
+    convert_initialized = subparsers.add_parser(
+        "convert-init-listing",
+        help="convert literal XDATA_I initializers from XDATA_ID records",
+    )
+    convert_initialized.add_argument("listing", type=Path)
+    convert_initialized.add_argument("--module", required=True)
+    convert_initialized.add_argument(
+        "--symbol", action="append", required=True, dest="symbols"
+    )
+    convert_initialized.add_argument("--out", type=Path, required=True)
+    convert_initialized.add_argument("--llvm-mc", type=Path)
+    convert_initialized.add_argument("--llvm-ar", type=Path)
+    convert_initialized.add_argument("--json", action="store_true")
     return parser
 
 
@@ -93,8 +108,17 @@ def main(argv: list[str] | None = None) -> int:
                 args.llvm_mc,
                 args.llvm_ar,
             )
-        else:
+        elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
+                args.listing,
+                args.module,
+                args.symbols,
+                args.out,
+                args.llvm_mc,
+                args.llvm_ar,
+            )
+        else:
+            payload = convert_initialized_listing_to_archive(
                 args.listing,
                 args.module,
                 args.symbols,
@@ -110,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         "convert-listing",
         "convert-code-listing",
         "convert-const-listing",
+        "convert-init-listing",
     ):
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))

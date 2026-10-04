@@ -512,6 +512,280 @@ def convert_const_listing_to_archive(
     }
 
 
+def _selected_initialized_xdata(
+    listing: str, module_name: str, symbol_names: list[str]
+) -> list[tuple[Symbol, bytes]]:
+    modules = _modules(listing)
+    if module_name not in modules:
+        raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
+
+    records = modules[module_name]
+    segments: dict[str, Segment] = {}
+    symbols: dict[str, Symbol] = {}
+    definitions_by_segment: dict[str, list[str]] = {}
+    external_names: dict[str, str] = {}
+    for tag, text in records:
+        if tag == "t_seg":
+            match = re.search(
+                r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+<rel,([A-Z0-9_]+)>\s+'([^']+)'",
+                text,
+            )
+            if match:
+                ident, address_space, name = match.groups()
+                segments[ident.upper()] = Segment(ident.upper(), address_space, name)
+        elif tag == "t_symbol_def2":
+            match = re.search(
+                r"([A-Z_]+_REL)\s+\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)\s+"
+                r"N[0-9A-Fa-f]+\"([^\"]+)\"",
+                text,
+            )
+            if match:
+                kind, segment, offset, name = match.groups()
+                segment = segment.upper()
+                definitions_by_segment.setdefault(segment, []).append(name)
+                if kind == "PUBLIC_REL":
+                    symbols[name] = Symbol(name, segment, int(offset, 16))
+                continue
+            match = re.search(
+                r"EXTERNAL\s+<([0-9A-Fa-f]+)>\s+[0-9A-Fa-f]+\s+"
+                r"N[0-9A-Fa-f]+\"([^\"]+)\"",
+                text,
+            )
+            if match:
+                external_names[match.group(1).upper()] = match.group(2)
+
+    if not symbol_names:
+        raise ListingError("select at least one public initialized XDATA symbol")
+    requested: list[Symbol] = []
+    for name in symbol_names:
+        symbol = symbols.get(name)
+        if symbol is None:
+            raise ListingError(f"public initialized XDATA symbol {name!r} was not found")
+        segment = segments.get(symbol.segment)
+        if segment is None or (segment.address_space, segment.name) != (
+            "XDATA",
+            "XDATA_I",
+        ):
+            raise ListingError(f"{name} is not in an IAR XDATA/XDATA_I segment")
+        if symbol.offset != 0:
+            raise ListingError(f"nonzero symbol offset is unsupported for {name}")
+        if definitions_by_segment.get(symbol.segment) != [name]:
+            raise ListingError(
+                f"segment {symbol.segment} has additional relative symbols; "
+                "their individual sizes are not known in this prototype"
+            )
+        requested.append(symbol)
+
+    records_by_segment: dict[str, list[tuple[str, str]]] = {}
+    current_segment: str | None = None
+    for tag, text in records:
+        if tag == "t_org_rel1":
+            match = re.search(r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+", text)
+            current_segment = match.group(1).upper() if match else None
+            if current_segment is not None:
+                records_by_segment.setdefault(current_segment, [])
+                records_by_segment[current_segment].append((tag, text))
+            continue
+        if current_segment is not None:
+            records_by_segment.setdefault(current_segment, []).append((tag, text))
+
+    initializer_for: dict[str, str] = {}
+    for symbol in requested:
+        source_records = records_by_segment.get(symbol.segment, [])
+        relative_targets: list[str] = []
+        initializer_markers: list[str] = []
+        for tag, text in source_records:
+            if tag == "t_org_rel1":
+                continue
+            if tag == "t_push_rel":
+                match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+                if not match:
+                    raise ListingError(
+                        f"malformed XDATA_I initializer reference for {symbol.name}"
+                    )
+                target, addend = match.groups()
+                if int(addend, 16) != 0:
+                    raise ListingError(
+                        f"nonzero initializer addend is unsupported for {symbol.name}"
+                    )
+                relative_targets.append(target.upper())
+            elif tag == "t_push_ext":
+                match = re.fullmatch(r"<([0-9A-Fa-f]+)>\s+[0-9A-Fa-f]+", text)
+                if not match:
+                    raise ListingError(
+                        f"malformed XDATA_I initialization marker for {symbol.name}"
+                    )
+                external = external_names.get(match.group(1).upper())
+                if external is None:
+                    raise ListingError(
+                        f"unknown XDATA_I initialization marker for {symbol.name}"
+                    )
+                initializer_markers.append(external)
+            elif tag not in (
+                "t_asm_mode_change",
+                "t_delete_tos",
+                "t_stack_error",
+                "t_end",
+            ):
+                raise ListingError(
+                    f"unsupported XLIB record {tag} in XDATA_I segment "
+                    f"{symbol.segment}"
+                )
+
+        if len(relative_targets) != 1 or initializer_markers != ["__INIT_XDATA_I"]:
+            raise ListingError(
+                f"unsupported IAR initializer metadata for {symbol.name}"
+            )
+        initializer = relative_targets[0]
+        initializer_segment = segments.get(initializer)
+        if initializer_segment is None or (
+            initializer_segment.address_space,
+            initializer_segment.name,
+        ) != ("CODE", "XDATA_ID"):
+            raise ListingError(
+                f"initializer for {symbol.name} does not reference an XDATA_ID segment"
+            )
+        initializer_for[symbol.name] = initializer
+
+    if len(set(initializer_for.values())) != len(initializer_for):
+        raise ListingError("multiple XDATA_I symbols share one initializer segment")
+
+    result: list[tuple[Symbol, bytes]] = []
+    for symbol in requested:
+        initializer = initializer_for[symbol.name]
+        cursor = 0
+        emitted: dict[int, int] = {}
+        for tag, text in records_by_segment.get(initializer, []):
+            if tag == "t_org_rel1":
+                match = re.search(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+                if not match or match.group(1).upper() != initializer:
+                    raise ListingError(
+                        f"malformed initializer segment {initializer} for {symbol.name}"
+                    )
+                cursor = int(match.group(2), 16)
+            elif tag in ("t_abs_8", "t_abs_16", "t_abs_24", "t_abs_32"):
+                digits = {
+                    "t_abs_8": 2,
+                    "t_abs_16": 4,
+                    "t_abs_24": 6,
+                    "t_abs_32": 8,
+                }[tag]
+                if not re.fullmatch(r"[0-9A-Fa-f]{%d}" % digits, text):
+                    raise ListingError(
+                        f"malformed {tag} record in initializer segment {initializer}"
+                    )
+                data = bytes.fromhex(text)
+                for offset, value in enumerate(data, cursor):
+                    if offset in emitted:
+                        raise ListingError(
+                            f"overlapping initializer bytes in segment {initializer}"
+                        )
+                    emitted[offset] = value
+                cursor += len(data)
+            elif tag not in ("t_asm_mode_change", "t_stack_error", "t_end"):
+                raise ListingError(
+                    f"unsupported XLIB record {tag} in XDATA_ID segment "
+                    f"{initializer}; relocatable initializers are not supported"
+                )
+        if not emitted:
+            raise ListingError(f"initializer for {symbol.name} contains no bytes")
+        size = max(emitted) + 1
+        if set(emitted) != set(range(size)):
+            raise ListingError(
+                f"initializer for {symbol.name} contains uninitialized gaps"
+            )
+        result.append((symbol, bytes(emitted[offset] for offset in range(size))))
+    return result
+
+
+def convert_initialized_listing_to_archive(
+    listing_path: Path,
+    module_name: str,
+    symbol_names: list[str],
+    output: Path,
+    llvm_mc: Path | None = None,
+    llvm_ar: Path | None = None,
+) -> dict[str, object]:
+    """Convert literal XDATA_I initializers into native ELF .data sections."""
+    selected = _selected_initialized_xdata(
+        listing_path.read_text(encoding="latin1"), module_name, symbol_names
+    )
+    llvm_mc = llvm_mc or _default_tool("llvm-mc")
+    llvm_ar = llvm_ar or _default_tool("llvm-ar")
+
+    assembly: list[str] = ["; Generated from an IAR XLIB listing by iar2llvm."]
+    for symbol, contents in selected:
+        alias = _asm_name(symbol.name)
+        assembly.extend(
+            [
+                f'.section .data.{alias},"aw",@progbits',
+                ".balign 1",
+                f".globl {alias}",
+                f".type {alias},@object",
+                f"{alias}:",
+            ]
+        )
+        assembly.extend(
+            ".byte "
+            + ", ".join(
+                f"0x{byte:02x}" for byte in contents[offset : offset + 16]
+            )
+            for offset in range(0, len(contents), 16)
+        )
+        assembly.append(f".size {alias}, {len(contents)}")
+
+    output = output.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="iar2llvm-", dir=output.parent) as temp:
+        temp_dir = Path(temp)
+        module_token = module_name.encode("utf-8").hex()
+        asm_path = temp_dir / f"{module_token}.s"
+        object_path = temp_dir / f"{module_token}.o"
+        archive_path = temp_dir / output.name
+        asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
+
+        assemble = subprocess.run(
+            [
+                str(llvm_mc),
+                "-triple",
+                "mcs51",
+                "-filetype=obj",
+                str(asm_path),
+                "-o",
+                str(object_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if assemble.returncode:
+            raise ListingError(
+                f"llvm-mc failed ({assemble.returncode}):\n{assemble.stderr.strip()}"
+            )
+        archive = subprocess.run(
+            [str(llvm_ar), "rcs", str(archive_path), str(object_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if archive.returncode:
+            raise ListingError(
+                f"llvm-ar failed ({archive.returncode}):\n{archive.stderr.strip()}"
+            )
+        archive_path.replace(output)
+
+    return {
+        "module": module_name,
+        "output": str(output),
+        "symbols": [
+            {"name": symbol.name, "size": len(contents)}
+            for symbol, contents in selected
+        ],
+        "format": "ELF32 MCS-51 archive",
+        "scope": "literal XDATA_I initializers through XDATA_ID; relocations rejected",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class _CodeItem:
     kind: str
