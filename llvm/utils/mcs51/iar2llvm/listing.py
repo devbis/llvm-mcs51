@@ -58,7 +58,7 @@ def _emit_initializer(lines: list[str], contents: list[_InitializerAtom]) -> Non
             literal_bytes.append(atom)
             continue
         flush_literal_bytes()
-        operand = _asm_name(atom.symbol)
+        operand = _asm_symbol(atom.symbol)
         if atom.addend:
             operand += f"+{atom.addend}" if atom.addend > 0 else str(atom.addend)
         lines.append(f".short {operand}")
@@ -299,19 +299,17 @@ def convert_listing_to_archive(
 
     assembly: list[str] = ["; Generated from an IAR XLIB listing by iar2llvm."]
     for symbol, _segment, size, _ops in selected:
-        if not re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$]*", symbol.name):
-            raise ListingError(
-                f"symbol name cannot be emitted in LLVM assembly: {symbol.name!r}"
-            )
+        asm_name = _asm_symbol(symbol.name)
+        section_name = f".bss.iar_{symbol.name.encode('utf-8').hex()}"
         assembly.extend(
             [
-                f'.section .bss.{symbol.name},"aw",@nobits',
+                f'.section {section_name},"aw",@nobits',
                 ".balign 1",
-                f".globl {symbol.name}",
-                f".type {symbol.name},@object",
-                f"{symbol.name}:",
+                f".globl {asm_name}",
+                f".type {asm_name},@object",
+                f"{asm_name}:",
                 f".zero {size}",
-                f".size {symbol.name}, {size}",
+                f".size {asm_name}, {size}",
             ]
         )
 
@@ -507,13 +505,15 @@ def convert_const_listing_to_archive(
     assembly: list[str] = ["; Generated from an IAR XLIB listing by iar2llvm."]
     for symbol, size, contents in selected:
         alias = _asm_name(symbol.name)
+        asm_alias = _asm_symbol(alias)
+        section_name = f".rodata.iar_{symbol.name.encode('utf-8').hex()}"
         assembly.extend(
             [
-                f'.section .rodata.{alias},"a",@progbits',
+                f'.section {section_name},"a",@progbits',
                 ".balign 1",
-                f".globl {alias}",
-                f".type {alias},@object",
-                f"{alias}:",
+                f".globl {asm_alias}",
+                f".type {asm_alias},@object",
+                f"{asm_alias}:",
             ]
         )
         assembly.extend(
@@ -523,7 +523,7 @@ def convert_const_listing_to_archive(
             )
             for offset in range(0, size, 16)
         )
-        assembly.append(f".size {alias}, {size}")
+        assembly.append(f".size {asm_alias}, {size}")
 
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -843,17 +843,19 @@ def convert_initialized_listing_to_archive(
     assembly: list[str] = ["; Generated from an IAR XLIB listing by iar2llvm."]
     for symbol, contents in selected:
         alias = _asm_name(symbol.name)
+        asm_alias = _asm_symbol(alias)
+        section_name = f".data.iar_{symbol.name.encode('utf-8').hex()}"
         assembly.extend(
             [
-                f'.section .data.{alias},"aw",@progbits',
+                f'.section {section_name},"aw",@progbits',
                 ".balign 1",
-                f".globl {alias}",
-                f".type {alias},@object",
-                f"{alias}:",
+                f".globl {asm_alias}",
+                f".type {asm_alias},@object",
+                f"{asm_alias}:",
             ]
         )
         _emit_initializer(assembly, contents)
-        assembly.append(f".size {alias}, {_initializer_size(contents)}")
+        assembly.append(f".size {asm_alias}, {_initializer_size(contents)}")
 
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -941,9 +943,33 @@ class _IARValue:
 
 
 def _asm_name(name: str) -> str:
+    """Keep the ELF symbol name identical to the source IAR name."""
+    return name
+
+
+def _asm_symbol(name: str) -> str:
+    """Format one ELF symbol name as an LLVM assembler identifier."""
     if re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$]*", name):
         return name
-    return "__iar_sym_" + name.encode("utf-8").hex()
+    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _asm_expression(expression: str) -> str:
+    """Quote a symbol in a simple symbol-plus/minus-integer expression."""
+    if re.fullmatch(r"(?:0[xX][0-9A-Fa-f]+|[0-9]+)", expression):
+        return expression
+    match = re.fullmatch(r"(.+?)([+-][0-9]+)", expression)
+    if match:
+        name, addend = match.groups()
+        return _asm_symbol(name) + addend
+    return _asm_symbol(expression)
+
+
+def _expression_symbol(expression: str) -> str:
+    """Return the symbol portion of a symbol-plus/minus-integer expression."""
+    match = re.fullmatch(r"(.+?)([+-][0-9]+)", expression)
+    return match.group(1) if match else expression
 
 
 def _iar_segment_boundary_symbol(boundary: str, segment_name: str) -> str:
@@ -1004,7 +1030,10 @@ def _virtual_register_support(
                 )
             alias = _asm_name(name)
             lines.extend(
-                [f".globl {alias}", f".equ {alias}, {0x30 + int(match.group(1))}"]
+                [
+                    f".globl {_asm_symbol(alias)}",
+                    f".equ {_asm_symbol(alias)}, {0x30 + int(match.group(1))}",
+                ]
             )
             exports.add(alias)
             names.add(name)
@@ -1022,11 +1051,11 @@ def _virtual_register_support(
             [
                 '.section .mcs51.data1.bss,"aw",@nobits',
                 ".balign 1",
-                f".globl {alias}",
-                f".type {alias},@object",
-                f"{alias}:",
+                f".globl {_asm_symbol(alias)}",
+                f".type {_asm_symbol(alias)},@object",
+                f"{_asm_symbol(alias)}:",
                 f".zero {size}",
-                f".size {alias}, {size}",
+                f".size {_asm_symbol(alias)}, {size}",
             ]
         )
         exports.add(alias)
@@ -1037,7 +1066,12 @@ def _virtual_register_support(
                 f"IAR ?VB byte address 0x{vb_byte_address:x} is outside 0x20..0x2f"
             )
         alias = _asm_name("?VB")
-        lines.extend([f".globl {alias}", f".equ {alias}, {vb_byte_address}"])
+        lines.extend(
+            [
+                f".globl {_asm_symbol(alias)}",
+                f".equ {_asm_symbol(alias)}, {vb_byte_address}",
+            ]
+        )
         exports.add(alias)
         names.add("?VB")
     return lines, exports, names
@@ -2244,11 +2278,7 @@ def convert_code_listing_to_archive(
     lines = ["; Generated from an IAR XLIB listing by iar2llvm."]
     external_aliases = sorted(
         {
-            _asm_name(
-                item.external_symbol
-                if item.kind == "pcrel8"
-                else str(item.operand)
-            )
+            item.external_symbol or _expression_symbol(str(item.operand))
             for items in decoded.values()
             for item in items
             if item.kind in (
@@ -2289,7 +2319,7 @@ def convert_code_listing_to_archive(
     )
     unresolved_names = sorted(unresolved)
     for alias in external_aliases:
-        lines.append(f".globl {alias}")
+        lines.append(f".globl {_asm_symbol(alias)}")
 
     selected_order = [ident for ident in segment_order if ident in selected_segments]
     for group in ("banked", "relays", "common_code", "common_const"):
@@ -2311,7 +2341,7 @@ def convert_code_listing_to_archive(
             exports = exports_by_segment.get(ident, [])
             items = decoded[ident]
             size = sum(item.size for item in items)
-            lines.append(f"{segment_labels[ident]}:")
+            lines.append(f"{_asm_symbol(segment_labels[ident])}:")
             for alias, offset in exports:
                 if offset > size:
                     raise ListingError(
@@ -2320,10 +2350,14 @@ def convert_code_listing_to_archive(
                 symbol_type = "object" if group == "common_const" else "function"
                 if offset == size:
                     symbol_type = "notype"
-                lines.append(f".globl {alias}")
+                asm_alias = _asm_symbol(alias)
+                lines.append(f".globl {asm_alias}")
                 if symbol_type != "notype":
-                    lines.append(f".type {alias},@{symbol_type}")
-                lines.append(f".set {alias}, {segment_labels[ident]}+{offset}")
+                    lines.append(f".type {asm_alias},@{symbol_type}")
+                lines.append(
+                    f".set {asm_alias}, "
+                    f"{_asm_expression(f'{segment_labels[ident]}+{offset}')}"
+                )
             if not items and exports:
                 raise ListingError(
                     f"public symbol {exports[0][0]} has no emitted code in segment {ident}"
@@ -2332,25 +2366,25 @@ def convert_code_listing_to_archive(
                 if item.kind == "byte":
                     lines.append(f".byte 0x{int(item.value):02x}")
                 elif item.kind == "byte_reloc":
-                    lines.append(f".byte {item.value}")
+                    lines.append(f".byte {_asm_expression(str(item.value))}")
                 elif item.kind in ("byte_reloc_lo", "byte_reloc_hi"):
                     fixup = "fixup_lo8" if item.kind == "byte_reloc_lo" else "fixup_hi8"
                     lines.extend(
                         [
                             ".byte 0",
-                            f".reloc .-1, {fixup}, {item.value}",
+                            f".reloc .-1, {fixup}, {_asm_expression(str(item.value))}",
                         ]
                     )
                 elif item.kind == "byte_reloc_bit":
                     lines.extend(
                         [
                             ".byte 0",
-                            f".reloc .-1, fixup_bit8, {item.value}",
+                            f".reloc .-1, fixup_bit8, {_asm_expression(str(item.value))}",
                         ]
                     )
                 elif item.kind == "pcrel8":
                     addend = int(item.operand or "0") - 1
-                    expression = str(item.value)
+                    expression = _asm_expression(str(item.value))
                     if addend:
                         expression += f"+{addend}" if addend > 0 else str(addend)
                     lines.extend(
@@ -2362,19 +2396,19 @@ def convert_code_listing_to_archive(
                 elif item.kind == "word":
                     lines.append(f".short 0x{int(item.value):04x}")
                 elif item.kind == "word_reloc":
-                    lines.append(f".short {item.value}")
+                    lines.append(f".short {_asm_expression(str(item.value))}")
                 elif item.kind == "branch":
-                    operand = str(item.value)
+                    operand = _asm_expression(str(item.value))
                     addend = int(item.operand or "0")
                     if addend:
                         operand += f"+{addend}" if addend > 0 else str(addend)
                     lines.append(f"sjmp {operand}")
                 elif item.kind in ("call", "relcall"):
-                    lines.append(f"{item.value} {item.operand}")
+                    lines.append(f"{item.value} {_asm_expression(str(item.operand))}")
                 elif item.kind == "dptr":
-                    lines.append(f"mov dptr, #{item.value}")
+                    lines.append(f"mov dptr, #{_asm_expression(str(item.value))}")
                 elif item.kind == "bankptr":
-                    lines.append(f"bankaddr24 {item.value}")
+                    lines.append(f"bankaddr24 {_asm_expression(str(item.value))}")
             public_offsets = sorted(
                 {
                     symbol.offset
@@ -2385,7 +2419,7 @@ def convert_code_listing_to_archive(
             for alias, offset in exports:
                 next_offsets = [position for position in public_offsets if position > offset]
                 end = min(next_offsets, default=size)
-                lines.append(f".size {alias}, {end - offset}")
+                lines.append(f".size {_asm_symbol(alias)}, {end - offset}")
 
     if decoded_constants:
         lines.extend(
@@ -2398,7 +2432,7 @@ def convert_code_listing_to_archive(
             if ident not in decoded_constants:
                 continue
             contents = decoded_constants[ident]
-            lines.append(f"{segment_labels[ident]}:")
+            lines.append(f"{_asm_symbol(segment_labels[ident])}:")
             exports_at_offset: dict[int, list[Symbol]] = {}
             for symbol in constant_exports_by_segment.get(ident, []):
                 if symbol.offset < 0 or symbol.offset >= len(contents):
@@ -2429,11 +2463,12 @@ def convert_code_listing_to_archive(
                     )
                 for symbol in exports_at_offset[offset]:
                     alias = _asm_name(symbol.name)
+                    asm_alias = _asm_symbol(alias)
                     lines.extend(
                         [
-                            f".globl {alias}",
-                            f".type {alias},@object",
-                            f"{alias}:",
+                            f".globl {asm_alias}",
+                            f".type {asm_alias},@object",
+                            f"{asm_alias}:",
                         ]
                     )
                 cursor = offset
@@ -2447,34 +2482,40 @@ def convert_code_listing_to_archive(
                 )
             for offset in ordered_offsets:
                 for symbol in exports_at_offset[offset]:
-                    lines.append(f".size {_asm_name(symbol.name)}, {sizes[offset]}")
+                    lines.append(
+                        f".size {_asm_symbol(_asm_name(symbol.name))}, {sizes[offset]}"
+                    )
 
     for symbol, _segment, size, _ops in public_bss:
         alias = _asm_name(symbol.name)
+        asm_alias = _asm_symbol(alias)
+        section_name = f".bss.iar_{symbol.name.encode('utf-8').hex()}"
         lines.extend(
             [
-                f'.section .bss.{alias},"aw",@nobits',
+                f'.section {section_name},"aw",@nobits',
                 ".balign 1",
-                f".globl {alias}",
-                f".type {alias},@object",
-                f"{alias}:",
+                f".globl {asm_alias}",
+                f".type {asm_alias},@object",
+                f"{asm_alias}:",
                 f".zero {size}",
-                f".size {alias}, {size}",
+                f".size {asm_alias}, {size}",
             ]
         )
     for symbol, contents in public_initialized:
         alias = _asm_name(symbol.name)
+        asm_alias = _asm_symbol(alias)
+        section_name = f".data.iar_{symbol.name.encode('utf-8').hex()}"
         lines.extend(
             [
-                f'.section .data.{alias},"aw",@progbits',
+                f'.section {section_name},"aw",@progbits',
                 ".balign 1",
-                f".globl {alias}",
-                f".type {alias},@object",
-                f"{alias}:",
+                f".globl {asm_alias}",
+                f".type {asm_alias},@object",
+                f"{asm_alias}:",
             ]
         )
         _emit_initializer(lines, contents)
-        lines.append(f".size {alias}, {_initializer_size(contents)}")
+        lines.append(f".size {asm_alias}, {_initializer_size(contents)}")
 
     private_bss = {
         ident: size
@@ -2492,10 +2533,10 @@ def convert_code_listing_to_archive(
             label = segment_labels[ident]
             lines.extend(
                 [
-                    f".type {label},@object",
-                    f"{label}:",
+                    f".type {_asm_symbol(label)},@object",
+                    f"{_asm_symbol(label)}:",
                     f".zero {size}",
-                    f".size {label}, {size}",
+                    f".size {_asm_symbol(label)}, {size}",
                 ]
             )
 
@@ -2513,10 +2554,12 @@ def convert_code_listing_to_archive(
         )
         for ident, contents in private_initialized.items():
             label = segment_labels[ident]
-            lines.append(f".type {label},@object")
-            lines.append(f"{label}:")
+            lines.append(f".type {_asm_symbol(label)},@object")
+            lines.append(f"{_asm_symbol(label)}:")
             _emit_initializer(lines, [*contents])
-            lines.append(f".size {label}, {_initializer_size([*contents])}")
+            lines.append(
+                f".size {_asm_symbol(label)}, {_initializer_size([*contents])}"
+            )
 
     for symbol, _segment, size, _ops in public_bss:
         exported_originals[symbol.name] = _asm_name(symbol.name)

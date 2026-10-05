@@ -169,9 +169,10 @@ The code subset preserves machine bytes and translates supported `SJMP`,
 bit-address, and 24-bit banked-code relocations. `R_8051_24` writes
 address-low, address-high, and the final flash bank number after CC2530
 automatic bank placement. `R_8051_BIT8` converts the IAR virtual-bit byte
-address and bit offset into the 8051 bit address. Symbols with IAR-only
-punctuation are exported under stable `__iar_sym_<hex-name>` ELF names; JSON
-output lists those mappings and unresolved IAR runtime names.
+address and bit offset into the 8051 bit address. ELF symbols retain their
+original IAR names, including punctuation such as `?`, `::`, and angle brackets.
+Generated assembly quotes names that need it; JSON output lists the unchanged
+names and unresolved IAR runtime references.
 
 This does not adapt an IAR function body to the standard Clang calling
 convention. `-mabi=iar` opts into the current scalar register ABI bring-up;
