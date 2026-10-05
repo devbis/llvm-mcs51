@@ -167,6 +167,7 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   case R_8051_LO8_CODE:
   case R_8051_HI8_CODE:
   case R_8051_BIT8:
+  case R_8051_BANK8:
   case R_8051_16:
   case R_8051_16_BE:
   case R_8051_DPTR16:
@@ -399,6 +400,10 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     *loc = static_cast<uint8_t>(BitAddress);
     break;
   }
+  case R_8051_BANK8:
+    checkUInt(ctx, loc, val, 8, rel);
+    *loc = val;
+    break;
   case R_8051_24:
     checkUInt(ctx, loc, val, 24, rel);
     loc[0] = static_cast<uint8_t>(val);
@@ -483,7 +488,8 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     }
     bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
     bool isAutoBankThunk = sec.name.starts_with(".text.autobankthunks.");
-    if (rel.sym && rel.type != R_8051_24 && !isBankThunk && !isAutoBankThunk)
+    if (rel.sym && rel.type != R_8051_24 && rel.type != R_8051_BANK8 &&
+        !isBankThunk && !isAutoBankThunk)
       if (const Defined *direct =
               getCommonTargetOfExternalBankThunk(ctx, *rel.sym))
         val = direct->getVA(ctx, rel.addend);
@@ -497,7 +503,11 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       if (targetInput && (targetInput->flags & SHF_EXECINSTR))
         targetBank = getMCS51CodeBank(targetInput->getOutputSection());
     }
-    if (rel.type == R_8051_24 && rel.sym) {
+    if ((rel.type == R_8051_24 || rel.type == R_8051_BANK8) && rel.sym) {
+      if (rel.type == R_8051_BANK8) {
+        relocate(loc, rel, targetBank);
+        continue;
+      }
       val = (static_cast<uint64_t>(targetBank) << 16) | (val & 0xffff);
       relocate(loc, rel, val);
       continue;
@@ -511,10 +521,16 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       bool isLongCall = rel.type == R_8051_16_BE &&
                         (sec.flags & SHF_EXECINSTR) && rel.offset > 0 &&
                         sec.content()[rel.offset - 1] == 0x12;
+      bool isLongJump = rel.type == R_8051_16_BE &&
+                        (sec.flags & SHF_EXECINSTR) && rel.offset > 0 &&
+                        sec.content()[rel.offset - 1] == 0x02;
+      bool isDirectCodeTransfer =
+          rel.type == R_8051_11 || isLongCall || isLongJump;
       bool isFunctionAddress =
           (rel.type == R_8051_16 || rel.type == R_8051_DPTR16) && !isLongCall;
-      bool needsThunk =
-          targetBank && (targetBank != callerBank || isFunctionAddress);
+      bool needsThunk = targetBank &&
+                        ((isDirectCodeTransfer && targetBank != callerBank) ||
+                         isFunctionAddress);
       if (needsThunk && !isBankThunk && !isAutoBankThunk) {
         // Some declarations in another translation unit do not carry a
         // section attribute. Resolve those calls and function pointers here,

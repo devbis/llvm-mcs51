@@ -62,6 +62,8 @@ public:
       return MCS51::fixup_hi8;
     if (Name == "fixup_bit8")
       return MCS51::fixup_bit8;
+    if (Name == "fixup_bank8")
+      return MCS51::fixup_bank8;
     if (Name == "fixup_pcrel8")
       return MCS51::fixup_pcrel8;
     return MCAsmBackend::getFixupKind(Name);
@@ -100,6 +102,8 @@ public:
       return {"fixup_bit8", 0, 8, 0};
     if (Kind == MCS51::fixup_24)
       return {"fixup_24", 0, 24, 0};
+    if (Kind == MCS51::fixup_bank8)
+      return {"fixup_bank8", 0, 8, 0};
     return MCAsmBackend::getFixupKindInfo(Kind);
   }
 
@@ -132,6 +136,11 @@ public:
       }
       Data[0] |= static_cast<uint8_t>((Value >> 3) & 0xe0);
       Data[1] |= static_cast<uint8_t>(Value);
+      return;
+    }
+    if (Fixup.getKind() == MCS51::fixup_bank8) {
+      if (!IsResolved)
+        Asm->getWriter().recordRelocation(F, Fixup, Target, Value);
       return;
     }
     if (!IsResolved)

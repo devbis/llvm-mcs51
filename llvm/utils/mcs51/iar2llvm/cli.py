@@ -16,6 +16,17 @@ from .listing import (
 )
 
 
+def _read_module_list(path: Path | None) -> list[str]:
+    if path is None:
+        return []
+    modules = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        module = line.partition("#")[0].strip()
+        if module:
+            modules.append(module)
+    return modules
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="iar2llvm",
@@ -64,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     convert_library.add_argument("listing", type=Path)
     convert_library.add_argument("--symbol", action="append", dest="symbols", default=[])
+    convert_library.add_argument(
+        "--module-list",
+        type=Path,
+        help="convert only modules listed in this UTF-8 file (one XLIB module per line)",
+    )
     convert_library.add_argument("--language", default="00")
     convert_library.add_argument("--out", type=Path, required=True)
     convert_library.add_argument("--llvm-mc", type=Path)
@@ -145,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.language,
                 args.fail_fast,
                 args.vb_byte_address,
+                _read_module_list(args.module_list),
             )
         elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
@@ -178,6 +195,11 @@ def main(argv: list[str] | None = None) -> int:
             print("Converted modules: " + ", ".join(payload["modules"]))
             if payload["skipped_modules"]:
                 print("Skipped public modules: " + ", ".join(payload["skipped_modules"]))
+            if payload["missing_requested_modules"]:
+                print(
+                    "Missing requested modules: "
+                    + ", ".join(payload["missing_requested_modules"])
+                )
             print(f"Unresolved IAR symbols ({len(payload['unresolved'])}):")
             for symbol in payload["unresolved"]:
                 print(f"  {symbol}")

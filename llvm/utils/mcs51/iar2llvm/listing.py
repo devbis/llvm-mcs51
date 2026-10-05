@@ -80,7 +80,7 @@ def _records(lines: list[str]) -> Iterator[tuple[str, str]]:
         while index < len(lines) and not start_re.match(lines[index]):
             continuation = lines[index].strip()
             if continuation:
-                if parts and parts[-1].count('"') % 2:
+                if any(parts[-1].count(quote) % 2 for quote in ("'", '"')):
                     parts[-1] += continuation
                 else:
                     parts.append(continuation)
@@ -925,6 +925,7 @@ class _CodeItem:
             "byte_reloc_lo": 1,
             "byte_reloc_hi": 1,
             "byte_reloc_bit": 1,
+            "byte_reloc_bank": 1,
             "pcrel8": 1,
             "word": 2,
             "word_reloc": 2,
@@ -1099,7 +1100,7 @@ def _code_group(segment: Segment) -> str | None:
         return "banked"
     if segment.address_space == "CODE" and segment.name == "BANK_RELAYS":
         return "relays"
-    if segment.address_space == "CODE" and segment.name == "RCODE":
+    if segment.address_space == "CODE" and segment.name in ("RCODE", "CSTART"):
         return "common_code"
     if segment.address_space == "CODE" and segment.name == "CODE_C":
         return "common_const"
@@ -1538,7 +1539,27 @@ def _parse_code_item_records(
         elif tag == "t_minus":
             rhs = pop_value(tag)
             lhs = pop_value(tag)
-            if lhs.kind in ("rel", "external") and rhs.kind == "pcr":
+            if lhs.kind == "external" and rhs.kind == "external":
+                left_symbol = str(lhs.value)
+                right_symbol = str(rhs.value)
+                if (
+                    left_symbol.startswith("__iar_sfe_")
+                    and right_symbol
+                    == "__iar_sfb_" + left_symbol.removeprefix("__iar_sfe_")
+                ):
+                    segment_name = left_symbol.removeprefix("__iar_sfe_")
+                    stack.append(
+                        _IARValue(
+                            "external",
+                            f"__iar_size_{segment_name}",
+                            lhs.addend - rhs.addend,
+                        )
+                    )
+                else:
+                    raise ListingError(
+                        f"unsupported segment-boundary difference in segment {segment_id}"
+                    )
+            elif lhs.kind in ("rel", "external") and rhs.kind == "pcr":
                 if rhs.addend:
                     raise ListingError(
                         f"nonzero PCR addend is unsupported in segment {segment_id}"
@@ -1684,6 +1705,10 @@ def _parse_code_item_records(
             ):
                 segment_name = str(value.value).removeprefix("__iar_sfb_")
                 stack.append(_IARValue("sfb_byte3", segment_name, value.addend))
+            elif value.kind == "external" and byte_index == 2:
+                stack.append(
+                    _IARValue("external_bank_single", value.value, value.addend)
+                )
             else:
                 raise ListingError(
                     f"unsupported t_get_byte index {byte_index} in segment {segment_id}"
@@ -1718,6 +1743,14 @@ def _parse_code_item_records(
                         alias if external else None,
                     )
                 )
+            elif value.kind == "external_bank_single":
+                alias = _asm_name(str(value.value))
+                operand = alias
+                if value.addend:
+                    operand += (
+                        f"+{value.addend}" if value.addend > 0 else str(value.addend)
+                    )
+                items.append(_CodeItem("byte_reloc_bank", operand, alias, alias))
             elif value.kind in ("pcrel", "external_pcrel"):
                 if pending_high is not None or not items:
                     raise ListingError(
@@ -2306,6 +2339,7 @@ def convert_code_listing_to_archive(
                 "byte_reloc_lo",
                 "byte_reloc_hi",
                 "byte_reloc_bit",
+                "byte_reloc_bank",
                 "word_reloc",
                 "pcrel8",
             )
@@ -2333,7 +2367,7 @@ def convert_code_listing_to_archive(
         for items in decoded.values()
         for item in items
         if item.external_symbol
-        and item.external_symbol.startswith(("__iar_sfb_", "__iar_sfe_"))
+        and item.external_symbol.startswith(("__iar_sfb_", "__iar_sfe_", "__iar_size_"))
     )
     unresolved_names = sorted(unresolved)
     for alias in external_aliases:
@@ -2376,7 +2410,12 @@ def convert_code_listing_to_archive(
                     f".set {asm_alias}, "
                     f"{_asm_expression(f'{segment_labels[ident]}+{offset}')}"
                 )
-            if not items and exports:
+            zero_code_alias = (
+                not items
+                and any(tag == "t_push_rel" for tag, _text in code_records.get(ident, []))
+                and any(tag == "t_delete_tos" for tag, _text in code_records.get(ident, []))
+            )
+            if not items and exports and not zero_code_alias:
                 raise ListingError(
                     f"public symbol {exports[0][0]} has no emitted code in segment {ident}"
                 )
@@ -2398,6 +2437,13 @@ def convert_code_listing_to_archive(
                         [
                             ".byte 0",
                             f".reloc .-1, fixup_bit8, {_asm_expression(str(item.value))}",
+                        ]
+                    )
+                elif item.kind == "byte_reloc_bank":
+                    lines.extend(
+                        [
+                            ".byte 0",
+                            f".reloc .-1, fixup_bank8, {_asm_expression(str(item.value))}",
                         ]
                     )
                 elif item.kind == "pcrel8":
@@ -2647,6 +2693,7 @@ def convert_library_listing_to_archive(
     language: str = "00",
     fail_fast: bool = False,
     vb_byte_address: int | None = None,
+    module_names: list[str] | None = None,
 ) -> dict[str, object]:
     """Convert public code modules from an XLIB listing into an ELF archive."""
     listing_text = listing_path.read_text(encoding="latin1")
@@ -2655,6 +2702,13 @@ def convert_library_listing_to_archive(
     llvm_ar = (llvm_ar or _default_tool("llvm-ar")).resolve()
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    wanted_modules = set(module_names or [])
+    available_modules = {name.split("@LAN", 1)[0] for name in modules}
+    unknown_modules = sorted(wanted_modules - available_modules)
+    if unknown_modules:
+        raise ListingError(
+            "XLIB listing has no requested modules: " + ", ".join(unknown_modules)
+        )
 
     converted_modules: list[str] = []
     skipped_modules: list[str] = []
@@ -2669,6 +2723,11 @@ def convert_library_listing_to_archive(
         temp_dir = Path(temp)
         member_objects: list[Path] = []
         for module_name, records in modules.items():
+            if (
+                wanted_modules
+                and module_name.split("@LAN", 1)[0] not in wanted_modules
+            ):
+                continue
             is_virtual_register_module = (
                 module_name.split("@LAN", 1)[0] == "VIRTUAL_REGISTERS"
             )
@@ -2837,6 +2896,10 @@ def convert_library_listing_to_archive(
             )
         archive_path.replace(output)
 
+    missing_requested_modules = sorted(
+        wanted_modules
+        - {module.split("@LAN", 1)[0] for module in converted_modules}
+    )
     unresolved = sorted(
         {
             name
@@ -2867,18 +2930,23 @@ def convert_library_listing_to_archive(
                 "--vb-byte-address to define it"
             )
     if any(
-        name.startswith(("__iar_sfb_", "__iar_sfe_")) for name in unresolved
+        name.startswith(("__iar_sfb_", "__iar_sfe_", "__iar_size_"))
+        for name in unresolved
     ):
         limitations.append(
-            "IAR SFB/SFE references and derived masked-address bytes need linker "
-            "definitions before those runtime helpers can link"
+            "IAR SFB/SFE references, segment-size values, and derived masked-address "
+            "bytes need linker definitions before those runtime helpers can link"
         )
     return {
         "output": str(output),
         "modules": converted_modules,
+        "requested_modules": sorted(wanted_modules),
+        "missing_requested_modules": missing_requested_modules,
         "skipped_modules": skipped_modules,
         "unsupported_modules": unsupported_modules,
-        "partial": bool(unsupported_modules or unsupported_public_data),
+        "partial": bool(
+            unsupported_modules or unsupported_public_data or missing_requested_modules
+        ),
         "unresolved": unresolved,
         "unsupported_public_data": unsupported_public_data,
         "language": language,

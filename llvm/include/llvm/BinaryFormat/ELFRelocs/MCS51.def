@@ -26,3 +26,5 @@ ELF_RELOC(R_8051_HI8_CODE, 15)
 ELF_RELOC(R_8051_24, 16)
 // IAR virtual-bit address: (byte address * 8 + bit offset) modulo 256.
 ELF_RELOC(R_8051_BIT8, 17)
+// Bank number byte of an IAR 24-bit banked-code address.
+ELF_RELOC(R_8051_BANK8, 18)
