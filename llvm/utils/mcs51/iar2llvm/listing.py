@@ -912,6 +912,7 @@ class _CodeItem:
     kind: str
     value: int | str
     operand: str | None = None
+    external_symbol: str | None = None
 
     @property
     def size(self) -> int:
@@ -921,6 +922,7 @@ class _CodeItem:
             "byte_reloc_lo": 1,
             "byte_reloc_hi": 1,
             "byte_reloc_bit": 1,
+            "pcrel8": 1,
             "word": 2,
             "word_reloc": 2,
             "branch": 2,
@@ -942,6 +944,11 @@ def _asm_name(name: str) -> str:
     if re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$]*", name):
         return name
     return "__iar_sym_" + name.encode("utf-8").hex()
+
+
+def _iar_segment_boundary_symbol(boundary: str, segment_name: str) -> str:
+    safe_name = re.sub(r"[^A-Za-z0-9_$]", "_", segment_name)
+    return f"__iar_{boundary.lower()}_{safe_name}"
 
 
 def _virtual_register_support(
@@ -1164,6 +1171,7 @@ def _parse_private_xdata_segment(
 def _parse_code_item_records(
     records: list[tuple[str, str]],
     segment_id: str,
+    segment_names: dict[str, str],
     segment_labels: dict[str, str],
     external_names: dict[str, str],
     external_segments: set[str],
@@ -1194,27 +1202,62 @@ def _parse_code_item_records(
         if not operand:
             return None
         expression = operand.group(1).strip()
+        has_byte_mask = bool(
+            re.search(r"&\s*(?:0x)?ff\b", expression, re.IGNORECASE)
+        )
+        expression = re.sub(
+            r"&\s*(?:0x)?ff\b", "", expression, flags=re.IGNORECASE
+        ).strip()
+
+        def strip_outer_parentheses(value: str) -> str:
+            value = value.strip()
+            while value.startswith("(") and value.endswith(")"):
+                depth = 0
+                for index, character in enumerate(value):
+                    if character == "(":
+                        depth += 1
+                    elif character == ")":
+                        depth -= 1
+                        if depth == 0 and index != len(value) - 1:
+                            break
+                else:
+                    value = value[1:-1].strip()
+                    continue
+                break
+            return value
+
+        expression = strip_outer_parentheses(expression)
         shift = re.search(r">>\s*8", expression)
         relocation_kind = "high" if shift else "low"
         if shift:
             expression = expression[: shift.start()]
-        elif not re.search(r"&\s*(?:0x)?ff\b", expression, re.IGNORECASE):
+        elif not has_byte_mask:
             return None
-        expression = re.sub(r"&\s*(?:0x)?ff\b", "", expression, flags=re.IGNORECASE)
-        expression = expression.lstrip("(").rstrip(") ").strip()
-        symbol_match = re.fullmatch(
-            r"(`[^`]+`|[A-Za-z_?$][A-Za-z0-9_?$.:]*)"
-            r"\s*(?:([+-])\s*(\d+))?",
+        expression = strip_outer_parentheses(expression)
+        boundary_match = re.fullmatch(
+            r"(SFB|SFE)\s*\(\s*([A-Za-z0-9_$]+)\s*\)",
             expression,
+            re.IGNORECASE,
         )
-        if not symbol_match:
-            return None
-        source_name = symbol_match.group(1).strip("`")
-        sign, digits = symbol_match.group(2), symbol_match.group(3)
-        addend = int(digits, 10) if digits else 0
-        if sign == "-":
-            addend = -addend
-        target = source_aliases.get(source_name)
+        if boundary_match:
+            boundary, segment_name = boundary_match.groups()
+            source_name = _iar_segment_boundary_symbol(boundary, segment_name)
+            addend = 0
+            target = (source_name, True)
+        else:
+            symbol_match = re.fullmatch(
+                r"(`[^`]+`|[A-Za-z_?$][A-Za-z0-9_?$.:]*)"
+                r"\s*(?:([+-])\s*(\d+))?",
+                expression,
+            )
+            if not symbol_match:
+                return None
+            source_name = symbol_match.group(1).strip("`")
+            sign, digits = symbol_match.group(2), symbol_match.group(3)
+            addend = int(digits, 10) if digits else 0
+            if sign == "-":
+                addend = -addend
+            target = source_aliases.get(source_name)
         if target is None:
             target = fallback
         if target is None:
@@ -1288,6 +1331,23 @@ def _parse_code_item_records(
             stack.append(
                 _IARValue("external", external_names[external_id.upper()], int(addend, 16))
             )
+        elif tag in ("t_push_sfb", "t_push_sfe"):
+            match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+            if not match:
+                raise ListingError(f"malformed {tag} record in segment {segment_id}")
+            target, addend = match.groups()
+            target = target.upper()
+            name = segment_names.get(target)
+            if name is None:
+                raise ListingError(f"{tag} refers to unknown segment {target}")
+            boundary = "sfb" if tag == "t_push_sfb" else "sfe"
+            stack.append(
+                _IARValue(
+                    "external",
+                    _iar_segment_boundary_symbol(boundary, name),
+                    int(addend, 16),
+                )
+            )
         elif tag == "t_push_pcr":
             if not re.fullmatch(r"[0-9A-Fa-f]+", text):
                 raise ListingError(f"malformed t_push_pcr record in segment {segment_id}")
@@ -1338,13 +1398,19 @@ def _parse_code_item_records(
         elif tag == "t_minus":
             rhs = pop_value(tag)
             lhs = pop_value(tag)
-            if lhs.kind == "rel" and rhs.kind == "pcr":
+            if lhs.kind in ("rel", "external") and rhs.kind == "pcr":
                 if rhs.addend:
                     raise ListingError(
                         f"nonzero PCR addend is unsupported in segment {segment_id}"
                     )
-                stack.append(_IARValue("pcrel", lhs.value, lhs.addend))
-            elif lhs.kind == "pcrel" and rhs.kind == "absolute":
+                stack.append(
+                    _IARValue(
+                        "external_pcrel" if lhs.kind == "external" else "pcrel",
+                        lhs.value,
+                        lhs.addend,
+                    )
+                )
+            elif lhs.kind in ("pcrel", "external_pcrel") and rhs.kind == "absolute":
                 if int(rhs.value) != 1:
                     raise ListingError(
                         f"unsupported PC-relative adjustment in segment {segment_id}"
@@ -1403,6 +1469,30 @@ def _parse_code_item_records(
                 stack.append(_IARValue("absolute", int(value.value) >> shift))
             else:
                 raise ListingError(f"unsupported t_lsr expression in segment {segment_id}")
+        elif tag == "t_get_byte":
+            if not re.fullmatch(r"[0-9A-Fa-f]+", text):
+                raise ListingError(f"malformed t_get_byte record in segment {segment_id}")
+            byte_index = int(text, 16)
+            value = pop_value(tag)
+            if value.kind == "absolute":
+                stack.append(
+                    _IARValue(
+                        "absolute",
+                        (int(value.value) >> (byte_index * 8)) & 0xFF,
+                    )
+                )
+            elif value.kind in ("rel", "external") and byte_index in (0, 1):
+                prefix = "relative" if value.kind == "rel" else "external"
+                part = "low" if byte_index == 0 else "high"
+                stack.append(
+                    _IARValue(
+                        f"{prefix}_{part}_single", value.value, value.addend
+                    )
+                )
+            else:
+                raise ListingError(
+                    f"unsupported t_get_byte index {byte_index} in segment {segment_id}"
+                )
         elif tag == "t_check":
             # Range masks are consumed by XLINK and do not change the value.
             continue
@@ -1416,25 +1506,42 @@ def _parse_code_item_records(
             ):
                 high = value.kind.endswith("high_single")
                 external = value.kind.startswith("external_")
-                operand = str(value.value)
+                if external:
+                    alias = _asm_name(str(value.value))
+                else:
+                    target = str(value.value).upper()
+                    alias = segment_labels.get(target, str(value.value))
+                    external = target in external_segments
+                operand = alias
                 if value.addend:
                     operand += f"+{value.addend}" if value.addend > 0 else str(value.addend)
                 items.append(
                     _CodeItem(
                         "byte_reloc_hi" if high else "byte_reloc_lo",
                         operand,
-                        str(value.value) if external else None,
+                        alias if external else None,
+                        alias if external else None,
                     )
                 )
-            elif value.kind == "pcrel":
-                if pending_high is not None or not items or items[-1] != _CodeItem("byte", 0x80):
+            elif value.kind in ("pcrel", "external_pcrel"):
+                if pending_high is not None or not items:
                     raise ListingError(
-                        f"only SJMP PC-relative bytes are supported in segment {segment_id}"
+                        f"invalid PC-relative byte in segment {segment_id}"
                     )
-                target = str(value.value).upper()
-                if target not in code_segments:
-                    raise ListingError(f"relative target segment {target} is unavailable")
-                items[-1] = _CodeItem("branch", segment_labels[target], str(value.addend))
+                if value.kind == "external_pcrel":
+                    alias = _asm_name(str(value.value))
+                    items.append(
+                        _CodeItem(
+                            "pcrel8", alias, str(value.addend), external_symbol=alias
+                        )
+                    )
+                else:
+                    target = str(value.value).upper()
+                    if target not in code_segments:
+                        raise ListingError(f"relative target segment {target} is unavailable")
+                    items.append(
+                        _CodeItem("pcrel8", segment_labels[target], str(value.addend))
+                    )
             elif value.kind in ("external_high", "relative_high"):
                 if pending_high is not None:
                     raise ListingError(f"nested 16-bit address in segment {segment_id}")
@@ -1593,6 +1700,11 @@ def _parse_code_item_records(
             "t_src_call",
             "t_count",
             "t_sub_def_frame_size",
+            "t_beg_pgm",
+            "t_version",
+            "t_aux",
+            "t_aux_1",
+            "t_type",
             "t_end",
         ):
             continue
@@ -1718,8 +1830,6 @@ def convert_code_listing_to_archive(
             group = _code_group(segment) if segment else None
             if group != "banked" and not (all_public_code and group == "common_code"):
                 continue
-            if symbol.offset != 0:
-                raise ListingError(f"nonzero symbol offset is unsupported for {name}")
             requested[name] = symbol
         if not requested:
             raise ListingError("module has no public executable code symbols")
@@ -1735,8 +1845,6 @@ def convert_code_listing_to_archive(
             segment = segments.get(symbol.segment)
             if segment is None or _code_group(segment) not in ("banked", "common_code"):
                 raise ListingError(f"{name} is not in a supported IAR executable segment")
-            if symbol.offset != 0:
-                raise ListingError(f"nonzero symbol offset is unsupported for {name}")
             requested[name] = symbol
 
     public_bss: list[tuple[Symbol, Segment, int, list[str]]] = []
@@ -1885,6 +1993,7 @@ def convert_code_listing_to_archive(
         segment_labels[ident] = f"__iar_data_{module_token}_{ident.lower()}"
 
     decoded: dict[str, list[_CodeItem]] = {}
+    segment_names = {ident: segment.name for ident, segment in segments.items()}
     banked_segments = {
         ident for ident in selected_segments if _code_group(segments[ident]) == "banked"
     }
@@ -1930,6 +2039,7 @@ def convert_code_listing_to_archive(
         decoded[ident] = _parse_code_item_records(
             code_records.get(ident, []),
             ident,
+            segment_names,
             segment_labels,
             external_names,
             external_data_segments,
@@ -1942,16 +2052,16 @@ def convert_code_listing_to_archive(
         for ident in selected_constant_segments
     }
 
-    exports_by_segment: dict[str, list[str]] = {}
+    exports_by_segment: dict[str, list[tuple[str, int]]] = {}
     constant_exports_by_segment: dict[str, list[Symbol]] = {}
     exported_originals: dict[str, str] = {}
     for original, symbol in requested.items():
         alias = _asm_name(original)
-        exports_by_segment.setdefault(symbol.segment, []).append(alias)
+        exports_by_segment.setdefault(symbol.segment, []).append((alias, symbol.offset))
         exported_originals[original] = alias
     for original, symbol in relay_exports.items():
         alias = _asm_name(symbol.name)
-        exports_by_segment.setdefault(symbol.segment, []).append(alias)
+        exports_by_segment.setdefault(symbol.segment, []).append((alias, symbol.offset))
         exported_originals[symbol.name] = alias
     for name, symbol in symbols.items():
         if symbol.segment in selected_constant_segments:
@@ -1968,7 +2078,7 @@ def convert_code_listing_to_archive(
                 f"nonzero CODE_C data-symbol offset is unsupported for {name}"
             )
         alias = _asm_name(name)
-        exports_by_segment.setdefault(symbol.segment, []).append(alias)
+        exports_by_segment.setdefault(symbol.segment, []).append((alias, symbol.offset))
         exported_originals[name] = alias
 
     section_names = {
@@ -1980,7 +2090,11 @@ def convert_code_listing_to_archive(
     lines = ["; Generated from an IAR XLIB listing by iar2llvm."]
     external_aliases = sorted(
         {
-            _asm_name(str(item.operand))
+            _asm_name(
+                item.external_symbol
+                if item.kind == "pcrel8"
+                else str(item.operand)
+            )
             for items in decoded.values()
             for item in items
             if item.kind in (
@@ -1991,8 +2105,13 @@ def convert_code_listing_to_archive(
                 "byte_reloc_hi",
                 "byte_reloc_bit",
                 "word_reloc",
+                "pcrel8",
             )
-            and item.operand is not None
+            and (
+                item.operand is not None
+                if item.kind != "pcrel8"
+                else item.external_symbol is not None
+            )
         }
     )
     external_alias_set = set(external_aliases)
@@ -2006,6 +2125,13 @@ def convert_code_listing_to_archive(
         and symbol.segment not in selected_constant_segments
         and symbol.name not in bundled_public_data_names
         and _asm_name(symbol.name) in external_alias_set
+    )
+    unresolved.update(
+        item.external_symbol
+        for items in decoded.values()
+        for item in items
+        if item.external_symbol
+        and item.external_symbol.startswith(("__iar_sfb_", "__iar_sfe_"))
     )
     unresolved_names = sorted(unresolved)
     for alias in external_aliases:
@@ -2029,14 +2155,24 @@ def convert_code_listing_to_archive(
         )
         for ident in group_segments:
             exports = exports_by_segment.get(ident, [])
-            for alias in exports:
-                symbol_type = "object" if group == "common_const" else "function"
-                lines.extend([f".globl {alias}", f".type {alias},@{symbol_type}", f"{alias}:"])
-            lines.append(f"{segment_labels[ident]}:")
             items = decoded[ident]
+            size = sum(item.size for item in items)
+            lines.append(f"{segment_labels[ident]}:")
+            for alias, offset in exports:
+                if offset > size:
+                    raise ListingError(
+                        f"public symbol {alias} starts beyond emitted code in segment {ident}"
+                    )
+                symbol_type = "object" if group == "common_const" else "function"
+                if offset == size:
+                    symbol_type = "notype"
+                lines.append(f".globl {alias}")
+                if symbol_type != "notype":
+                    lines.append(f".type {alias},@{symbol_type}")
+                lines.append(f".set {alias}, {segment_labels[ident]}+{offset}")
             if not items and exports:
                 raise ListingError(
-                    f"public symbol {exports[0]} has no emitted code in segment {ident}"
+                    f"public symbol {exports[0][0]} has no emitted code in segment {ident}"
                 )
             for item in items:
                 if item.kind == "byte":
@@ -2058,6 +2194,17 @@ def convert_code_listing_to_archive(
                             f".reloc .-1, fixup_bit8, {item.value}",
                         ]
                     )
+                elif item.kind == "pcrel8":
+                    addend = int(item.operand or "0") - 1
+                    expression = str(item.value)
+                    if addend:
+                        expression += f"+{addend}" if addend > 0 else str(addend)
+                    lines.extend(
+                        [
+                            ".byte 0",
+                            f".reloc .-1, fixup_pcrel8, {expression}",
+                        ]
+                    )
                 elif item.kind == "word":
                     lines.append(f".short 0x{int(item.value):04x}")
                 elif item.kind == "word_reloc":
@@ -2074,9 +2221,17 @@ def convert_code_listing_to_archive(
                     lines.append(f"mov dptr, #{item.value}")
                 elif item.kind == "bankptr":
                     lines.append(f"bankaddr24 {item.value}")
-            size = sum(item.size for item in items)
-            for alias in exports:
-                lines.append(f".size {alias}, {size}")
+            public_offsets = sorted(
+                {
+                    symbol.offset
+                    for symbol in symbols.values()
+                    if symbol.segment == ident and symbol.offset > 0
+                }
+            )
+            for alias, offset in exports:
+                next_offsets = [position for position in public_offsets if position > offset]
+                end = min(next_offsets, default=size)
+                lines.append(f".size {alias}, {end - offset}")
 
     if decoded_constants:
         lines.extend(
@@ -2474,6 +2629,34 @@ def convert_library_listing_to_archive(
             if _asm_name(name) not in defined_symbols
         }
     )
+    limitations: list[str] = []
+    if any(
+        module.split("@LAN", 1)[0] == "VIRTUAL_REGISTERS"
+        for module in converted_modules
+    ):
+        limitations.extend(
+            [
+                "IAR PSP/XSP storage is emitted as DATA bss, but stack regions "
+                "are not reserved and PSP/XSP are not initialized; startup must do so"
+            ]
+        )
+        if vb_byte_address is not None:
+            limitations.append(
+                f"IAR ?VB is fixed at 0x{vb_byte_address:02x}; reserve that "
+                "byte from other bit-addressed storage"
+            )
+        else:
+            limitations.append(
+                "IAR ?VB has no address in XLIB; provide "
+                "--vb-byte-address to define it"
+            )
+    if any(
+        name.startswith(("__iar_sfb_", "__iar_sfe_")) for name in unresolved
+    ):
+        limitations.append(
+            "IAR SFB/SFE references need linker definitions for the named segment "
+            "boundaries before those runtime helpers can link"
+        )
     return {
         "output": str(output),
         "modules": converted_modules,
@@ -2488,27 +2671,6 @@ def convert_library_listing_to_archive(
             "module-wide public executable code, supported public data, and "
             "IAR virtual-register symbols"
         ),
-        "limitations": (
-            [
-                "IAR PSP/XSP storage is emitted as DATA bss, but stack regions "
-                "are not reserved and PSP/XSP are not initialized; startup must do so"
-            ]
-            + (
-                [
-                    f"IAR ?VB is fixed at 0x{vb_byte_address:02x}; reserve that "
-                    "byte from other bit-addressed storage"
-                ]
-                if vb_byte_address is not None
-                else [
-                    "IAR ?VB has no address in XLIB; provide "
-                    "--vb-byte-address to define it"
-                ]
-            )
-            if any(
-                module.split("@LAN", 1)[0] == "VIRTUAL_REGISTERS"
-                for module in converted_modules
-            )
-            else []
-        ),
+        "limitations": limitations,
         "abi": "IAR calling convention preserved; no Clang ABI adaptation",
     }

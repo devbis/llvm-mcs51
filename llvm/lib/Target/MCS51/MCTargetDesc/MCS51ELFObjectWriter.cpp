@@ -74,6 +74,8 @@ protected:
       return ELF::R_8051_BIT8;
     case MCS51::fixup_24:
       return ELF::R_8051_24;
+    case MCS51::fixup_pcrel8:
+      return ELF::R_8051_PCREL8;
     default:
       reportError(Fixup.getLoc(), "unsupported MCS-51 relocation");
       return ELF::R_8051_NONE;
