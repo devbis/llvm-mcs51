@@ -145,11 +145,13 @@ address and bit offset into the 8051 bit address. Symbols with IAR-only
 punctuation are exported under stable `__iar_sym_<hex-name>` ELF names; JSON
 output lists those mappings and unresolved IAR runtime names.
 
-This does not adapt an IAR function body to the Clang calling convention. The
-converted relay still depends on IAR bank-switching runtime routines, and
-banked functions use IAR's 24-bit return-address convention. Clang keeps its
-standard ABI unless a future, explicit `-mabi=iar` option is selected. This
-archive is therefore a linker-input milestone, not yet callable Z-Stack code
-or a deployable firmware library. Other UBROF expression records, relocatable
-constants, and initialized XDATA data outside the literal `XDATA_ID` subset
-are still unsupported by the converter.
+This does not adapt an IAR function body to the standard Clang calling
+convention. `-mabi=iar` opts into the current scalar register ABI bring-up;
+stack-passed arguments, aggregate arguments and returns, and IAR's XDATA
+reentrant frames are not implemented yet. The converted relay still depends
+on IAR bank-switching runtime routines, and banked functions use IAR's 24-bit
+return-address convention. This archive is therefore a linker-input
+milestone, not yet callable arbitrary Z-Stack code or a deployable firmware
+library. Other UBROF expression records, relocatable constants, and initialized
+XDATA data outside the supported `XDATA_ID` subset are still unsupported by
+the converter.
