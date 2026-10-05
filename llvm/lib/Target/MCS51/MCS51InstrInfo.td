@@ -1518,6 +1518,12 @@ def LCALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE> {
   let Pattern = [(MCS51call (i16 tglobaladdr:$addr))];
 }
 
+// MachineOutliner calls have the physical-register effects of the outlined
+// sequence attached by the outliner. Keep only the hardware stack effect here
+// so a helper call does not appear to clobber the ordinary C call registers.
+let Defs = [SP], Uses = [SP], isCall = 1, isCodeGenOnly = 1 in
+def OUTLINE_CALL : MCS51Abs16Inst<0x12, "lcall", MCS51Imm16BE>;
+
 def : Pat<(MCS51call (i16 texternalsym:$addr)),
           (LCALL texternalsym:$addr)>;
 

@@ -1,9 +1,11 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib \
+// RUN:   -mllvm -enable-machine-outliner=never \
 // RUN:   -S %s -o %t.s
 // RUN: FileCheck %s < %t.s
 // RUN: llvm-mc -triple=mcs51 -filetype=obj %t.s -o %t.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib \
-// RUN:   -mllvm -verify-machineinstrs -S %s -o /dev/null
+// RUN:   -mllvm -enable-machine-outliner=never -mllvm -verify-machineinstrs \
+// RUN:   -S %s -o /dev/null
 
 volatile __xdata unsigned long lhs;
 volatile __xdata unsigned long rhs;

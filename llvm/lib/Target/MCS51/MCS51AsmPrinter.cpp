@@ -29,7 +29,7 @@ using namespace llvm;
 
 namespace {
 static bool isMCS51LongCallOpcode(unsigned Opcode) {
-  return Opcode == MCS51::LCALL;
+  return Opcode == MCS51::LCALL || Opcode == MCS51::OUTLINE_CALL;
 }
 
 static bool isMCS51IndirectCallOpcode(unsigned Opcode) {
@@ -38,6 +38,8 @@ static bool isMCS51IndirectCallOpcode(unsigned Opcode) {
 
 static bool isAutoBankFunction(const Function &F, StringRef CPU,
                                bool FunctionSections) {
+  if (F.hasSection() && F.getSection().starts_with(".text.__mcs51_"))
+    return false;
   return isMCS51AutoBankFunction(F, CPU, FunctionSections);
 }
 

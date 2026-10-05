@@ -1,4 +1,5 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -Oz -ffreestanding -nostdlib \
+// RUN:   -mllvm -enable-machine-outliner=never \
 // RUN:   -S %s -o - | FileCheck %s
 
 __xdata volatile unsigned char flags;

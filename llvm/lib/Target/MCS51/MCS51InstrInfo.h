@@ -2,6 +2,7 @@
 #define LLVM_LIB_TARGET_MCS51_MCS51INSTRINFO_H
 
 #include "MCS51RegisterInfo.h"
+#include "llvm/CodeGen/MachineOutliner.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
@@ -52,6 +53,27 @@ public:
                             MachineBasicBlock &RestoreBB,
                             const DebugLoc &DL, int64_t BrOffset,
                             RegScavenger *RS = nullptr) const override;
+  bool isFunctionSafeToOutlineFrom(
+      MachineFunction &MF, bool OutlineFromLinkOnceODRs) const override;
+  bool shouldOutlineFromFunctionByDefault(
+      MachineFunction &MF) const override;
+  std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+  getOutliningCandidateInfo(
+      const MachineModuleInfo &MMI,
+      std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+      unsigned MinRepeats) const override;
+  void mergeOutliningCandidateAttributes(
+      Function &F, std::vector<outliner::Candidate> &Candidates) const override;
+  outliner::InstrType
+  getOutliningTypeImpl(const MachineModuleInfo &MMI,
+                       MachineBasicBlock::iterator &MBBI,
+                       unsigned Flags) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                          const outliner::OutlinedFunction &OF) const override;
+  MachineBasicBlock::iterator
+  insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator &It, MachineFunction &MF,
+                     outliner::Candidate &C) const override;
 
 private:
   const MCS51RegisterInfo RI;
