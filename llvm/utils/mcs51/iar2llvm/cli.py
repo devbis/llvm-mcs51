@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="stop at the first unsupported module instead of collecting errors",
     )
+    convert_library.add_argument(
+        "--vb-byte-address",
+        type=lambda value: int(value, 0),
+        help="set the IAR virtual-bit byte address ?VB (0x20..0x2f)",
+    )
     convert_library.add_argument("--json", action="store_true")
 
     convert_const = subparsers.add_parser(
@@ -139,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.symbols,
                 args.language,
                 args.fail_fast,
+                args.vb_byte_address,
             )
         elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
