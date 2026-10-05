@@ -136,12 +136,21 @@ def _modules(listing: str) -> dict[str, list[tuple[str, str]]]:
     return modules
 
 
-def _selected_bss(listing: str, module_name: str, symbol_names: list[str]):
-    modules = _modules(listing)
-    if module_name not in modules:
-        raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
+def _selected_bss(
+    listing: str,
+    module_name: str,
+    symbol_names: list[str],
+    module_records: list[tuple[str, str]] | None = None,
+):
+    if module_records is None:
+        modules = _modules(listing)
+        if module_name not in modules:
+            raise ListingError(
+                f"module {module_name!r} is not present in the XLIB listing"
+            )
+        module_records = modules[module_name]
 
-    records = modules[module_name]
+    records = module_records
     segments: dict[str, Segment] = {}
     symbols: dict[str, Symbol] = {}
     definitions_by_segment: dict[str, list[str]] = {}
@@ -568,13 +577,20 @@ def convert_const_listing_to_archive(
 
 
 def _selected_initialized_xdata(
-    listing: str, module_name: str, symbol_names: list[str]
+    listing: str,
+    module_name: str,
+    symbol_names: list[str],
+    module_records: list[tuple[str, str]] | None = None,
 ) -> list[tuple[Symbol, list[_InitializerAtom]]]:
-    modules = _modules(listing)
-    if module_name not in modules:
-        raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
+    if module_records is None:
+        modules = _modules(listing)
+        if module_name not in modules:
+            raise ListingError(
+                f"module {module_name!r} is not present in the XLIB listing"
+            )
+        module_records = modules[module_name]
 
-    records = modules[module_name]
+    records = module_records
     segments: dict[str, Segment] = {}
     symbols: dict[str, Symbol] = {}
     definitions_by_segment: dict[str, list[str]] = {}
@@ -1595,6 +1611,7 @@ def convert_code_listing_to_archive(
     llvm_ar: Path | None = None,
     all_public_banked: bool = False,
     all_public_code: bool = False,
+    module_records: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     """Convert selected IAR banked code, relays, and supported references.
 
@@ -1602,10 +1619,16 @@ def convert_code_listing_to_archive(
     expressions to ELF relocations, and does not adapt the IAR calling
     convention to Clang's ABI.
     """
-    listing_text = listing_path.read_text(encoding="latin1")
-    modules = _modules(listing_text)
-    if module_name not in modules:
-        raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
+    if module_records is None:
+        listing_text = listing_path.read_text(encoding="latin1")
+        modules = _modules(listing_text)
+        if module_name not in modules:
+            raise ListingError(
+                f"module {module_name!r} is not present in the XLIB listing"
+            )
+        module_records = modules[module_name]
+    else:
+        listing_text = ""
     if all_public_banked and all_public_code:
         raise ListingError("--all-public-banked cannot be combined with --all-public-code")
     include_all_public = all_public_banked or all_public_code
@@ -1614,7 +1637,7 @@ def convert_code_listing_to_archive(
     symbols: dict[str, Symbol] = {}
     local_symbols: dict[str, Symbol] = {}
     external_names: dict[str, str] = {}
-    for tag, text in modules[module_name]:
+    for tag, text in module_records:
         if tag == "t_seg":
             match = re.search(
                 r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+<rel,([A-Z0-9_]+)>\s+'([^']+)'",
@@ -1657,7 +1680,7 @@ def convert_code_listing_to_archive(
     code_records: dict[str, list[tuple[str, str]]] = {}
     segment_order: list[str] = []
     current_segment: str | None = None
-    for tag, text in modules[module_name]:
+    for tag, text in module_records:
         if tag == "t_org_rel1":
             match = re.search(r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+", text)
             current_segment = match.group(1).upper() if match else None
@@ -1722,26 +1745,30 @@ def convert_code_listing_to_archive(
         ]
         if public_xdata_z:
             try:
-                public_bss = _selected_bss(listing_text, module_name, public_xdata_z)
+                public_bss = _selected_bss(
+                    listing_text, module_name, public_xdata_z, module_records
+                )
             except ListingError:
                 for name in public_xdata_z:
                     try:
                         public_bss.extend(
-                            _selected_bss(listing_text, module_name, [name])
+                            _selected_bss(
+                                listing_text, module_name, [name], module_records
+                            )
                         )
                     except ListingError as symbol_error:
                         unsupported_public_data[name] = str(symbol_error)
         if public_xdata_i:
             try:
                 public_initialized = _selected_initialized_xdata(
-                    listing_text, module_name, public_xdata_i
+                    listing_text, module_name, public_xdata_i, module_records
                 )
             except ListingError:
                 for name in public_xdata_i:
                     try:
                         public_initialized.extend(
                             _selected_initialized_xdata(
-                                listing_text, module_name, [name]
+                                listing_text, module_name, [name], module_records
                             )
                         )
                     except ListingError as symbol_error:
@@ -2237,6 +2264,7 @@ def convert_library_listing_to_archive(
     llvm_ar: Path | None = None,
     symbol_names: list[str] | None = None,
     language: str = "00",
+    fail_fast: bool = False,
 ) -> dict[str, object]:
     """Convert public code modules from an XLIB listing into an ELF archive."""
     listing_text = listing_path.read_text(encoding="latin1")
@@ -2248,6 +2276,7 @@ def convert_library_listing_to_archive(
 
     converted_modules: list[str] = []
     skipped_modules: list[str] = []
+    unsupported_modules: dict[str, str] = {}
     module_unresolved: list[set[str]] = []
     defined_symbols: set[str] = set()
     unsupported_public_data: dict[str, dict[str, str]] = {}
@@ -2266,38 +2295,49 @@ def convert_library_listing_to_archive(
                 skipped_modules.append(module_name)
                 continue
             if is_virtual_register_module:
-                assembly, exports, original_names = _virtual_register_support(records)
-                if wanted_symbols and original_names.intersection(wanted_symbols):
-                    requested_symbols_found = True
-                if not exports:
-                    skipped_modules.append(module_name)
-                    continue
-                module_token = module_name.encode("utf-8").hex()
-                asm_path = temp_dir / f"{module_token}.s"
-                object_path = temp_dir / f"{module_token}.o"
-                asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
-                assemble = subprocess.run(
-                    [
-                        str(llvm_mc),
-                        "-triple",
-                        "mcs51",
-                        "-filetype=obj",
-                        str(asm_path),
-                        "-o",
-                        str(object_path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if assemble.returncode:
-                    raise ListingError(
-                        f"llvm-mc failed for {module_name} ({assemble.returncode}):\n"
-                        f"{assemble.stderr.strip()}"
+                try:
+                    assembly, exports, original_names = _virtual_register_support(
+                        records
                     )
+                    if not exports:
+                        skipped_modules.append(module_name)
+                        continue
+                    module_token = module_name.encode("utf-8").hex()
+                    asm_path = temp_dir / f"{module_token}.s"
+                    object_path = temp_dir / f"{module_token}.o"
+                    asm_path.write_text(
+                        "\n".join(assembly) + "\n", encoding="utf-8"
+                    )
+                    assemble = subprocess.run(
+                        [
+                            str(llvm_mc),
+                            "-triple",
+                            "mcs51",
+                            "-filetype=obj",
+                            str(asm_path),
+                            "-o",
+                            str(object_path),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if assemble.returncode:
+                        raise ListingError(
+                            f"llvm-mc failed for {module_name} "
+                            f"({assemble.returncode}):\n{assemble.stderr.strip()}"
+                        )
+                except ListingError as error:
+                    if fail_fast:
+                        raise
+                    skipped_modules.append(module_name)
+                    unsupported_modules[module_name] = str(error)
+                    continue
                 member_objects.append(object_path)
                 converted_modules.append(module_name)
                 defined_symbols.update(exports)
+                if wanted_symbols and original_names.intersection(wanted_symbols):
+                    requested_symbols_found = True
                 continue
 
             segments: dict[str, Segment] = {}
@@ -2333,56 +2373,73 @@ def convert_library_listing_to_archive(
                 and _code_group(segments[ident]) in ("banked", "common_code")
                 for ident, _name in public_symbols
             ):
+                module_archive = temp_dir / f"{module_name.encode('utf-8').hex()}.a"
+                try:
+                    result = convert_code_listing_to_archive(
+                        listing_path,
+                        module_name,
+                        [],
+                        module_archive,
+                        llvm_mc,
+                        llvm_ar,
+                        all_public_code=True,
+                        module_records=records,
+                    )
+                    extract_dir = temp_dir / f"extract-{module_name.encode('utf-8').hex()}"
+                    extract_dir.mkdir()
+                    extract = subprocess.run(
+                        [str(llvm_ar), "x", str(module_archive)],
+                        cwd=extract_dir,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if extract.returncode:
+                        raise ListingError(
+                            f"llvm-ar extraction failed for {module_name} "
+                            f"({extract.returncode}):\n{extract.stderr.strip()}"
+                        )
+                    objects = sorted(extract_dir.glob("*.o"))
+                    if len(objects) != 1:
+                        raise ListingError(
+                            f"expected one ELF object in converted module "
+                            f"{module_name}, found {len(objects)}"
+                        )
+                except ListingError as error:
+                    if fail_fast:
+                        raise
+                    skipped_modules.append(module_name)
+                    unsupported_modules[module_name] = str(error)
+                    continue
+
                 if wanted_symbols and public_names.intersection(wanted_symbols):
                     requested_symbols_found = True
-                module_archive = temp_dir / f"{module_name.encode('utf-8').hex()}.a"
-                result = convert_code_listing_to_archive(
-                    listing_path,
-                    module_name,
-                    [],
-                    module_archive,
-                    llvm_mc,
-                    llvm_ar,
-                    all_public_code=True,
-                )
                 converted_modules.append(module_name)
                 module_unresolved.append(set(result["unresolved"]))
                 defined_symbols.update(result["symbols"].values())
                 module_unsupported = result["unsupported_public_data"]
                 if module_unsupported:
                     unsupported_public_data[module_name] = module_unsupported
-
-                extract_dir = temp_dir / f"extract-{module_name.encode('utf-8').hex()}"
-                extract_dir.mkdir()
-                extract = subprocess.run(
-                    [str(llvm_ar), "x", str(module_archive)],
-                    cwd=extract_dir,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if extract.returncode:
-                    raise ListingError(
-                        f"llvm-ar extraction failed for {module_name} "
-                        f"({extract.returncode}):\n{extract.stderr.strip()}"
-                    )
-                objects = sorted(extract_dir.glob("*.o"))
-                if len(objects) != 1:
-                    raise ListingError(
-                        f"expected one ELF object in converted module {module_name}, "
-                        f"found {len(objects)}"
-                    )
                 member_objects.extend(objects)
             elif public_symbols and (not wanted_symbols or public_names.intersection(wanted_symbols)):
                 skipped_modules.append(module_name)
 
         if not member_objects or (wanted_symbols and not requested_symbols_found):
+            details = ""
+            if unsupported_modules:
+                details = "\n" + "\n".join(
+                    f"  {module}: {reason}"
+                    for module, reason in unsupported_modules.items()
+                )
             if wanted_symbols:
                 raise ListingError(
                     "XLIB listing has no convertible modules defining: "
                     + ", ".join(sorted(wanted_symbols))
+                    + details
                 )
-            raise ListingError("XLIB listing has no convertible public code modules")
+            raise ListingError(
+                "XLIB listing has no convertible public code modules" + details
+            )
 
         archive_path = temp_dir / output.name
         archive = subprocess.run(
@@ -2410,6 +2467,8 @@ def convert_library_listing_to_archive(
         "output": str(output),
         "modules": converted_modules,
         "skipped_modules": skipped_modules,
+        "unsupported_modules": unsupported_modules,
+        "partial": bool(unsupported_modules or unsupported_public_data),
         "unresolved": unresolved,
         "unsupported_public_data": unsupported_public_data,
         "language": language,

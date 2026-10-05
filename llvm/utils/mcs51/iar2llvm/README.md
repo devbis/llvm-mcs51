@@ -42,6 +42,13 @@ specific public symbols, such as runtime helpers. It reports unresolved IAR
 symbols that need another converted library or IAR runtime support. The
 module-specific commands below are useful for inspecting a smaller slice:
 
+By default, the library conversion continues after a module contains an
+unsupported record, writes an archive from modules that do convert, and reports
+all omitted modules and reasons together in `unsupported_modules` at the end.
+Use `--fail-fast` to stop at the first unsupported module. A partial archive may
+omit a function required by the application; the linker will report unresolved
+symbols for those functions.
+
 The `VIRTUAL_REGISTERS` data-only module is included when present. Its `?V0` to
 `?V7` symbols map to this checkout's reserved DATA addresses `0x30` to `0x37`;
 `?PSP` and `?XSP` are emitted as DATA bss objects. This only provides storage:
