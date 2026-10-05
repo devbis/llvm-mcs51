@@ -163,6 +163,9 @@ def MCS51br_ult : SDNode<"MCS51ISD::BR_ULT", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_uge : SDNode<"MCS51ISD::BR_UGE", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_slt : SDNode<"MCS51ISD::BR_SLT", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_sge : SDNode<"MCS51ISD::BR_SGE", SDT_MCS51Br, [SDNPHasChain]>;
+def SDT_MCS51BrJT : SDTypeProfile<0, 2, [SDTCisVT<0, i32>,
+                                         SDTCisVT<1, i16>] >;
+def MCS51brjt : SDNode<"MCS51ISD::BR_JT", SDT_MCS51BrJT, [SDNPHasChain]>;
 def SDT_MCS51LoadStack8 : SDTypeProfile<1, 1, [SDTCisVT<0, i8>,
                                                SDTCisVT<1, i8>]>;
 def MCS51loadstack8 : SDNode<"MCS51ISD::LOAD_STACK8", SDT_MCS51LoadStack8,
@@ -241,6 +244,18 @@ def JMP_ADPTR : MCS51Inst<0x73, "jmp @a+dptr"> {
   let isBranch = 1; let isIndirectBranch = 1;
   let isTerminator = 1; let isBarrier = 1;
   let Uses = [A, DPTR];
+}
+
+def MCS51JumpTable : Operand<i32>;
+let Defs = [A, B, DPTR, R6, R7], isBranch = 1, isIndirectBranch = 1,
+    isTerminator = 1, isBarrier = 1, isPseudo = 1, isCodeGenOnly = 1,
+    Size = 24 in
+def BR_JT : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR16:$index, MCS51JumpTable:$table);
+  let AsmString = "";
+  let Pattern = [(MCS51brjt tjumptable:$table, MCS51GPR16:$index)];
 }
 def MOVC_ADPTR : MCS51Inst<0x93, "movc a, @a+dptr"> {
   let Defs = [A]; let Uses = [A, DPTR]; let mayLoad = 1;

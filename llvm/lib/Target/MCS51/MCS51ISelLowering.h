@@ -25,6 +25,10 @@ public:
   ShiftLegalizationStrategy
   preferredShiftLegalizationStrategy(SelectionDAG &DAG, SDNode *N,
                                      unsigned ExpansionFactor) const override;
+  bool isSuitableForJumpTable(const SwitchInst *SI, uint64_t NumCases,
+                              uint64_t Range, ProfileSummaryInfo *PSI,
+                              BlockFrequencyInfo *BFI) const override;
+  unsigned getJumpTableEncoding() const override;
 
   // A symbol plus a constant is a single relocated address.
   bool isOffsetFoldingLegal(const GlobalAddressSDNode *) const override {

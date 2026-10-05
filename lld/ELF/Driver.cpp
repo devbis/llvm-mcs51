@@ -3596,6 +3596,9 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
       readCallGraphsFromObjectFiles<ELFT>(ctx);
   }
 
+  if (ctx.arg.emachine == EM_8051)
+    ctx.script->fillMCS51CommonSpace();
+
   // Write the result to the file.
   writeResult<ELFT>(ctx);
 }
