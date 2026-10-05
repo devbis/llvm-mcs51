@@ -126,6 +126,15 @@ SECTIONS
     *(COMMON)
   } > XRAM
 
+  /* The optional IAR ABI runtime contributes this reserved downward-growing
+     XDATA stack. With the section absent, the standard Clang ABI uses no RAM. */
+  .mcs51_iar_xstack 0x1d00 (NOLOAD) :
+  {
+    __mcs51_iar_xstack_start = .;
+    KEEP(*(.mcs51.iar.xstack))
+    __mcs51_iar_xstack_end = .;
+  } > XRAM
+
   /* Address-space 1 and 2 globals occupy the CPU DATA alias of XRAM. */
   .mcs51_data1 __cc2530_static_data_start :
   {
@@ -179,6 +188,12 @@ ASSERT(ADDR(.data) + SIZEOF(.data) <= __cc2530_data_alias_start,
        "CC2530 .data overlaps the DATA-space SRAM alias")
 ASSERT(ADDR(.bss) + SIZEOF(.bss) <= __cc2530_data_alias_start,
        "CC2530 .bss overlaps the DATA-space SRAM alias")
+ASSERT(SIZEOF(.mcs51_iar_xstack) == 0 ||
+       ADDR(.data) + SIZEOF(.data) <= ADDR(.mcs51_iar_xstack),
+       "CC2530 .data overlaps the IAR XDATA stack")
+ASSERT(SIZEOF(.mcs51_iar_xstack) == 0 ||
+       ADDR(.bss) + SIZEOF(.bss) <= ADDR(.mcs51_iar_xstack),
+       "CC2530 .bss overlaps the IAR XDATA stack")
 ASSERT(__mcs51_pdata_bss_end <= 0x100,
        "CC2530 PDATA globals exceed the MPAGE zero page")
 ASSERT(__mcs51_data1_bss_end <= __cc2530_static_data_end,

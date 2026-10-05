@@ -1318,6 +1318,7 @@ def _parse_code_item_records(
     external_segments: set[str],
     code_segments: set[str],
     banked_segments: set[str],
+    relay_target_symbols_by_segment: dict[str, Symbol],
     source_aliases: dict[str, tuple[str, bool]],
 ) -> list[_CodeItem]:
     items: list[_CodeItem] = []
@@ -1461,7 +1462,18 @@ def _parse_code_item_records(
             if not match:
                 raise ListingError(f"malformed t_push_rel record in segment {segment_id}")
             target, addend = match.groups()
-            stack.append(_IARValue("rel", target.upper(), int(addend, 16)))
+            target = target.upper()
+            relay_target = relay_target_symbols_by_segment.get(target)
+            if relay_target is not None:
+                stack.append(
+                    _IARValue(
+                        "rel",
+                        relay_target.segment,
+                        relay_target.offset + int(addend, 16),
+                    )
+                )
+            else:
+                stack.append(_IARValue("rel", target, int(addend, 16)))
         elif tag == "t_push_ext":
             match = re.fullmatch(r"<([0-9A-Fa-f]+)>\s+([0-9A-Fa-f]+)", text)
             if not match:
@@ -1469,9 +1481,11 @@ def _parse_code_item_records(
             external_id, addend = match.groups()
             if external_id.upper() not in external_names:
                 raise ListingError(f"unknown external symbol {external_id} in segment {segment_id}")
-            stack.append(
-                _IARValue("external", external_names[external_id.upper()], int(addend, 16))
+            name = external_names[external_id.upper()]
+            alias, _is_external = source_aliases.get(
+                name, (_asm_name(name), True)
             )
+            stack.append(_IARValue("external", alias, int(addend, 16)))
         elif tag in ("t_push_sfb", "t_push_sfe"):
             match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
             if not match:
@@ -1931,6 +1945,8 @@ def _parse_code_item_records(
             "t_stack_error",
             "t_call_frame_info",
             "t_src_call",
+            "t_src_stat",
+            "t_new_file",
             "t_count",
             "t_sub_def_frame_size",
             "t_beg_pgm",
@@ -2136,17 +2152,35 @@ def convert_code_listing_to_archive(
             for symbol in symbols.values()
             if _code_group(segments[symbol.segment]) == "common_const"
         )
-    relay_exports: dict[str, Symbol] = {}
-    for name in requested:
-        relay = symbols.get(name + "::?relay")
-        if relay:
-            relay_segment = segments.get(relay.segment)
-            if relay_segment is None or _code_group(relay_segment) != "relays":
-                raise ListingError(f"relay for {name} is not in an IAR BANK_RELAYS segment")
-            if relay.offset != 0:
-                raise ListingError(f"nonzero relay symbol offset is unsupported for {name}")
-            selected_segments.add(relay.segment)
-            relay_exports[name] = relay
+    relay_targets_by_segment: dict[str, str] = {}
+    relay_target_symbols_by_segment: dict[str, Symbol] = {}
+    relay_symbols = [*symbols.items(), *local_symbols.items()]
+    for name, relay_symbol in relay_symbols:
+        if not name.endswith("::?relay"):
+            continue
+        relay_segment = segments.get(relay_symbol.segment)
+        if relay_segment is None or _code_group(relay_segment) != "relays":
+            continue
+        if relay_symbol.offset != 0:
+            raise ListingError(
+                f"nonzero relay symbol offset is unsupported for {name}"
+            )
+        target_name = name.removesuffix("::?relay")
+        target_symbol = (
+            symbols.get(target_name)
+            or local_symbols.get(target_name)
+            or local_symbols.get(target_name.removeprefix("<internal>::"))
+        )
+        if target_symbol is None:
+            continue
+        previous = relay_targets_by_segment.setdefault(
+            relay_symbol.segment, target_symbol.name
+        )
+        if previous != target_symbol.name:
+            raise ListingError(
+                f"multiple public relays share IAR segment {relay_symbol.segment}"
+            )
+        relay_target_symbols_by_segment[relay_symbol.segment] = target_symbol
 
     # Relocatable code references keep code segments in this object. Data
     # references remain ELF symbol relocations and are resolved by other
@@ -2176,7 +2210,26 @@ def convert_code_listing_to_archive(
                 # The code decoder rejects a missing segment if it reaches an
                 # emitted relocation.
                 continue
-            if _code_group(target_segment) and target not in selected_segments:
+            code_group = _code_group(target_segment)
+            if code_group == "relays":
+                # Route IAR relay references through the public function and
+                # let LLD use the native CC2530 bank-call trampoline.
+                relay_target = relay_target_symbols_by_segment.get(target)
+                if relay_target is None:
+                    raise ListingError(
+                        f"IAR relay segment {target} has no corresponding function"
+                    )
+                relay_target_group = _code_group(
+                    segments[relay_target.segment]
+                )
+                if (
+                    relay_target_group
+                    and relay_target.segment not in selected_segments
+                ):
+                    selected_segments.add(relay_target.segment)
+                    pending.append(relay_target.segment)
+                continue
+            if code_group and target not in selected_segments:
                 selected_segments.add(target)
                 pending.append(target)
             elif _constant_segment(target_segment):
@@ -2236,13 +2289,22 @@ def convert_code_listing_to_archive(
     banked_segments = {
         ident for ident in selected_segments if _code_group(segments[ident]) == "banked"
     }
-    source_aliases: dict[str, tuple[str, bool]] = {
-        name: (_asm_name(name), True) for name in external_names.values()
-    }
+    source_aliases: dict[str, tuple[str, bool]] = {}
+    for name in external_names.values():
+        # IAR's bank relay is a call stub for the public function. The MCS-51
+        # linker emits its own bank-call trampoline when the function symbol
+        # is referenced directly, so do not leave an IAR-only relay unresolved.
+        target = name.removesuffix("::?relay") if name.endswith("::?relay") else name
+        source_aliases[name] = (_asm_name(target), True)
     for name, symbol in symbols.items():
+        if name.endswith("::?relay"):
+            source_aliases[name] = (
+                _asm_name(name.removesuffix("::?relay")),
+                True,
+            )
+            continue
         if (
             name in requested
-            or name in relay_exports
             or (
                 symbol.segment in selected_segments
                 and _code_group(segments[symbol.segment]) == "common_const"
@@ -2284,6 +2346,7 @@ def convert_code_listing_to_archive(
             external_data_segments,
             selected_segments,
             banked_segments,
+            relay_target_symbols_by_segment,
             source_aliases,
         )
     decoded_constants = {
@@ -2298,10 +2361,6 @@ def convert_code_listing_to_archive(
         alias = _asm_name(original)
         exports_by_segment.setdefault(symbol.segment, []).append((alias, symbol.offset))
         exported_originals[original] = alias
-    for original, symbol in relay_exports.items():
-        alias = _asm_name(symbol.name)
-        exports_by_segment.setdefault(symbol.segment, []).append((alias, symbol.offset))
-        exported_originals[symbol.name] = alias
     for name, symbol in symbols.items():
         if symbol.segment in selected_constant_segments:
             constant_exports_by_segment.setdefault(symbol.segment, []).append(symbol)
@@ -2320,7 +2379,7 @@ def convert_code_listing_to_archive(
         exports_by_segment.setdefault(symbol.segment, []).append((alias, symbol.offset))
         exported_originals[name] = alias
 
-    section_names = {
+    section_prefixes = {
         "banked": f".mcs51.autobank.iar_{module_token}",
         "relays": f".text.__mcs51_iarrelay_{module_token}",
         "common_code": f".text.__mcs51_iarcode_{module_token}",
@@ -2352,7 +2411,9 @@ def convert_code_listing_to_archive(
     )
     external_alias_set = set(external_aliases)
     unresolved = {
-        name for name in external_names.values() if _asm_name(name) in external_alias_set
+        source_aliases.get(name, (_asm_name(name), True))[0]
+        for name in external_names.values()
+        if source_aliases.get(name, (_asm_name(name), True))[0] in external_alias_set
     }
     unresolved.update(
         symbol.name
@@ -2383,16 +2444,17 @@ def convert_code_listing_to_archive(
         if not group_segments:
             continue
         section_flags = "a" if group == "common_const" else "ax"
-        lines.extend(
-            [
-                f'.section {section_names[group]},"{section_flags}",@progbits',
-                ".balign 1",
-            ]
-        )
         for ident in group_segments:
             exports = exports_by_segment.get(ident, [])
             items = decoded[ident]
             size = sum(item.size for item in items)
+            section_name = f"{section_prefixes[group]}_{ident.lower()}"
+            lines.extend(
+                [
+                    f'.section {section_name},"{section_flags}",@progbits',
+                    ".balign 1",
+                ]
+            )
             lines.append(f"{_asm_symbol(segment_labels[ident])}:")
             for alias, offset in exports:
                 if offset > size:
@@ -2484,6 +2546,33 @@ def convert_code_listing_to_archive(
                 next_offsets = [position for position in public_offsets if position > offset]
                 end = min(next_offsets, default=size)
                 lines.append(f".size {_asm_symbol(alias)}, {end - offset}")
+
+    banked_functions = [
+        (name, symbol)
+        for name, symbol in requested.items()
+        if _code_group(segments[symbol.segment]) == "banked"
+    ]
+    if banked_functions:
+        for name, _symbol in banked_functions:
+            target = _asm_name(name)
+            thunk = _asm_symbol(f"__mcs51_bankcall_{target}")
+            target_symbol = _asm_symbol(target)
+            function_token = name.encode("utf-8").hex()
+            lines.extend(
+                [
+                    f'.section .text.autobankthunks.iar_{module_token}_{function_token},"ax",@progbits',
+                    ".balign 1",
+                    f".globl {thunk}",
+                    f".type {thunk},@function",
+                    f"{thunk}:",
+                    "push 159",
+                    f"mov 159, #{target_symbol}",
+                    f"lcall {target_symbol}",
+                    "pop 159",
+                    "ret",
+                    f".size {thunk}, 11",
+                ]
+            )
 
     if decoded_constants:
         lines.extend(

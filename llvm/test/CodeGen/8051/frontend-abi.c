@@ -7,6 +7,8 @@
 // RUN:       --implicit-check-not=crti.o --implicit-check-not=-lgcc \
 // RUN:       --implicit-check-not=-lc --implicit-check-not=-dynamic-linker \
 // RUN:       --implicit-check-not=eh-frame-hdr
+// RUN: clang -target mcs51 -mcpu=cc2530 -mabi=iar -### %s -o %t 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=IARLINK
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib -### %s -o %t 2>&1 \
 // RUN:   | FileCheck %s --check-prefix=NOSTDLIB \
 // RUN:       --implicit-check-not=cc2530.ld \
@@ -24,6 +26,10 @@
 // SIGNED: "-cc1" "-triple" "mcs51"
 // LINK: {{ld.lld}}
 // LINK-SAME: "-static"
+// IARLINK: "-target-abi" "iar"
+// IARLINK: cc2530_iar_xstack.o
+// IARLINK: mcs51-runtime-iar.o
+// IARLINK-NOT: mcs51-runtime.o
 // NOSTDLIB: "-ffunction-sections"
 // NOSTDLIB-SAME: "-fdata-sections"
 // NOSTDLIB: {{ld.lld}}

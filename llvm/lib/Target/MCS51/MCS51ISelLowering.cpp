@@ -462,6 +462,12 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   addRegisterClass(MVT::i16, &MCS51::MCS51GPR16RegClass);
   setOperationAction(ISD::UDIV, MVT::i8, Legal);
   setOperationAction(ISD::UREM, MVT::i8, Legal);
+  setOperationAction(ISD::CTPOP, MVT::i8, Expand);
+  setOperationAction(ISD::CTPOP, MVT::i16, Expand);
+  setOperationAction(ISD::CTTZ, MVT::i8, Expand);
+  setOperationAction(ISD::CTTZ, MVT::i16, Expand);
+  setOperationAction(ISD::CTLZ, MVT::i8, Expand);
+  setOperationAction(ISD::CTLZ, MVT::i16, Expand);
   setOperationAction(ISD::UDIV, MVT::i16, LibCall);
   setOperationAction(ISD::UREM, MVT::i16, LibCall);
   setOperationAction(ISD::SDIV, MVT::i16, LibCall);
@@ -1309,14 +1315,41 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
                       MF.getFunction(), MF.getTarget().getTargetCPU(),
                       MF.getTarget().getFunctionSections());
 
+  GlobalVariable *IARXSP = nullptr;
+  SDValue IARStackBase;
+  auto getIARStackBase = [&]() {
+    if (IARStackBase.getNode())
+      return IARStackBase;
+    IARXSP = MF.getFunction().getParent()->getGlobalVariable("?XSP");
+    if (!IARXSP)
+      report_fatal_error("MCS-51 IAR ABI is missing its ?XSP declaration");
+    SDValue XSPAddress = DAG.getGlobalAddress(IARXSP, DL, MVT::i8);
+    auto XSP = DAG.getLoad(MVT::i16, DL, Chain, XSPAddress,
+                           MachinePointerInfo(IARXSP), Align(1));
+    Chain = XSP.getValue(1);
+    IARStackBase = XSP;
+    return IARStackBase;
+  };
+
   for (const CCValAssign &VA : ArgLocs) {
-    if (UseIARABI && VA.isMemLoc())
-      report_fatal_error("MCS-51 IAR ABI stack arguments require XDATA "
-                         "reentrant stack lowering");
     if (EVT(VA.getLocVT()) != VA.getValVT() ||
         (VA.getValVT() != MVT::i8 && VA.getValVT() != MVT::i16))
       report_fatal_error("unsupported MCS-51 argument type");
     if (VA.isMemLoc()) {
+      if (UseIARABI) {
+        SDValue Ptr = getIARStackBase();
+        if (VA.getLocMemOffset())
+          Ptr = DAG.getNode(ISD::ADD, DL, MVT::i16, Ptr,
+                            DAG.getConstant(VA.getLocMemOffset(), DL,
+                                            MVT::i16));
+        auto Load = DAG.getLoad(VA.getValVT(), DL, Chain, Ptr,
+                                MachinePointerInfo(MCS51::XData,
+                                                   VA.getLocMemOffset()),
+                                Align(1));
+        Chain = Load.getValue(1);
+        InVals.push_back(Load);
+        continue;
+      }
       // Stack arguments are fixed objects below the return address. A word was
       // pushed high byte first, so its low byte sits nearest the return
       // address. Frame lowering resolves the SP-relative address once the
@@ -1344,9 +1377,7 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
     if (!VA.isRegLoc())
       report_fatal_error("unsupported MCS-51 argument location");
     const TargetRegisterClass *RC = VA.getLocVT() == MVT::i16
-                                        ? (UseIARABI
-                                               ? &MCS51::MCS51IARGPR16RegClass
-                                               : &MCS51::MCS51GPR16RegClass)
+                                        ? &MCS51::MCS51GPR16RegClass
                                         : &MCS51::MCS51GPR8RegClass;
     Register LiveIn = MF.addLiveIn(VA.getLocReg(),
                                    RC);
@@ -1472,15 +1503,15 @@ SDValue MCS51TargetLowering::LowerCall(
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeCallOperands(Outs,
                              UseIARABI ? CC_MCS51_IAR : CC_MCS51);
-  if (UseIARABI && llvm::any_of(ArgLocs, [](const CCValAssign &VA) {
-        return VA.isMemLoc();
-      }))
-    report_fatal_error("MCS-51 IAR ABI stack arguments require XDATA "
-                       "reentrant stack lowering");
 
   SDValue Chain = CLI.Chain;
   SDValue InGlue;
-  unsigned CallFrameSize = CCInfo.getStackSize();
+  bool HasIARStackArgs = UseIARABI &&
+                         llvm::any_of(ArgLocs, [](const CCValAssign &VA) {
+                           return VA.isMemLoc();
+                         });
+  unsigned IARStackSize = HasIARStackArgs ? CCInfo.getStackSize() : 0;
+  unsigned CallFrameSize = UseIARABI ? 0 : CCInfo.getStackSize();
   Chain = DAG.getCALLSEQ_START(Chain, CallFrameSize, 0, DL);
   SmallVector<std::pair<Register, SDValue>, 8> RegsToPass;
   SmallVector<std::pair<int64_t, SDValue>, 4> StackArgs;
@@ -1497,33 +1528,57 @@ SDValue MCS51TargetLowering::LowerCall(
       report_fatal_error("unsupported MCS-51 call argument location");
   }
 
-  // Preserve stack argument values before register argument copies can
-  // overwrite the physical registers that currently hold those values. The
-  // hardware stack grows upward, so push arguments in descending ABI offset.
-  // Emit zero-valued bytes for alignment holes between arguments.
-  std::sort(StackArgs.begin(), StackArgs.end(),
-            [](const auto &A, const auto &B) { return A.first < B.first; });
-  unsigned StackCursor = CCInfo.getStackSize();
-  auto PushPadding = [&]() {
-    Chain = DAG.getNode(MCS51ISD::PUSH_PAD8, DL, MVT::Other, Chain);
-    --StackCursor;
-  };
-  for (auto I = StackArgs.rbegin(), E = StackArgs.rend(); I != E; ++I) {
-    unsigned ArgSize = I->second.getValueType().getSizeInBits() / 8;
-    unsigned ArgEnd = I->first + ArgSize;
-    if (ArgEnd > StackCursor)
-      report_fatal_error("overlapping MCS-51 stack arguments");
-    while (StackCursor > ArgEnd)
+  if (HasIARStackArgs) {
+    GlobalVariable *IARXSP =
+        MF.getFunction().getParent()->getGlobalVariable("?XSP");
+    if (!IARXSP)
+      report_fatal_error("MCS-51 IAR ABI is missing its ?XSP declaration");
+    SDValue XSPAddress = DAG.getGlobalAddress(IARXSP, DL, MVT::i8);
+    auto XSP = DAG.getLoad(MVT::i16, DL, Chain, XSPAddress,
+                           MachinePointerInfo(IARXSP), Align(1));
+    Chain = XSP.getValue(1);
+    SDValue StackBase = DAG.getNode(
+        ISD::SUB, DL, MVT::i16, XSP,
+        DAG.getConstant(IARStackSize, DL, MVT::i16));
+    Chain = DAG.getStore(Chain, DL, StackBase, XSPAddress,
+                         MachinePointerInfo(IARXSP), Align(1));
+    for (const auto &[Offset, Value] : StackArgs) {
+      SDValue Ptr = StackBase;
+      if (Offset)
+        Ptr = DAG.getNode(ISD::ADD, DL, MVT::i16, Ptr,
+                          DAG.getConstant(Offset, DL, MVT::i16));
+      Chain = DAG.getStore(Chain, DL, Value, Ptr,
+                           MachinePointerInfo(MCS51::XData, Offset), Align(1));
+    }
+  } else {
+    // Preserve stack argument values before register argument copies can
+    // overwrite the physical registers that currently hold those values. The
+    // hardware stack grows upward, so push arguments in descending ABI offset.
+    // Emit zero-valued bytes for alignment holes between arguments.
+    std::sort(StackArgs.begin(), StackArgs.end(),
+              [](const auto &A, const auto &B) { return A.first < B.first; });
+    unsigned StackCursor = CCInfo.getStackSize();
+    auto PushPadding = [&]() {
+      Chain = DAG.getNode(MCS51ISD::PUSH_PAD8, DL, MVT::Other, Chain);
+      --StackCursor;
+    };
+    for (auto I = StackArgs.rbegin(), E = StackArgs.rend(); I != E; ++I) {
+      unsigned ArgSize = I->second.getValueType().getSizeInBits() / 8;
+      unsigned ArgEnd = I->first + ArgSize;
+      if (ArgEnd > StackCursor)
+        report_fatal_error("overlapping MCS-51 stack arguments");
+      while (StackCursor > ArgEnd)
+        PushPadding();
+      SDValue Ops[] = {Chain, I->second};
+      unsigned Opcode = I->second.getValueType() == MVT::i16
+                            ? MCS51ISD::PUSH_ARG16
+                            : MCS51ISD::PUSH_ARG8;
+      Chain = DAG.getNode(Opcode, DL, MVT::Other, Ops);
+      StackCursor = I->first;
+    }
+    while (StackCursor)
       PushPadding();
-    SDValue Ops[] = {Chain, I->second};
-    unsigned Opcode = I->second.getValueType() == MVT::i16
-                          ? MCS51ISD::PUSH_ARG16
-                          : MCS51ISD::PUSH_ARG8;
-    Chain = DAG.getNode(Opcode, DL, MVT::Other, Ops);
-    StackCursor = I->first;
   }
-  while (StackCursor)
-    PushPadding();
 
   for (auto &[Reg, Value] : RegsToPass) {
     // Load a constant byte argument in the class of its argument register.
@@ -1595,7 +1650,7 @@ SDValue MCS51TargetLowering::LowerCall(
   // Pop the stack arguments right after the call and glue the pops to it. The
   // type legalizer drops the chain of pure library calls, which would
   // otherwise discard the pops and leak the arguments.
-  for (unsigned I = 0; I < CCInfo.getStackSize(); ++I) {
+  for (unsigned I = 0; !UseIARABI && I < CCInfo.getStackSize(); ++I) {
     SDValue Pop = DAG.getNode(MCS51ISD::POP_ARG8, DL,
                               DAG.getVTList(MVT::Other, MVT::Glue), Chain,
                               InGlue);
@@ -1618,6 +1673,18 @@ SDValue MCS51TargetLowering::LowerCall(
     Chain = Copy.getValue(1);
     InGlue = Copy.getValue(2);
     InVals.push_back(Copy.getValue(0));
+  }
+  if (HasIARStackArgs) {
+    GlobalVariable *IARXSP =
+        MF.getFunction().getParent()->getGlobalVariable("?XSP");
+    SDValue XSPAddress = DAG.getGlobalAddress(IARXSP, DL, MVT::i8);
+    auto XSP = DAG.getLoad(MVT::i16, DL, Chain, XSPAddress,
+                           MachinePointerInfo(IARXSP), Align(1));
+    SDValue RestoredXSP = DAG.getNode(
+        ISD::ADD, DL, MVT::i16, XSP,
+        DAG.getConstant(IARStackSize, DL, MVT::i16));
+    Chain = DAG.getStore(XSP.getValue(1), DL, RestoredXSP, XSPAddress,
+                         MachinePointerInfo(IARXSP), Align(1));
   }
   return Chain;
 }

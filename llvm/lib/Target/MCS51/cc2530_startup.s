@@ -85,6 +85,9 @@ __mcs51_start:
   mov dptr, #__mcs51_data2_load
   lcall .Lcopy_initialized_data
 
+  /* The IAR ABI runtime replaces this weak stub and initializes ?XSP. */
+  lcall __mcs51_iar_xstack_init
+
   lcall main
 .Lhalt:
   sjmp .Lhalt
@@ -172,3 +175,9 @@ __mcs51_start:
   sjmp .Lcopy_bit_loop
 .Lcopy_bits_done:
   ret
+
+.weak __mcs51_iar_xstack_init
+.type __mcs51_iar_xstack_init,@function
+__mcs51_iar_xstack_init:
+  ret
+.size __mcs51_iar_xstack_init, .-__mcs51_iar_xstack_init

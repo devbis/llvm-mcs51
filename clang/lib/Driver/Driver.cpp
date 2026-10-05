@@ -137,19 +137,24 @@ public:
     CC2530CPU = true;
     if (Args.hasArg(options::OPT_nostdlib))
       return;
+    UseIARABI = Args.getLastArgValue(options::OPT_mabi_EQ) == "iar";
 
     SmallString<256> ResourceDir(D.ResourceDir);
     llvm::sys::path::append(ResourceDir, "mcs51");
     SmallString<256> RuntimeObject(ResourceDir);
-    llvm::sys::path::append(RuntimeObject, "mcs51-runtime.o");
+    llvm::sys::path::append(RuntimeObject, UseIARABI ? "mcs51-runtime-iar.o"
+                                                     : "mcs51-runtime.o");
     SmallString<256> StartupObject(ResourceDir);
     llvm::sys::path::append(StartupObject, "cc2530_startup.o");
+    SmallString<256> IARXStackObject(ResourceDir);
+    llvm::sys::path::append(IARXStackObject, "cc2530_iar_xstack.o");
     SmallString<256> LinkerScript(ResourceDir);
     llvm::sys::path::append(LinkerScript, "cc2530.ld");
 
     auto &VFS = D.getVFS();
     if (!VFS.exists(RuntimeObject) || !VFS.exists(StartupObject) ||
-        !VFS.exists(LinkerScript))
+        !VFS.exists(LinkerScript) ||
+        (UseIARABI && !VFS.exists(IARXStackObject)))
       return;
 
     AutoCC2530 = true;
@@ -157,6 +162,7 @@ public:
     AddStartup = !Args.hasArg(options::OPT_nostartfiles);
     RuntimeObjectPath = RuntimeObject.str().str();
     StartupObjectPath = StartupObject.str().str();
+    IARXStackObjectPath = IARXStackObject.str().str();
     LinkerScriptPath = LinkerScript.str().str();
 
     HasLinkerScript = Args.hasArg(options::OPT_T);
@@ -234,6 +240,8 @@ public:
       CmdArgs.push_back("--gc-sections");
     if (AddStartup)
       CmdArgs.push_back(StartupObjectPath.c_str());
+    if (UseIARABI)
+      CmdArgs.push_back(IARXStackObjectPath.c_str());
     if (AddRuntime)
       CmdArgs.push_back(RuntimeObjectPath.c_str());
   }
@@ -246,12 +254,14 @@ protected:
 private:
   bool CC2530CPU = false;
   bool AutoCC2530 = false;
+  bool UseIARABI = false;
   bool AddRuntime = false;
   bool AddStartup = false;
   bool HasLinkerScript = false;
   bool HasNoGC = false;
   std::string RuntimeObjectPath;
   std::string StartupObjectPath;
+  std::string IARXStackObjectPath;
   std::string LinkerScriptPath;
 };
 } // namespace

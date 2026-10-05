@@ -95,3 +95,36 @@ SDValue MCS51SelectionDAGInfo::EmitTargetCodeForMemcpy(
   }
   return Chain;
 }
+
+SDValue MCS51SelectionDAGInfo::EmitTargetCodeForMemset(
+    SelectionDAG &DAG, const SDLoc &DL, SDValue Chain, SDValue Dst,
+    SDValue Byte, SDValue Size, Align Alignment, bool IsVolatile,
+    bool AlwaysInline, MachinePointerInfo DstPtrInfo) const {
+  auto *ConstantSize = dyn_cast<ConstantSDNode>(Size);
+  if (!ConstantSize)
+    return SDValue();
+
+  bool NeedsAddressSpaceAwareSet =
+      usesAddressSpaceAwareMemcpy(DstPtrInfo.getAddrSpace());
+  if (Dst.getOpcode() == ISD::ADDRSPACECAST) {
+    auto *Cast = cast<AddrSpaceCastSDNode>(Dst);
+    if (usesAddressSpaceAwareMemcpy(Cast->getSrcAddressSpace())) {
+      NeedsAddressSpaceAwareSet = true;
+      Dst = Dst.getOperand(0);
+      DstPtrInfo = MachinePointerInfo(Cast->getSrcAddressSpace());
+    }
+  }
+  if (!AlwaysInline && !NeedsAddressSpaceAwareSet)
+    return SDValue();
+
+  uint64_t Count = ConstantSize->getZExtValue();
+  MachineMemOperand::Flags Flags =
+      IsVolatile ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone;
+  for (uint64_t Offset = 0; Offset < Count; ++Offset) {
+    SDValue DstOffset = DAG.getObjectPtrOffset(
+        DL, Dst, TypeSize::getFixed(Offset));
+    Chain = DAG.getStore(Chain, DL, Byte, DstOffset,
+                         DstPtrInfo.getWithOffset(Offset), Align(1), Flags);
+  }
+  return Chain;
+}

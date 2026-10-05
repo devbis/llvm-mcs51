@@ -113,6 +113,9 @@ public:
       bool AutoBank = isAutoBankFunction(*F, TM.getTargetCPU(),
                                          TM.Options.FunctionSections);
       if (Bank || AutoBank) {
+        if (F->isDeclaration() &&
+            TM.getTargetCPU().equals_insensitive("cc2530"))
+          PendingExternalBankCallThunks.insert(F->getName());
         const MCExpr *Address = MCSymbolRefExpr::create(
             getBankThunkSymbol(*F), OutContext);
         if (Offset)
@@ -515,39 +518,64 @@ private:
     return OutContext.getOrCreateSymbol(getMCS51BankThunkName(TargetName));
   }
 
+  void collectExternalFunctionPointers(const Constant *CV) {
+    if (const auto *F = dyn_cast<Function>(CV)) {
+      unsigned Bank = F->hasSection() ? getMCS51CodeBank(F->getSection()) : 0;
+      bool AutoBank = isAutoBankFunction(*F, TM.getTargetCPU(),
+                                         TM.Options.FunctionSections);
+      if (F->isDeclaration() && !F->getName().starts_with("__mcs51_") &&
+          (Bank || AutoBank))
+        PendingExternalBankCallThunks.insert(F->getName());
+      return;
+    }
+    for (const Value *Operand : CV->operand_values())
+      if (const auto *Nested = dyn_cast<Constant>(Operand))
+        collectExternalFunctionPointers(Nested);
+  }
+
   void emitExternalBankCallThunks() {
     SmallVector<StringRef, 4> Targets;
+    for (const GlobalVariable &GV : MF->getFunction().getParent()->globals())
+      if (GV.hasInitializer())
+        collectExternalFunctionPointers(GV.getInitializer());
+    for (const auto &Target : PendingExternalBankCallThunks)
+      if (!ExternalBankCallThunks.contains(Target.getKey()))
+        Targets.push_back(Target.getKey());
     for (const MachineBasicBlock &MBB : *MF)
       for (const MachineInstr &MI : MBB) {
-        if (!isMCS51LongCallOpcode(MI.getOpcode()))
-          continue;
+        StringRef TargetName;
+        const Function *Target = nullptr;
         for (const MachineOperand &MO : MI.operands()) {
-          StringRef TargetName;
-          const Function *Target = nullptr;
-          if (MO.isSymbol()) {
+          if (MO.isSymbol() && isMCS51LongCallOpcode(MI.getOpcode())) {
             TargetName = MO.getSymbolName();
             if (TargetName.starts_with("__mcs51_bankcall_"))
-              continue;
-            Target =
-                MF->getFunction().getParent()->getFunction(TargetName);
-          } else if (MO.isGlobal()) {
+              break;
+            Target = MF->getFunction().getParent()->getFunction(TargetName);
+          } else if (MO.isGlobal() &&
+                     (!isMCS51LongCallOpcode(MI.getOpcode()) ||
+                      TargetName.empty())) {
             const GlobalValue *GV = MO.getGlobal();
-            TargetName = GV->getName();
             Target = dyn_cast<Function>(GV);
+            if (Target)
+              TargetName = Target->getName();
           } else {
             continue;
           }
-          if (TargetName.starts_with("__mcs51_"))
-            continue;
-          // Definitions emit their own strong trampoline (when banked) or
-          // can be called directly. Only declarations and unresolved symbols
-          // need a weak caller-side fallback.
-          if (Target && !Target->isDeclaration())
-            continue;
-          if (!ExternalBankCallThunks.contains(TargetName) &&
-              !is_contained(Targets, TargetName))
-            Targets.push_back(TargetName);
+          if (!TargetName.empty())
+            break;
         }
+        if (TargetName.empty() || TargetName.starts_with("__mcs51_bankcall_"))
+          continue;
+        if (TargetName.starts_with("__mcs51_"))
+          continue;
+        // Definitions emit their own strong trampoline (when banked) or
+        // can be called directly. Only declarations and unresolved symbols
+        // need a weak caller-side fallback.
+        if (Target && !Target->isDeclaration())
+          continue;
+        if (!ExternalBankCallThunks.contains(TargetName) &&
+            !is_contained(Targets, TargetName))
+          Targets.push_back(TargetName);
       }
     if (Targets.empty())
       return;
@@ -585,6 +613,7 @@ private:
   }
 
   StringSet<> ExternalBankCallThunks;
+  StringSet<> PendingExternalBankCallThunks;
 
   void emitThunkInstruction(unsigned Opcode,
                             std::initializer_list<MCOperand> Operands) {

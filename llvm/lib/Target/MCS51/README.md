@@ -8,13 +8,19 @@ passes byte arguments in the first available `R1`-`R5` register, word arguments
 in `R3:R2` and `R5:R4`, returns bytes in `R1`, and returns words in
 `R3:R2`/`R5:R4`. It also preserves the IAR virtual registers and `R6`/`R7`.
 
-This does not yet implement the project's XDATA reentrant stack. Compilation
-diagnoses stack-passed arguments, variadic calls, and aggregate arguments or
-returns. Clang locals and spills still use its IDATA hardware stack, so taking
-the address of an automatic object and passing it to IAR code is not supported.
-The selected Clang runtime must also be built with `-mabi=iar` before using its
-helpers from an IAR ABI translation unit. Treat this option as an ABI bring-up
-step; it is not yet sufficient to link arbitrary Z-Stack code.
+Scalar arguments that do not fit the IAR registers use the downward-growing
+XDATA stack through `?XSP`; callers reserve and release the outgoing area, and
+callees load stack arguments from it. For CC2530, `-mabi=iar` selects a matching
+runtime and startup object, reserves 512 bytes at XDATA `0x1d00` through
+`0x1eff`, and initializes `?XSP` to `0x1f00`. The virtual registers `?V0` through
+`?V7` are also exported at direct addresses `0x30` through `0x37` for converted
+IAR library code.
+
+Variadic calls and aggregate arguments or returns remain unsupported. Clang
+locals and spills still use its IDATA hardware stack, so taking the address of
+an automatic object and passing it to IAR code is not supported. Treat this
+option as an ABI bring-up step; it is not yet sufficient to link arbitrary
+Z-Stack code into a CC2530-sized image.
 
 The experimental module pass can move eligible fixed-size local objects into
 one static arena and reuse function ranges when their functions cannot be
