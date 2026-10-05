@@ -729,7 +729,7 @@ void MCS51InstrInfo::mergeOutliningCandidateAttributes(
   TargetInstrInfo::mergeOutliningCandidateAttributes(F, Candidates);
   // All call sites can reach this shared helper directly, including callers
   // in different CC2530 flash banks.
-  F.setSection(".text.__mcs51_outlined");
+  F.setSection((Twine(".text.__mcs51_outlined.") + F.getName()).str());
 }
 
 void MCS51InstrInfo::buildOutlinedFrame(
