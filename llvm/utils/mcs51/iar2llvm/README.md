@@ -42,6 +42,20 @@ specific public symbols, such as runtime helpers. It reports unresolved IAR
 symbols that need another converted library or IAR runtime support. The
 module-specific commands below are useful for inspecting a smaller slice:
 
+For the fixed RouterEB build, select the modules using the committed manifests:
+
+```sh
+python3 -m iar2llvm convert-library-listing /private/tmp/CLIB-RouterEB.lst \
+  --module-list iar2llvm/manifests/cc2530-genericapp-routereb/clib-routereb.modules \
+  --vb-byte-address 0x20 --out /tmp/CLIB-RouterEB.clang.a \
+  --llvm-mc ../../../../llvm-mcs51-build/bin/llvm-mc \
+  --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
+```
+
+Repeat with the matching `Router-Pro`, `Security`, and `TIMAC-CC2530` listing
+and manifest. A module list restricts conversion to the named modules; unlisted
+modules do not appear in the archive or in the unsupported-module report.
+
 By default, the library conversion continues after a module contains an
 unsupported record, writes an archive from modules that do convert, and reports
 all omitted modules and reasons together in `unsupported_modules` at the end.
@@ -51,6 +65,15 @@ symbols for those functions.
 Archive member `.o` names use the XLIB module name; `?` and other filename-unsafe
 characters are replaced by `_` in the filename only. The ELF symbol name remains
 unchanged.
+
+The `manifests/cc2530-genericapp-routereb/` files record the library modules
+selected by an actual IAR XLINK 6.5.4.100 build of `GenericApp.ewp`, configuration
+`RouterEB`. Pass the matching file with `--module-list` to emit only that
+configuration's selected library modules. XLINK selected 69 CLIB modules, five
+`Router-Pro` modules, one `Security` module, and one `TIMAC-CC2530` module; all
+76 selected library modules are supported by the current converter. The
+`CSTARTUP` module in the map comes from the project's `chipcon_cstartup.r51`
+object, not from CLIB.
 
 The `VIRTUAL_REGISTERS` data-only module is included when present. Its `?V0` to
 `?V7` symbols map to this checkout's reserved DATA addresses `0x30` to `0x37`;
@@ -66,8 +89,10 @@ must be reserved from Clang `__bit` globals. See the [IAR 8051 compiler guide](h
 Some IAR runtime modules reference segment boundaries with `SFB`/`SFE`. The
 converter emits these as unresolved ELF symbols named
 `__iar_sfb_<SEGMENT>` and `__iar_sfe_<SEGMENT>`; define the corresponding
-addresses in the linker script before linking those helpers. Extended-stack
-helpers also need `__iar_sfb_highmask_EXT_STACK`, the linker-computed byte for
+addresses in the linker script before linking those helpers. Differences
+`SFE(segment)-SFB(segment)` are emitted as `__iar_size_<SEGMENT>` references;
+define each as the linked segment size. Extended-stack helpers also need
+`__iar_sfb_highmask_EXT_STACK`, the linker-computed byte for
 `(HIGH(SFB(EXT_STACK)) & ~?ESP_MASK)`. `?RESTORE_MCB` additionally needs
 `__iar_sfb_byte3_mask07_shift4_BANKED_CODE_EXT2_C` and
 `__iar_sfb_byte3_mask08_shift4_BANKED_CODE_EXT2_C`, the two linker-computed
@@ -172,7 +197,8 @@ The code subset preserves machine bytes and translates supported `SJMP`,
 bit-address, and 24-bit banked-code relocations. `R_8051_24` writes
 address-low, address-high, and the final flash bank number after CC2530
 automatic bank placement. `R_8051_BIT8` converts the IAR virtual-bit byte
-address and bit offset into the 8051 bit address. ELF symbols retain their
+address and bit offset into the 8051 bit address. `R_8051_BANK8` relocates an
+isolated bank-number byte such as `BYTE3(main)`. ELF symbols retain their
 original IAR names, including punctuation such as `?`, `::`, and angle brackets.
 Generated assembly quotes names that need it; JSON output lists the unchanged
 names and unresolved IAR runtime references.

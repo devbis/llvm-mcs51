@@ -72,6 +72,8 @@ protected:
       return ELF::R_8051_HI8;
     case MCS51::fixup_bit8:
       return ELF::R_8051_BIT8;
+    case MCS51::fixup_bank8:
+      return ELF::R_8051_BANK8;
     case MCS51::fixup_24:
       return ELF::R_8051_24;
     case MCS51::fixup_pcrel8:
