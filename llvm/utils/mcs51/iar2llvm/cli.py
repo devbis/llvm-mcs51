@@ -46,12 +46,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     convert_code = subparsers.add_parser(
         "convert-code-listing",
-        help="convert selected or all public IAR banked code and supported module data",
+        help="convert selected or all public IAR code and supported module data",
     )
     convert_code.add_argument("listing", type=Path)
     convert_code.add_argument("--module", required=True)
     convert_code.add_argument("--symbol", action="append", dest="symbols", default=[])
     convert_code.add_argument("--all-public-banked", action="store_true")
+    convert_code.add_argument("--all-public-code", action="store_true")
     convert_code.add_argument("--out", type=Path, required=True)
     convert_code.add_argument("--llvm-mc", type=Path)
     convert_code.add_argument("--llvm-ar", type=Path)
@@ -59,9 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     convert_library = subparsers.add_parser(
         "convert-library-listing",
-        help="convert public BANKED_CODE modules from an XLIB listing into one archive",
+        help="convert public banked/common code modules from an XLIB listing",
     )
     convert_library.add_argument("listing", type=Path)
+    convert_library.add_argument("--symbol", action="append", dest="symbols", default=[])
+    convert_library.add_argument("--language", default="00")
     convert_library.add_argument("--out", type=Path, required=True)
     convert_library.add_argument("--llvm-mc", type=Path)
     convert_library.add_argument("--llvm-ar", type=Path)
@@ -120,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.llvm_mc,
                 args.llvm_ar,
                 args.all_public_banked,
+                args.all_public_code,
             )
         elif args.command == "convert-library-listing":
             payload = convert_library_listing_to_archive(
@@ -127,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 args.llvm_mc,
                 args.llvm_ar,
+                args.symbols,
+                args.language,
             )
         elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
@@ -156,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"Archive: {payload['output']}")
             print(f"Format: {payload['format']}")
+            print(f"IAR language variant: {payload['language']}")
             print("Converted modules: " + ", ".join(payload["modules"]))
             if payload["skipped_modules"]:
                 print("Skipped public modules: " + ", ".join(payload["skipped_modules"]))

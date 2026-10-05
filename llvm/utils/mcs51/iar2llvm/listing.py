@@ -91,29 +91,46 @@ def _records(lines: list[str]) -> Iterator[tuple[str, str]]:
 def _modules(listing: str) -> dict[str, list[tuple[str, str]]]:
     modules: dict[str, list[tuple[str, str]]] = {}
     current_name: str | None = None
+    current_language: str | None = None
     current_records: list[tuple[str, str]] = []
+    module_languages: dict[str, str | None] = {}
+    duplicate_bases: set[str] = set()
+
+    def store_module() -> None:
+        if current_name is None:
+            return
+        if current_name not in modules and current_name not in duplicate_bases:
+            modules[current_name] = current_records
+            module_languages[current_name] = current_language
+            return
+        if current_name not in duplicate_bases:
+            previous_records = modules.pop(current_name)
+            previous_language = module_languages.pop(current_name)
+            suffix = previous_language or "unknown"
+            modules[f"{current_name}@LAN{suffix}"] = previous_records
+            duplicate_bases.add(current_name)
+        suffix = current_language or "unknown"
+        key = f"{current_name}@LAN{suffix}"
+        duplicate_index = 2
+        while key in modules:
+            key = f"{current_name}@LAN{suffix}_{duplicate_index}"
+            duplicate_index += 1
+        modules[key] = current_records
+
     for record in _records(listing.splitlines()):
         tag, text = record
         if tag == "t_beg_lib":
-            if current_name is not None:
-                if current_name in modules:
-                    raise ListingError(
-                        f"duplicate module {current_name!r} in XLIB listing"
-                    )
-                modules[current_name] = current_records
+            store_module()
             match = re.search(r"'([^']+)'", text)
             if not match:
                 raise ListingError("XLIB t_beg_lib record has no module name")
             current_name = match.group(1)
+            language = re.search(r"\bLAN=([0-9A-Fa-f]+)", text)
+            current_language = language.group(1).upper() if language else None
             current_records = []
         elif current_name is not None:
             current_records.append(record)
-    if current_name is not None:
-        if current_name in modules:
-            raise ListingError(
-                f"duplicate module {current_name!r} in XLIB listing"
-            )
-        modules[current_name] = current_records
+    store_module()
     if not modules:
         raise ListingError("no XLIB t_beg_lib module records found")
     return modules
@@ -916,6 +933,8 @@ def _code_group(segment: Segment) -> str | None:
         return "banked"
     if segment.address_space == "CODE" and segment.name == "BANK_RELAYS":
         return "relays"
+    if segment.address_space == "CODE" and segment.name == "RCODE":
+        return "common_code"
     if segment.address_space == "CODE" and segment.name == "CODE_C":
         return "common_const"
     return None
@@ -1493,6 +1512,7 @@ def convert_code_listing_to_archive(
     llvm_mc: Path | None = None,
     llvm_ar: Path | None = None,
     all_public_banked: bool = False,
+    all_public_code: bool = False,
 ) -> dict[str, object]:
     """Convert selected IAR banked code, relays, and supported references.
 
@@ -1504,6 +1524,9 @@ def convert_code_listing_to_archive(
     modules = _modules(listing_text)
     if module_name not in modules:
         raise ListingError(f"module {module_name!r} is not present in the XLIB listing")
+    if all_public_banked and all_public_code:
+        raise ListingError("--all-public-banked cannot be combined with --all-public-code")
+    include_all_public = all_public_banked or all_public_code
 
     segments: dict[str, Segment] = {}
     symbols: dict[str, Symbol] = {}
@@ -1572,30 +1595,31 @@ def convert_code_listing_to_archive(
             code_records.setdefault(current_segment, []).append((tag, text))
 
     requested: dict[str, Symbol] = {}
-    if all_public_banked:
+    if include_all_public:
         if symbol_names:
-            raise ListingError("--all-public-banked cannot be combined with --symbol")
+            raise ListingError("all-public conversion cannot be combined with --symbol")
         for name, symbol in symbols.items():
             segment = segments.get(symbol.segment)
-            if segment is None or _code_group(segment) != "banked":
+            group = _code_group(segment) if segment else None
+            if group != "banked" and not (all_public_code and group == "common_code"):
                 continue
             if symbol.offset != 0:
                 raise ListingError(f"nonzero symbol offset is unsupported for {name}")
             requested[name] = symbol
         if not requested:
-            raise ListingError("module has no public BANKED_CODE symbols")
+            raise ListingError("module has no public executable code symbols")
     else:
         if not symbol_names:
             raise ListingError(
-                "select a public BANKED_CODE symbol or use --all-public-banked"
+                "select a public code symbol or use an all-public conversion option"
             )
         for name in symbol_names:
             symbol = symbols.get(name)
             if symbol is None:
                 raise ListingError(f"public code symbol {name!r} was not found")
             segment = segments.get(symbol.segment)
-            if segment is None or _code_group(segment) != "banked":
-                raise ListingError(f"{name} is not in an IAR BANKED_CODE segment")
+            if segment is None or _code_group(segment) not in ("banked", "common_code"):
+                raise ListingError(f"{name} is not in a supported IAR executable segment")
             if symbol.offset != 0:
                 raise ListingError(f"nonzero symbol offset is unsupported for {name}")
             requested[name] = symbol
@@ -1603,7 +1627,7 @@ def convert_code_listing_to_archive(
     public_bss: list[tuple[Symbol, Segment, int, list[str]]] = []
     public_initialized: list[tuple[Symbol, list[_InitializerAtom]]] = []
     unsupported_public_data: dict[str, str] = {}
-    if all_public_banked:
+    if include_all_public:
         public_xdata_z = [
             name
             for name, symbol in symbols.items()
@@ -1646,7 +1670,7 @@ def convert_code_listing_to_archive(
     } | {symbol.name for symbol, _contents in public_initialized}
 
     selected_segments = {symbol.segment for symbol in requested.values()}
-    if all_public_banked:
+    if include_all_public:
         selected_segments.update(
             symbol.segment
             for symbol in symbols.values()
@@ -1668,7 +1692,7 @@ def convert_code_listing_to_archive(
     # references remain ELF symbol relocations and are resolved by other
     # converted archive members.
     selected_constant_segments: set[str] = set()
-    if all_public_banked:
+    if include_all_public:
         selected_constant_segments.update(
             symbol.segment
             for symbol in symbols.values()
@@ -1831,6 +1855,7 @@ def convert_code_listing_to_archive(
     section_names = {
         "banked": f".mcs51.autobank.iar_{module_token}",
         "relays": f".text.__mcs51_iarrelay_{module_token}",
+        "common_code": f".text.__mcs51_iarcode_{module_token}",
         "common_const": f".rodata.__mcs51_iarconst_{module_token}",
     }
     lines = ["; Generated from an IAR XLIB listing by iar2llvm."]
@@ -1868,7 +1893,7 @@ def convert_code_listing_to_archive(
         lines.append(f".globl {alias}")
 
     selected_order = [ident for ident in segment_order if ident in selected_segments]
-    for group in ("banked", "relays", "common_const"):
+    for group in ("banked", "relays", "common_code", "common_const"):
         group_segments = [
             ident
             for ident in selected_order
@@ -2113,11 +2138,11 @@ def convert_code_listing_to_archive(
         "unresolved_elf_symbols": external_aliases,
         "format": "ELF32 MCS-51 archive",
         "scope": (
-            "all public IAR BANKED_CODE/BANK_RELAYS code, literal constants, "
+            "all public IAR code, literal constants, "
             "public XDATA_Z/XDATA_I objects, private XDATA references, and supported "
             "address relocations"
-            if all_public_banked
-            else "selected IAR BANKED_CODE/BANK_RELAYS code and supported relocation records"
+            if include_all_public
+            else "selected IAR executable code and supported relocation records"
         ),
         "abi": "IAR calling convention preserved; no Clang ABI adaptation",
     }
@@ -2128,8 +2153,10 @@ def convert_library_listing_to_archive(
     output: Path,
     llvm_mc: Path | None = None,
     llvm_ar: Path | None = None,
+    symbol_names: list[str] | None = None,
+    language: str = "00",
 ) -> dict[str, object]:
-    """Convert each public BANKED_CODE module in one XLIB listing to an archive."""
+    """Convert public code modules from an XLIB listing into an ELF archive."""
     listing_text = listing_path.read_text(encoding="latin1")
     modules = _modules(listing_text)
     llvm_mc = (llvm_mc or _default_tool("llvm-mc")).resolve()
@@ -2142,6 +2169,7 @@ def convert_library_listing_to_archive(
     module_unresolved: list[set[str]] = []
     defined_symbols: set[str] = set()
     unsupported_public_data: dict[str, dict[str, str]] = {}
+    wanted_symbols = set(symbol_names or [])
 
     with tempfile.TemporaryDirectory(prefix="iar2llvm-lib-", dir=output.parent) as temp:
         temp_dir = Path(temp)
@@ -2171,8 +2199,17 @@ def convert_library_listing_to_archive(
                             (match.group(1).upper(), match.group(2))
                         )
 
+            public_names = {name for _ident, name in public_symbols}
+            if wanted_symbols and not public_names.intersection(wanted_symbols):
+                continue
+            language_match = re.search(r"@LAN([A-Fa-f0-9]+)(?:_\d+)?$", module_name)
+            if language_match and language_match.group(1).upper() != language.upper():
+                skipped_modules.append(module_name)
+                continue
+
             if any(
-                ident in segments and _code_group(segments[ident]) == "banked"
+                ident in segments
+                and _code_group(segments[ident]) in ("banked", "common_code")
                 for ident, _name in public_symbols
             ):
                 module_archive = temp_dir / f"{module_name.encode('utf-8').hex()}.a"
@@ -2183,7 +2220,7 @@ def convert_library_listing_to_archive(
                     module_archive,
                     llvm_mc,
                     llvm_ar,
-                    True,
+                    all_public_code=True,
                 )
                 converted_modules.append(module_name)
                 module_unresolved.append(set(result["unresolved"]))
@@ -2213,11 +2250,16 @@ def convert_library_listing_to_archive(
                         f"found {len(objects)}"
                     )
                 member_objects.extend(objects)
-            elif public_symbols:
+            elif public_symbols and (not wanted_symbols or public_names.intersection(wanted_symbols)):
                 skipped_modules.append(module_name)
 
         if not member_objects:
-            raise ListingError("XLIB listing has no convertible public BANKED_CODE modules")
+            if wanted_symbols:
+                raise ListingError(
+                    "XLIB listing has no convertible modules defining: "
+                    + ", ".join(sorted(wanted_symbols))
+                )
+            raise ListingError("XLIB listing has no convertible public code modules")
 
         archive_path = temp_dir / output.name
         archive = subprocess.run(
@@ -2247,7 +2289,8 @@ def convert_library_listing_to_archive(
         "skipped_modules": skipped_modules,
         "unresolved": unresolved,
         "unsupported_public_data": unsupported_public_data,
+        "language": language,
         "format": "ELF32 MCS-51 archive",
-        "scope": "module-wide public BANKED_CODE subsets and supported public data",
+        "scope": "module-wide public executable code and supported public data",
         "abi": "IAR calling convention preserved; no Clang ABI adaptation",
     }
