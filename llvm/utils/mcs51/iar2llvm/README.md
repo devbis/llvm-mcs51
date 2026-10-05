@@ -35,10 +35,12 @@ python3 -m iar2llvm convert-library-listing /private/tmp/Router-Pro.lst \
 ```
 
 This scans the listing, converts each module with public `BANKED_CODE`
-functions, and combines their ELF objects into one archive. It reports
-unresolved IAR symbols that need another converted library or IAR runtime
-support. The module-specific commands below are useful for inspecting a
-smaller slice:
+or `RCODE` functions, and combines their ELF objects into one archive. It
+defaults to XLIB's `LAN=00` variant when a library contains duplicate module
+names. Repeat `--symbol NAME` to limit conversion to modules that define
+specific public symbols, such as runtime helpers. It reports unresolved IAR
+symbols that need another converted library or IAR runtime support. The
+module-specific commands below are useful for inspecting a smaller slice:
 
 ```sh
 python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \
@@ -90,9 +92,11 @@ CC2530 startup copy from CODE. The converter supports 16-bit pointers to public
 `CODE_C` objects; other relocations and unsupported IAR initialization
 metadata are rejected.
 
-`convert-code-listing` can select one function with `--symbol`, or collect all
-public `BANKED_CODE` functions in a module with `--all-public-banked`. The
-latter also keeps referenced banked segments, relays, literal private
+`convert-code-listing` can select one public `BANKED_CODE` or `RCODE` function
+with `--symbol`, collect public `BANKED_CODE` functions with
+`--all-public-banked`, or collect public banked and common code with
+`--all-public-code`. The all-public forms also keep referenced code segments,
+relays, literal private
 constants, all public `CODE_C` and literal `CONST/XDATA_ROM_C` objects, and
 public `XDATA_Z`/literal `XDATA_I` objects in the same ELF member. Public
 constant and data symbols are exported so other converted modules can
