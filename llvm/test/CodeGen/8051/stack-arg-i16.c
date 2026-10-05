@@ -1,4 +1,5 @@
-// RUN: clang -target mcs51 -Oz -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
+// RUN: clang -target mcs51 -Oz -mllvm -enable-machine-outliner=never \
+// RUN:   -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
 
 __attribute__((noinline)) unsigned short
 sum4(unsigned short a, unsigned short b, unsigned short c, unsigned short d,

@@ -5,6 +5,9 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Support/MathExtras.h"
@@ -647,4 +650,98 @@ void MCS51InstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
                                          const DebugLoc &DL, int64_t,
                                          RegScavenger *) const {
   BuildMI(&MBB, DL, get(MCS51::LJMP)).addMBB(&NewDestBB);
+}
+
+bool MCS51InstrInfo::isFunctionSafeToOutlineFrom(
+    MachineFunction &MF, bool OutlineFromLinkOnceODRs) const {
+  const Function &F = MF.getFunction();
+  if (F.hasSection() || F.hasFnAttribute("interrupt"))
+    return false;
+  if (!OutlineFromLinkOnceODRs && F.hasLinkOnceODRLinkage())
+    return false;
+  return true;
+}
+
+bool MCS51InstrInfo::shouldOutlineFromFunctionByDefault(
+    MachineFunction &MF) const {
+  return MF.getFunction().hasMinSize();
+}
+
+outliner::InstrType MCS51InstrInfo::getOutliningTypeImpl(
+    const MachineModuleInfo &, MachineBasicBlock::iterator &MBBI,
+    unsigned) const {
+  const MachineInstr &MI = *MBBI;
+  if (MI.isPseudo() || MI.isMetaInstruction() || MI.isCall() ||
+      MI.isBranch() || MI.isTerminator() || MI.isNotDuplicable() ||
+      get(MI.getOpcode()).getSize() == 0 ||
+      // MOVC @A+PC is relative to its instruction address, so moving it into
+      // the common helper would change which byte it reads.
+      MI.getOpcode() == MCS51::MOVC_APC ||
+      MI.readsRegister(MCS51::PC, &RI) ||
+      MI.readsRegister(MCS51::SP, &RI) ||
+      MI.modifiesRegister(MCS51::SP, &RI))
+    return outliner::InstrType::Illegal;
+
+  // Memory accesses remain in the same order when moved to the helper. Symbol
+  // operands keep their relocations; block references and PC-relative
+  // instructions do not have a stable meaning outside their original code.
+  for (const MachineOperand &MO : MI.operands()) {
+    if (MO.isReg()) {
+      if (MO.getReg() == MCS51::SP)
+        return outliner::InstrType::Illegal;
+      continue;
+    }
+    if (MO.isImm() || MO.isCImm() || MO.isGlobal() || MO.isSymbol())
+      continue;
+    return outliner::InstrType::Illegal;
+  }
+
+  return outliner::InstrType::Legal;
+}
+
+std::optional<std::unique_ptr<outliner::OutlinedFunction>>
+MCS51InstrInfo::getOutliningCandidateInfo(
+    const MachineModuleInfo &,
+    std::vector<outliner::Candidate> &RepeatedSequenceLocs,
+    unsigned MinRepeats) const {
+  if (RepeatedSequenceLocs.size() < MinRepeats ||
+      RepeatedSequenceLocs.empty())
+    return std::nullopt;
+
+  outliner::Candidate &Candidate = RepeatedSequenceLocs.front();
+  unsigned SequenceSize = 0;
+  for (const MachineInstr &MI : Candidate)
+    SequenceSize += getInstSizeInBytes(MI);
+
+  // LCALL occupies three bytes; the outlined helper returns with RET.
+  constexpr unsigned CallOverhead = 3;
+  constexpr unsigned FrameOverhead = 1;
+  constexpr unsigned ConstructionID = 0;
+  for (outliner::Candidate &C : RepeatedSequenceLocs)
+    C.setCallInfo(ConstructionID, CallOverhead);
+
+  return std::make_unique<outliner::OutlinedFunction>(
+      RepeatedSequenceLocs, SequenceSize, FrameOverhead, ConstructionID);
+}
+
+void MCS51InstrInfo::mergeOutliningCandidateAttributes(
+    Function &F, std::vector<outliner::Candidate> &Candidates) const {
+  TargetInstrInfo::mergeOutliningCandidateAttributes(F, Candidates);
+  // All call sites can reach this shared helper directly, including callers
+  // in different CC2530 flash banks.
+  F.setSection(".text.__mcs51_outlined");
+}
+
+void MCS51InstrInfo::buildOutlinedFrame(
+    MachineBasicBlock &MBB, MachineFunction &MF,
+    const outliner::OutlinedFunction &) const {
+  MBB.insert(MBB.end(), BuildMI(MF, DebugLoc(), get(MCS51::RET)));
+}
+
+MachineBasicBlock::iterator MCS51InstrInfo::insertOutlinedCall(
+    Module &M, MachineBasicBlock &MBB, MachineBasicBlock::iterator &It,
+    MachineFunction &MF, outliner::Candidate &) const {
+  It = MBB.insert(It, BuildMI(MF, DebugLoc(), get(MCS51::OUTLINE_CALL))
+                          .addGlobalAddress(M.getNamedValue(MF.getName())));
+  return It;
 }

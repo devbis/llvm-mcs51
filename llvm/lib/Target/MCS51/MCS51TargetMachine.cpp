@@ -2980,6 +2980,9 @@ MCS51TargetMachine::MCS51TargetMachine(
       TLOF(std::make_unique<MCS51TargetObjectFile>()),
       Subtarget(TT, CPU, FS, *this) {
   initAsmInfo();
+
+  setMachineOutliner(true);
+  setSupportsDefaultOutlining(true);
 }
 
 bool MCS51TargetMachine::addPassesToEmitFile(
