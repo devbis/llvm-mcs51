@@ -42,6 +42,13 @@ specific public symbols, such as runtime helpers. It reports unresolved IAR
 symbols that need another converted library or IAR runtime support. The
 module-specific commands below are useful for inspecting a smaller slice:
 
+The `VIRTUAL_REGISTERS` data-only module is included when present. Its `?V0` to
+`?V7` symbols map to this checkout's reserved DATA addresses `0x30` to `0x37`;
+`?PSP` and `?XSP` are emitted as DATA bss objects. This only provides storage:
+the converter does not reserve IAR stack regions or initialize either stack
+pointer, so startup must do that before calling IAR reentrant code. Other
+virtual registers from this module are not mapped yet.
+
 ```sh
 python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \
   --module cGP_stub --symbol gp_macReq \
