@@ -5,22 +5,32 @@
 // RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s
+// RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=DIS
 
-static __attribute__((noinline)) unsigned char helper(unsigned char value) {
+static __attribute__((noinline, section(".mcs51.autobank.helper")))
+unsigned char helper(unsigned char value) {
   return value + 1;
 }
+typedef unsigned char (*helper_callback_t)(unsigned char);
+static helper_callback_t volatile helper_callback = helper;
 
 #ifdef SECOND_TU
 unsigned char second_translation_unit(unsigned char value) {
-  return helper(value);
+  return helper_callback(value);
 }
 #else
 unsigned char first_translation_unit(unsigned char value) {
-  return helper(value);
+  return helper_callback(value);
 }
-int main(void) { return first_translation_unit(0); }
+unsigned char second_translation_unit(unsigned char value);
+int main(void) {
+  return first_translation_unit(0) + second_translation_unit(0);
+}
 #endif
 
-// Each object has a private thunk for its same-named static helper.
-// CHECK-COUNT-2: Name: __mcs51_bankcall_helper
-// CHECK-COUNT-2: Binding: Local
+// Each translation unit keeps a private thunk for its same-named static
+// helper. The linked image contains both bodies even though the symbol table
+// prints only one of the duplicate local names.
+// CHECK: Name: __mcs51_bankcall_helper
+// CHECK: Binding: Local
+// DIS-COUNT-2: <__mcs51_bankcall_helper>:

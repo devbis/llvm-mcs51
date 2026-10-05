@@ -24,7 +24,7 @@ int main(void) { return call_probes(1); }
 // common window. Its call is direct; ordinary user code remains auto-banked.
 // ASM-LABEL: call_probes:
 // ASM: lcall __mcs51_runtime_probe
-// ASM: lcall __mcs51_bankcall_user_probe
+// ASM: lcall user_probe
 // ASM-NOT: __mcs51_bankcall___mcs51_runtime_probe
 // LINK: Disassembly of section .text:
 // LINK: <__mcs51_bankcall_user_probe>:

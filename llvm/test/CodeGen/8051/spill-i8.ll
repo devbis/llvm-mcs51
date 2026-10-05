@@ -45,7 +45,7 @@ entry:
 ; The entry point uses the same ordinary function ABI on every MCS-51 profile.
 ; CHECK-LABEL: main:
 ; CHECK: lcall __mcs51_save_r{{[0-7]}}
-; CHECK: lcall __mcs51_bankcall_entry_barrier
+; CHECK: lcall entry_barrier
 ; CHECK: dec 129
 ; CHECK: lcall __mcs51_restore_r{{[0-7]}}
 ; CHECK: ret

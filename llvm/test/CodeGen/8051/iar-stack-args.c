@@ -25,7 +25,7 @@ int main(void) { return call_sixth(1, 2, 3, 4, 5); }
 // IAR-LABEL: call_sixth:
 // IAR: "?XSP"
 // IAR: movx @dptr, a
-// IAR: lcall __mcs51_bankcall_sixth
+// IAR: lcall sixth
 // IAR: "?XSP"
 
 // The default ABI stays on its own hardware stack and never references ?XSP.

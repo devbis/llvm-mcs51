@@ -44,13 +44,13 @@ int main(void) { return background(); }
 // MAP-DAG: Name: .text
 // MAP-DAG: Address: 0x94
 // DIS: 00000000 <reset>:
-// DIS: ljmp
+// DIS: ajmp
 // DIS: 00000003 <.mcs51_vector_0>:
-// DIS: ljmp
+// DIS: ajmp
 // DIS: 00000033 <.mcs51_vector_6>:
-// DIS: ljmp
+// DIS: ajmp
 // DIS: 0000008b <.mcs51_vector_17>:
-// DIS: ljmp
+// DIS: ajmp
 // DIS-LABEL: <__mcs51_bankcall_background>:
 // DIS: mov 159, #{{[1-7]}}
 // DIS: lcall 32768

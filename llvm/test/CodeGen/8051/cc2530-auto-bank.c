@@ -1,5 +1,6 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O0 -S %s -o - | FileCheck %s --check-prefix=ASM
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
+// RUN:   -Wl,--gc-sections \
 // RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections \
 // RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s %s -o %t.elf
@@ -39,7 +40,8 @@ unsigned char call_other_bank(unsigned char value) {
 }
 
 int main(void) {
-  return call_banked(1) + call_other_bank(2) + lto_internal(3);
+  return call_banked(1) + call_other_bank(2) + lto_internal(3) +
+         banked_callback(4);
 }
 
 // ASM: .section .mcs51.autobank.banked_add,"ax"
@@ -60,7 +62,9 @@ int main(void) {
 // ASM: .section .text.autobankthunks.
 // ASM-LABEL: __mcs51_bankcall_lto_internal:
 // ASM-LABEL: call_banked:
-// ASM: lcall __mcs51_bankcall_banked_add
+// ASM: lcall banked_add
+// ASM-LABEL: call_other_bank:
+// ASM: lcall banked_xor
 // ASM: .short __mcs51_bankcall_banked_add
 
 // MAP: Name: .bank1
@@ -76,10 +80,13 @@ int main(void) {
 // LINK: lcall 32768
 // LINK: pop 159
 // LINK: ret
-// LINK-LABEL: <__mcs51_bankcall_banked_xor>:
-// LINK: mov 159, #{{[1-7]}}
+// LINK-NOT: <__mcs51_bankcall_banked_xor>:
 // LINK-LABEL: <__mcs51_bankcall_call_banked>:
 // LINK: mov 159, #{{[1-7]}}
 // LINK: lcall {{327[0-9][0-9]}}
 // LINK-LABEL: <__mcs51_bankcall_call_other_bank>:
 // LINK: mov 159, #{{[1-7]}}
+// LINK-LABEL: <call_banked>:
+// LINK: acall 32768
+// LINK-LABEL: <call_other_bank>:
+// LINK: acall 32777
