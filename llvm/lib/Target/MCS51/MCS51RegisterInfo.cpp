@@ -17,8 +17,9 @@ using namespace llvm;
 MCS51RegisterInfo::MCS51RegisterInfo() : MCS51GenRegisterInfo(MCS51::PC) {}
 
 const MCPhysReg *
-MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
-  return CSR_MCS51_SaveList;
+MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+  bool UseIARABI = MF && usesMCS51IARABI(MF->getFunction());
+  return UseIARABI ? CSR_MCS51_IAR_SaveList : CSR_MCS51_SaveList;
 }
 
 const uint32_t *MCS51RegisterInfo::getCallPreservedMask(

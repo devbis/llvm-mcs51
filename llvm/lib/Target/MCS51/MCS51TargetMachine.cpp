@@ -2525,6 +2525,53 @@ public:
 };
 char MCS51CallFramePropagation::ID = 0;
 
+// The instruction descriptions carry the default Clang call clobbers. Under
+// -mabi=iar, R2-R5 are scratch registers and IAR virtual registers IM0-7 are
+// preserved. Adjust calls before register allocation so liveness follows the
+// function's opt-in ABI.
+class MCS51IARCallClobbers final : public MachineFunctionPass {
+public:
+  static char ID;
+  MCS51IARCallClobbers() : MachineFunctionPass(ID) {}
+
+  bool runOnMachineFunction(MachineFunction &MF) override {
+    if (!usesMCS51IARABI(MF.getFunction()))
+      return false;
+
+    bool Changed = false;
+    for (MachineBasicBlock &MBB : MF)
+      for (MachineInstr &MI : MBB) {
+        if (!MI.isCall())
+          continue;
+        for (unsigned I = MI.getNumOperands(); I != 0;) {
+          --I;
+          const MachineOperand &MO = MI.getOperand(I);
+          if (!MO.isReg() || !MO.isImplicit() || !MO.isDef())
+            continue;
+          Register Reg = MO.getReg();
+          if (Reg >= MCS51::IM0 && Reg <= MCS51::IM7) {
+            MI.removeOperand(I);
+            Changed = true;
+          }
+        }
+        for (Register Reg : {MCS51::R2, MCS51::R3, MCS51::R4, MCS51::R5}) {
+          if (MI.modifiesRegister(Reg, MF.getSubtarget().getRegisterInfo()))
+            continue;
+          MI.addOperand(MF,
+                        MachineOperand::CreateReg(Reg, /*isDef=*/true,
+                                                  /*isImp=*/true));
+          Changed = true;
+        }
+      }
+    return Changed;
+  }
+
+  StringRef getPassName() const override {
+    return "MCS-51 IAR ABI call clobbers";
+  }
+};
+char MCS51IARCallClobbers::ID = 0;
+
 class MCS51DirectDptrReads final : public MachineFunctionPass {
 public:
   static char ID;
@@ -2780,7 +2827,10 @@ public:
     TargetPassConfig::addMachineSSAOptimization();
   }
 
-  void addPreRegAlloc() override { addPass(new MCS51AccCopyHoisting()); }
+  void addPreRegAlloc() override {
+    addPass(new MCS51IARCallClobbers());
+    addPass(new MCS51AccCopyHoisting());
+  }
 
   void addPostRegAlloc() override {
     addPass(new MCS51CallFramePropagation());

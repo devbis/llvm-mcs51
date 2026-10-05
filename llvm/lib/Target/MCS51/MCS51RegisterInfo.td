@@ -114,3 +114,6 @@ def MCS51AReg : RegisterClass<"MCS51", [i8], 8, (add A)>;
 def MCS51PTR : RegisterClass<"MCS51", [i16], 8, (add DPTR)>;
 def MCS51GPR16 : RegisterClass<"MCS51", [i16], 8,
                                (sequence "IP%d", 0, 11)>;
+// IAR's 8051 ABI passes words in R3:R2 and R5:R4. Keep these pairs out of the
+// normal allocator class so the default Clang ABI remains unchanged.
+def MCS51IARGPR16 : RegisterClass<"MCS51", [i16], 8, (add R2R3, R4R5)>;

@@ -1,4 +1,6 @@
 #include "MCS51Subtarget.h"
+#include "MCS51.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/RuntimeLibcalls.h"
 
 #define DEBUG_TYPE "mcs51-subtarget"
@@ -8,6 +10,10 @@
 #include "MCS51GenSubtargetInfo.inc"
 
 using namespace llvm;
+
+bool llvm::usesMCS51IARABI(const Function &F) {
+  return F.getFnAttribute("mcs51-abi").getValueAsString() == "iar";
+}
 
 MCS51Subtarget::MCS51Subtarget(const Triple &TT, StringRef CPU, StringRef FS,
                              const TargetMachine &TM)

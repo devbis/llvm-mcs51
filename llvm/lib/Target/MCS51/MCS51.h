@@ -12,8 +12,10 @@
 namespace llvm {
 
 class PassRegistry;
+class Function;
 void initializeMCS51AsmPrinterPass(PassRegistry &);
 void initializeMCS51DAGToDAGISelLegacyPass(PassRegistry &);
+bool usesMCS51IARABI(const Function &F);
 
 namespace MCS51 {
 

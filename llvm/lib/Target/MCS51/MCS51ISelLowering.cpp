@@ -1295,14 +1295,24 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
   InVals.clear();
   SmallVector<CCValAssign, 8> ArgLocs;
   MachineFunction &MF = DAG.getMachineFunction();
+  bool UseIARABI = usesMCS51IARABI(MF.getFunction());
   IsVarArg |= MF.getFunction().isVarArg();
+  if (UseIARABI && IsVarArg)
+    report_fatal_error("MCS-51 IAR ABI variadic functions are not "
+                       "implemented yet");
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeFormalArguments(Ins, CC_MCS51);
-  const unsigned IncomingArgBias = getMCS51IncomingStackArgBias(
-      MF.getFunction(), MF.getTarget().getTargetCPU(),
-      MF.getTarget().getFunctionSections());
+  CCInfo.AnalyzeFormalArguments(Ins,
+                                UseIARABI ? CC_MCS51_IAR : CC_MCS51);
+  const unsigned IncomingArgBias =
+      UseIARABI ? 0
+                : getMCS51IncomingStackArgBias(
+                      MF.getFunction(), MF.getTarget().getTargetCPU(),
+                      MF.getTarget().getFunctionSections());
 
   for (const CCValAssign &VA : ArgLocs) {
+    if (UseIARABI && VA.isMemLoc())
+      report_fatal_error("MCS-51 IAR ABI stack arguments require XDATA "
+                         "reentrant stack lowering");
     if (EVT(VA.getLocVT()) != VA.getValVT() ||
         (VA.getValVT() != MVT::i8 && VA.getValVT() != MVT::i16))
       report_fatal_error("unsupported MCS-51 argument type");
@@ -1334,7 +1344,9 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
     if (!VA.isRegLoc())
       report_fatal_error("unsupported MCS-51 argument location");
     const TargetRegisterClass *RC = VA.getLocVT() == MVT::i16
-                                        ? &MCS51::MCS51GPR16RegClass
+                                        ? (UseIARABI
+                                               ? &MCS51::MCS51IARGPR16RegClass
+                                               : &MCS51::MCS51GPR16RegClass)
                                         : &MCS51::MCS51GPR8RegClass;
     Register LiveIn = MF.addLiveIn(VA.getLocReg(),
                                    RC);
@@ -1432,7 +1444,11 @@ SDValue MCS51TargetLowering::LowerCall(
   const SDLoc &DL = CLI.DL;
   MachineFunction &MF = DAG.getMachineFunction();
   CallingConv::ID CallConv = CLI.CallConv;
+  bool UseIARABI = usesMCS51IARABI(MF.getFunction());
   bool IsVarArg = CLI.IsVarArg;
+  if (UseIARABI && IsVarArg)
+    report_fatal_error("MCS-51 IAR ABI variadic calls are not implemented "
+                       "yet");
   CLI.IsTailCall = false;
 
   // LLVM's memset intrinsic carries its fill value as i8, but the C runtime
@@ -1454,7 +1470,13 @@ SDValue MCS51TargetLowering::LowerCall(
 
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeCallOperands(Outs, CC_MCS51);
+  CCInfo.AnalyzeCallOperands(Outs,
+                             UseIARABI ? CC_MCS51_IAR : CC_MCS51);
+  if (UseIARABI && llvm::any_of(ArgLocs, [](const CCValAssign &VA) {
+        return VA.isMemLoc();
+      }))
+    report_fatal_error("MCS-51 IAR ABI stack arguments require XDATA "
+                       "reentrant stack lowering");
 
   SDValue Chain = CLI.Chain;
   SDValue InGlue;
@@ -1584,8 +1606,12 @@ SDValue MCS51TargetLowering::LowerCall(
   InGlue = Chain.getValue(1);
 
   SmallVector<CCValAssign, 2> RetLocs;
+  if (UseIARABI && CLI.Ins.size() > 2)
+    report_fatal_error("MCS-51 IAR ABI returns larger than 32 bits are not "
+                       "implemented yet");
   CCState RetInfo(CallConv, IsVarArg, MF, RetLocs, *DAG.getContext());
-  RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_MCS51);
+  RetInfo.AnalyzeCallResult(CLI.Ins,
+                            UseIARABI ? RetCC_MCS51_IAR : RetCC_MCS51);
   for (const CCValAssign &VA : RetLocs) {
     SDValue Copy = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getValVT(),
                                       InGlue);
@@ -1597,9 +1623,19 @@ SDValue MCS51TargetLowering::LowerCall(
 }
 
 bool MCS51TargetLowering::CanLowerReturn(
-    CallingConv::ID, MachineFunction &, bool,
+    CallingConv::ID, MachineFunction &MF, bool,
     const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &,
     const Type *) const {
+  if (usesMCS51IARABI(MF.getFunction())) {
+    if (Outs.empty())
+      return true;
+    if (Outs.size() == 1 && Outs.front().VT == MVT::i8)
+      return true;
+    return Outs.size() <= 2 &&
+           llvm::all_of(Outs, [](const ISD::OutputArg &Arg) {
+             return Arg.VT == MVT::i16;
+           });
+  }
   // A byte comes back in A, a value of up to four words in IP0-IP3.
   if (Outs.empty())
     return true;
@@ -1622,6 +1658,22 @@ SDValue MCS51TargetLowering::LowerReturn(
     if (!Outs.empty())
       report_fatal_error("MCS-51 interrupt handlers must return void");
     return DAG.getNode(MCS51ISD::RET_INTERRUPT, DL, MVT::Other, Chain);
+  }
+  if (usesMCS51IARABI(DAG.getMachineFunction().getFunction())) {
+    if (Outs.size() != OutVals.size() || Outs.size() > 2)
+      report_fatal_error("MCS-51 IAR ABI return lowering supports at most "
+                         "32-bit scalar values");
+    if (!Outs.empty() && Outs.size() == 1 && Outs.front().VT == MVT::i8) {
+      Chain = DAG.getCopyToReg(Chain, DL, MCS51::R1, OutVals.front());
+      return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
+    }
+    static constexpr MCRegister WordRegs[] = {MCS51::R2R3, MCS51::R4R5};
+    for (unsigned I = 0; I != Outs.size(); ++I) {
+      if (Outs[I].VT != MVT::i16)
+        report_fatal_error("unsupported MCS-51 IAR ABI return type");
+      Chain = DAG.getCopyToReg(Chain, DL, WordRegs[I], OutVals[I]);
+    }
+    return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
   }
   if (Outs.size() > 1) {
     // A value of several words: low word first, in IP0 upwards.
