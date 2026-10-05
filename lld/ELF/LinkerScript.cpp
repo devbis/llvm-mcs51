@@ -922,6 +922,8 @@ void LinkerScript::distributeMCS51AutoBankSections() {
       if (!isd)
         continue;
       for (InputSectionBase *section : isd->sectionBases) {
+        if (!section->isLive())
+          continue;
         bool ExplicitAutoBank = section->name.starts_with(".mcs51.autobank.");
         bool AutoText = haveAllBanks && section->name.starts_with(".text.") &&
                         section->name != ".text.main" &&
@@ -957,7 +959,8 @@ void LinkerScript::distributeMCS51AutoBankSections() {
       if (auto *isd = dyn_cast<InputSectionDescription>(subCmd)) {
         bankDescriptions[bank] = isd;
         for (InputSectionBase *section : isd->sectionBases)
-          bankSizes[bank] += section->getSize();
+          if (section->isLive())
+            bankSizes[bank] += section->getSize();
       }
     }
     if (!bankDescriptions[bank]) {
@@ -991,6 +994,136 @@ void LinkerScript::distributeMCS51AutoBankSections() {
     auto *osd = dyn_cast<OutputDesc>(cmd);
     return osd && osd->osec.name.starts_with(".mcs51.autobank.");
   });
+}
+
+void LinkerScript::fillMCS51CommonSpace() {
+  if (ctx.arg.emachine != EM_8051)
+    return;
+
+  OutputSection *commonText = findByName(sectionCommands, ".text");
+  if (!commonText)
+    return;
+
+  SmallVector<InputSectionDescription *, 2> commonDescriptions;
+  for (SectionCommand *cmd : commonText->commands)
+    if (auto *isd = dyn_cast<InputSectionDescription>(cmd))
+      commonDescriptions.push_back(isd);
+  if (commonDescriptions.empty())
+    return;
+
+  // CC2530 reserves the low 0x100 bytes for reset and interrupt vectors. The
+  // output-section address may not be evaluated until final layout.
+  uint64_t commonEnd = commonText->addr ? commonText->addr : 0x100;
+  for (InputSectionDescription *isd : commonDescriptions)
+    for (InputSection *section : isd->sections) {
+      if (!section->isLive())
+        continue;
+      commonEnd = alignToPowerOf2(commonEnd, section->addralign);
+      commonEnd += section->getSize();
+    }
+
+  struct Candidate {
+    InputSection *section;
+  };
+  SmallVector<Candidate, 0> candidates;
+
+  std::array<OutputSection *, 7> banks{};
+  std::array<SmallVector<InputSectionDescription *, 2>, 7> bankDescriptions;
+  std::array<uint64_t, 7> bankSizes{};
+  for (unsigned bank = 0; bank != banks.size(); ++bank) {
+    std::string name = (Twine(".bank") + Twine(bank + 1)).str();
+    banks[bank] = findByName(sectionCommands, name);
+    if (!banks[bank])
+      return;
+    for (SectionCommand *cmd : banks[bank]->commands)
+      if (auto *isd = dyn_cast<InputSectionDescription>(cmd)) {
+        bankDescriptions[bank].push_back(isd);
+        for (auto it = isd->sections.begin(); it != isd->sections.end();) {
+          InputSection *section = *it;
+          StringRef name = section->name;
+          bool AutoBank = name.starts_with(".mcs51.autobank.");
+          bool AutoText = name.starts_with(".text.") &&
+                          name != ".text.main" &&
+                          !name.starts_with(".text.main.") &&
+                          !name.starts_with(".text.startup") &&
+                          !name.starts_with(".text.__mcs51_") &&
+                          !name.starts_with(".text.bankthunks.") &&
+                          !name.starts_with(".text.autobankthunks.");
+          if ((AutoBank || AutoText) && section->isLive()) {
+            candidates.push_back({section});
+            it = isd->sections.erase(it);
+          } else {
+            if (section->isLive())
+              bankSizes[bank] += section->getSize();
+            ++it;
+          }
+        }
+      }
+    if (bankDescriptions[bank].empty()) {
+      auto *isd = make<InputSectionDescription>(StringRef{});
+      banks[bank]->commands.push_back(isd);
+      bankDescriptions[bank].push_back(isd);
+    }
+
+  }
+  llvm::sort(candidates, [](const Candidate &lhs, const Candidate &rhs) {
+    if (lhs.section->getSize() != rhs.section->getSize())
+      return lhs.section->getSize() > rhs.section->getSize();
+    return lhs.section->name < rhs.section->name;
+  });
+
+  uint64_t commonLimit = 0x8000;
+  if (commonText->memRegion)
+    commonLimit = commonText->memRegion->getOrigin() +
+                  commonText->memRegion->getLength();
+  uint64_t loadReserve = 0;
+  for (StringRef name : {".mcs51_pdata", ".data", ".mcs51_data1",
+                         ".mcs51_data2", ".mcs51_bit"}) {
+    OutputSection *section = findByName(sectionCommands, name);
+    if (!section)
+      continue;
+    uint64_t size = 0;
+    for (SectionCommand *cmd : section->commands)
+      if (auto *isd = dyn_cast<InputSectionDescription>(cmd))
+        for (InputSection *input : isd->sections) {
+          if (!input->isLive())
+            continue;
+          size = alignToPowerOf2(size, input->addralign) + input->getSize();
+        }
+    loadReserve = alignToPowerOf2(loadReserve, section->addralign) + size;
+  }
+  if (loadReserve >= commonLimit)
+    return;
+  commonLimit -= loadReserve;
+  InputSectionDescription *commonDestination = commonDescriptions.back();
+  for (const Candidate &candidate : candidates) {
+    constexpr uint64_t bankCapacity = 0x8000;
+    unsigned bank = 0;
+    while (bank != banks.size() &&
+           bankSizes[bank] + candidate.section->getSize() > bankCapacity)
+      ++bank;
+    if (bank != banks.size()) {
+      bankDescriptions[bank].back()->sections.push_back(candidate.section);
+      banks[bank]->commitSection(candidate.section);
+      bankSizes[bank] += candidate.section->getSize();
+      continue;
+    }
+
+    uint64_t start = alignToPowerOf2(commonEnd, candidate.section->addralign);
+    uint64_t end = start + candidate.section->getSize();
+    if (end <= commonLimit) {
+      commonDestination->sections.push_back(candidate.section);
+      commonText->commitSection(candidate.section);
+      commonEnd = end;
+      continue;
+    }
+
+    // Preserve the usual bank overflow diagnostic if neither flash area can
+    // hold this section.
+    bankDescriptions.back().back()->sections.push_back(candidate.section);
+    banks.back()->commitSection(candidate.section);
+    bankSizes.back() += candidate.section->getSize();
+  }
 }
 
 static OutputDesc *createSection(Ctx &ctx, InputSectionBase *isec,

@@ -383,6 +383,7 @@ public:
   void allocateHeaders(SmallVector<std::unique_ptr<PhdrEntry>, 0> &phdrs);
   void processSectionCommands();
   void distributeMCS51AutoBankSections();
+  void fillMCS51CommonSpace();
   void processSymbolAssignments();
   void declareSymbols();
 

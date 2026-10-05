@@ -9,6 +9,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
@@ -484,8 +485,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
                      Custom);
     setTruncStoreAction(VT, MVT::i1, Custom);
   }
-  // The 8051 has no indirect branch instruction; avoid jump-table lowering.
-  setMinimumJumpTableEntries(~0U);
+  // The dispatcher has a fixed setup cost. Use tables only when enough dense
+  // cases can repay it.
+  setMinimumJumpTableEntries(16);
+  setOperationAction(ISD::BR_JT, MVT::Other, Custom);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::ADD);
   // MCS51ISD::BR_EQ/BR_NE are target opcodes (>= ISD::BUILTIN_OP_END); the
@@ -517,7 +520,6 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::FP_TO_UINT, MVT::i64, LibCall);
   setOperationAction(ISD::SINT_TO_FP, MVT::i64, LibCall);
   setOperationAction(ISD::UINT_TO_FP, MVT::i64, LibCall);
-  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
   setOperationAction(ISD::MUL, MVT::i16, Custom);
   setOperationAction(ISD::MUL, MVT::i32, Custom);
   // Variable 32-bit shifts use the runtime helpers.
@@ -549,6 +551,17 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   MaxStoresPerMemcpy = MaxStoresPerMemcpyOptSize = 0;
   setStackPointerRegisterToSaveRestore(MCS51::SP);
   computeRegisterProperties(STI.getRegisterInfo());
+}
+
+bool MCS51TargetLowering::isSuitableForJumpTable(
+    const SwitchInst *SI, uint64_t NumCases, uint64_t Range,
+    ProfileSummaryInfo *PSI, BlockFrequencyInfo *BFI) const {
+  return Range <= 256 && NumCases >= 16 && NumCases * 100 >= Range * 90 &&
+         TargetLowering::isSuitableForJumpTable(SI, NumCases, Range, PSI, BFI);
+}
+
+unsigned MCS51TargetLowering::getJumpTableEncoding() const {
+  return MachineJumpTableInfo::EK_Inline;
 }
 
 EVT MCS51TargetLowering::getSetCCResultType(const DataLayout &, LLVMContext &,
@@ -665,6 +678,14 @@ void MCS51TargetLowering::ReplaceNodeResults(
 SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
+  if (Op.getOpcode() == ISD::BR_JT) {
+    SDValue Chain = Op.getOperand(0);
+    auto *JT = cast<JumpTableSDNode>(Op.getOperand(1));
+    SDValue Index = DAG.getZExtOrTrunc(Op.getOperand(2), DL, MVT::i16);
+    SDValue TargetJT = DAG.getTargetJumpTable(JT->getIndex(), MVT::i32);
+    return DAG.getNode(MCS51ISD::BR_JT, DL, MVT::Other, Chain, TargetJT,
+                       Index);
+  }
   if (Op.getOpcode() == ISD::SIGN_EXTEND_INREG &&
       Op.getValueType() == MVT::i16) {
     EVT FromVT = cast<VTSDNode>(Op.getOperand(1))->getVT();

@@ -8,6 +8,7 @@
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -50,6 +51,22 @@ public:
   static char ID;
 
   StringRef getPassName() const override { return "MCS-51 Assembly Printer"; }
+
+  void emitJumpTableInfo() override {
+    const MachineJumpTableInfo *MJTI = MF->getJumpTableInfo();
+    if (!MJTI)
+      return;
+
+    const auto &JumpTables = MJTI->getJumpTables();
+    for (unsigned JTI = 0; JTI < JumpTables.size(); ++JTI) {
+      if (JumpTables[JTI].MBBs.empty())
+        continue;
+      OutStreamer->emitLabel(GetJTISymbol(JTI));
+      for (const MachineBasicBlock *MBB : JumpTables[JTI].MBBs)
+        OutStreamer->emitValue(
+            MCSymbolRefExpr::create(MBB->getSymbol(), OutContext), 2);
+    }
+  }
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        const char *ExtraCode, raw_ostream &OS) override {
@@ -221,6 +238,48 @@ public:
     if (SkipNextReturn) {
       SkipNextReturn = false;
       assert(MI->getOpcode() == MCS51::RET || MI->getOpcode() == MCS51::RET_NOA);
+      return;
+    }
+    if (MI->getOpcode() == MCS51::BR_JT) {
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      const MachineOperand &IndexOperand = MI->getOperand(0);
+      Register IndexLo = TRI->getSubReg(IndexOperand.getReg(), MCS51::sub_lo);
+      auto Emit = [&](unsigned Opcode, ArrayRef<MCOperand> Operands) {
+        MCInst Inst;
+        Inst.setOpcode(Opcode);
+        for (const MCOperand &Operand : Operands)
+          Inst.addOperand(Operand);
+        EmitToStreamer(*OutStreamer, Inst);
+      };
+
+      Emit(MCS51::MOV_DPTR_IMM,
+           {MCOperand::createReg(MCS51::DPTR),
+            MCOperand::createExpr(MCSymbolRefExpr::create(
+                GetJTISymbol(MI->getOperand(1).getIndex()), OutContext))});
+      if (IndexLo >= MCS51::R0 && IndexLo <= MCS51::R7)
+        Emit(MCS51::MOV_A_RN, {MCOperand::createReg(IndexLo)});
+      else
+        Emit(MCS51::MOV_A_DIRECT,
+             {MCOperand::createReg(MCS51::A),
+              MCOperand::createImm(TRI->getEncodingValue(IndexLo))});
+      Emit(MCS51::MOV_DIRECT_IMM,
+           {MCOperand::createImm(0xF0), MCOperand::createImm(2)});
+      Emit(MCS51::MUL_AB, {});
+      Emit(MCS51::MOV_RN_A, {MCOperand::createReg(MCS51::R7)});
+      Emit(MCS51::MOV_A_DPH, {MCOperand::createReg(MCS51::A)});
+      Emit(MCS51::ADD_A_DIRECT,
+           {MCOperand::createReg(MCS51::A), MCOperand::createImm(0xF0)});
+      Emit(MCS51::MOV_DPH_A, {});
+      Emit(MCS51::MOV_A_RN, {MCOperand::createReg(MCS51::R7)});
+      Emit(MCS51::MOVC_ADPTR, {});
+      Emit(MCS51::MOV_RN_A, {MCOperand::createReg(MCS51::R6)});
+      Emit(MCS51::MOV_A_RN, {MCOperand::createReg(MCS51::R7)});
+      Emit(MCS51::INC_A, {});
+      Emit(MCS51::MOVC_ADPTR, {});
+      Emit(MCS51::MOV_DPH_A, {});
+      Emit(MCS51::MOV_DPL_RN, {MCOperand::createReg(MCS51::R6)});
+      Emit(MCS51::CLR_A, {});
+      Emit(MCS51::JMP_ADPTR, {});
       return;
     }
     switch (MI->getOpcode()) {
