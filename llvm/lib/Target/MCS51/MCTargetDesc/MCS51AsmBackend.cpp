@@ -62,6 +62,8 @@ public:
       return MCS51::fixup_hi8;
     if (Name == "fixup_bit8")
       return MCS51::fixup_bit8;
+    if (Name == "fixup_pcrel8")
+      return MCS51::fixup_pcrel8;
     return MCAsmBackend::getFixupKind(Name);
   }
 
