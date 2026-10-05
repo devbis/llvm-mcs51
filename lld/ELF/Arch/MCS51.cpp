@@ -107,6 +107,31 @@ static const Defined *getCommonTargetOfExternalBankThunk(Ctx &ctx,
   return target;
 }
 
+static Defined *findMCS51DefinedSymbol(Ctx &ctx, InputFile *file,
+                                       StringRef name) {
+  if (file && file->kind() == InputFile::ObjKind)
+    for (Symbol *symbol : file->getSymbols())
+      if (symbol->getName() == name)
+        if (auto *defined = dyn_cast<Defined>(symbol))
+          return defined;
+  if (Symbol *symbol = ctx.symtab->find(name))
+    return dyn_cast<Defined>(symbol);
+  return nullptr;
+}
+
+static Defined *findMCS51BankCallTarget(Ctx &ctx, const Defined &thunk) {
+  constexpr StringLiteral Prefix("__mcs51_bankcall_");
+  if (!thunk.getName().starts_with(Prefix))
+    return nullptr;
+  return findMCS51DefinedSymbol(
+      ctx, thunk.file, thunk.getName().drop_front(Prefix.size()));
+}
+
+static Defined *findMCS51BankCallThunk(Ctx &ctx, const Defined &function) {
+  std::string name = (Twine("__mcs51_bankcall_") + function.getName()).str();
+  return findMCS51DefinedSymbol(ctx, function.file, name);
+}
+
 class MCS51 final : public TargetInfo {
 public:
   MCS51(Ctx &ctx) : TargetInfo(ctx) { defaultImageBase = 0; }
@@ -196,8 +221,17 @@ bool MCS51::relaxOnce(int Pass) const {
     for (InputSection *Sec : getInputSections(*OSec, Storage)) {
       MutableArrayRef<Relocation> Relocs = Sec->relocs();
       if (Pass == 0) {
-        bool HasRelaxable = llvm::any_of(
-            Relocs, [](const Relocation &R) { return R.type == R_8051_RELAX; });
+        bool HasRelaxable = llvm::any_of(Relocs, [&](const Relocation &R) {
+          if (R.type == R_8051_RELAX || R.type == R_8051_DPTR16 ||
+              R.type == R_8051_DPTR16_XDATA ||
+              R.type == R_8051_DPTR16_CODE)
+            return true;
+          if (R.type != R_8051_16_BE || !R.sym || !R.sym->isFunc() ||
+              R.offset == 0 || R.offset >= Sec->content().size())
+            return false;
+          uint8_t opcode = Sec->content()[R.offset - 1];
+          return opcode == 0x12 || opcode == 0x02; // LCALL or LJMP
+        });
         if (!HasRelaxable)
           continue;
         Sec->relaxAux = make<RelaxAux>();
@@ -293,6 +327,33 @@ bool MCS51::relaxOnce(int Pass) const {
               HavePrevious = false;
             }
           }
+        } else if (R.type == R_8051_16_BE && R.sym && R.sym->isFunc() &&
+                   R.offset > 0 && R.offset < Sec->content().size()) {
+          // Direct transfers within a bank can use the two-byte ACALL/AJMP
+          // encoding when the destination is in the same 2 KiB page. This
+          // removes one byte from the input section and lets the normal
+          // address assignment loop account for the shorter instruction.
+          uint8_t opcode = Sec->content()[R.offset - 1];
+          if (opcode == 0x12 || opcode == 0x02) {
+            auto *target = dyn_cast<Defined>(R.sym);
+            auto *targetInput =
+                target ? dyn_cast_or_null<InputSection>(target->section)
+                       : nullptr;
+            unsigned targetBank =
+                targetInput
+                    ? getMCS51CodeBank(targetInput->getOutputSection())
+                    : 0;
+            unsigned callerBank = getMCS51CodeBank(Sec->getOutputSection());
+            uint64_t transferVA = Sec->getVA() + R.offset - Delta;
+            uint64_t destinationVA =
+                Sec->getRelocTargetVA(ctx, R, transferVA);
+            uint64_t nextPC = transferVA + 2;
+            if (targetInput && (targetInput->flags & SHF_EXECINSTR) &&
+                targetBank == callerBank &&
+                (destinationVA & ~uint64_t(0x7ff)) ==
+                    (nextPC & ~uint64_t(0x7ff)))
+              Remove = 1;
+          }
         }
         for (; !Anchors.empty() && Anchors.front().offset <= R.offset;
              Anchors = Anchors.drop_front()) {
@@ -348,11 +409,23 @@ void MCS51::finalizeRelax(int Passes) const {
         size_t CopySize = OpcodeOffset - Src;
         std::memcpy(New + Dst, Old.data() + Src, CopySize);
         Dst += CopySize;
-        New[Dst++] = 0xa3; // INC DPTR replaces MOV DPTR,#symbol.
-        Src = R.offset + 2;
-        R.type = R_8051_NONE;
-        if (I + 1 < Relocs.size() && Relocs[I + 1].type == R_8051_RELAX)
-          Relocs[I + 1].type = R_8051_NONE;
+        if (RemovedHere == 1) {
+          // Replace LCALL/LJMP (opcode, high address, low address) with
+          // ACALL/AJMP (opcode, low address). R.offset already points at the
+          // low byte in the shortened instruction after earlier removals.
+          New[Dst++] = Old[OpcodeOffset] == 0x12 ? 0x11 : 0x01;
+          New[Dst++] = Old[R.offset + 1];
+          R.type = R_8051_11;
+          R.offset = OpcodeOffset;
+        } else {
+          New[Dst++] = 0xa3; // INC DPTR replaces MOV DPTR,#symbol.
+          Src = R.offset + 2;
+          R.type = R_8051_NONE;
+          if (I + 1 < Relocs.size() && Relocs[I + 1].type == R_8051_RELAX)
+            Relocs[I + 1].type = R_8051_NONE;
+        }
+        if (RemovedHere == 1)
+          Src = R.offset + 2;
       }
       std::memcpy(New + Dst, Old.data() + Src, Old.size() - Src);
       Sec->content_ = New;
@@ -512,6 +585,29 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       relocate(loc, rel, val);
       continue;
     }
+    if (rel.sym && rel.sym->getName().starts_with("__mcs51_bankcall_")) {
+      if (auto *thunk = dyn_cast<Defined>(rel.sym)) {
+        if (Defined *function = findMCS51BankCallTarget(ctx, *thunk)) {
+          auto *functionInput =
+              dyn_cast_or_null<InputSection>(function->section);
+          unsigned functionBank = functionInput
+                                      ? getMCS51CodeBank(
+                                            functionInput->getOutputSection())
+                                      : 0;
+          unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
+          bool isDirectTransfer =
+              rel.type == R_8051_16_BE && (sec.flags & SHF_EXECINSTR) &&
+              rel.offset > 0 &&
+              (sec.content()[rel.offset - 1] == 0x12 ||
+               sec.content()[rel.offset - 1] == 0x02);
+          // A function in common flash, or a function called from its own
+          // bank, does not need the bank-switching trampoline.
+          if (!functionBank ||
+              (isDirectTransfer && functionBank == callerBank))
+            val = function->getVA(ctx, rel.addend);
+        }
+      }
+    }
     if (rel.sym && rel.sym->isFunc()) {
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
       if (rel.type == R_8051_11 && targetBank != callerBank)
@@ -535,9 +631,7 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
         // Some declarations in another translation unit do not carry a
         // section attribute. Resolve those calls and function pointers here,
         // after bank placement has made the target bank known.
-        std::string thunkName =
-            (Twine("__mcs51_bankcall_") + rel.sym->getName()).str();
-        auto *thunk = dyn_cast_or_null<Defined>(ctx.symtab->find(thunkName));
+        auto *thunk = findMCS51BankCallThunk(ctx, *target);
         if (thunk)
           val = thunk->getVA(ctx, rel.addend);
         else

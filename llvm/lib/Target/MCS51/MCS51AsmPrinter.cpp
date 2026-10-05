@@ -471,10 +471,20 @@ public:
           }
           const Function *Target = MF->getFunction().getParent()->getFunction(
               TargetName);
-          if (Target && !Target->isDeclaration() &&
-              (getMCS51CodeBank(Target->getSection()) ||
-               isAutoBankFunction(*Target, TM.getTargetCPU(),
-                                  TM.Options.FunctionSections))) {
+          bool IsDirectCall = isMCS51LongCallOpcode(MI->getOpcode());
+          unsigned TargetBank =
+              Target ? getMCS51CodeBank(Target->getSection()) : 0;
+          unsigned CallerBank = MF->getFunction().hasSection()
+                                    ? getMCS51CodeBank(
+                                          MF->getFunction().getSection())
+                                    : 0;
+          bool TargetAutoBank =
+              Target && isAutoBankFunction(*Target, TM.getTargetCPU(),
+                                           TM.Options.FunctionSections);
+          if (Target &&
+              ((TargetBank &&
+                (!IsDirectCall || TargetBank != CallerBank)) ||
+               (TargetAutoBank && !IsDirectCall))) {
             MCInst Call;
             Call.setOpcode(MCS51::LCALL);
             Call.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
@@ -482,7 +492,7 @@ public:
             EmitToStreamer(*OutStreamer, Call);
             return;
           }
-          if (Target && !Target->isDeclaration())
+          if (Target)
             break;
           // Runtime support is kept in common flash. External calls to it do
           // not need the fallback bank-call thunk used for unknown user code.
@@ -525,6 +535,7 @@ public:
           bool TargetAutoBank =
               isAutoBankFunction(*Target, TM.getTargetCPU(),
                                  TM.Options.FunctionSections);
+          bool IsDirectCall = isMCS51LongCallOpcode(MI->getOpcode());
           unsigned CallerBank = MF->getFunction().hasSection()
                                     ? getMCS51CodeBank(
                                           MF->getFunction().getSection())
@@ -532,14 +543,13 @@ public:
           // A banked function's 16-bit code address is shared by every bank.
           // Use its common-area trampoline whenever the address escapes as a
           // value. Direct calls within the same bank still target the body.
-          if ((TargetBank &&
-              (!isMCS51LongCallOpcode(MI->getOpcode()) ||
-               TargetBank != CallerBank)) ||
-              TargetAutoBank)
+          if ((TargetBank && (!IsDirectCall || TargetBank != CallerBank)) ||
+              (TargetAutoBank && !IsDirectCall))
             Symbol = getBankThunkSymbol(*Target);
           else if (Target->isDeclaration() &&
                    TM.getTargetCPU().equals_insensitive("cc2530") &&
-                   !Target->getName().starts_with("__mcs51_"))
+                   !Target->getName().starts_with("__mcs51_") &&
+                   !IsDirectCall)
             Symbol = getExternalBankCallThunkSymbol(Target->getName());
         }
         const MCExpr *Expr = MCSymbolRefExpr::create(Symbol, OutContext);

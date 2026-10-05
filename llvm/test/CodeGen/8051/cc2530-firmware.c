@@ -41,7 +41,7 @@ int main(void) {
 // MAP-DAG: Value: 0x8000
 
 // DIS-LABEL: <reset>:
-// DIS: ljmp
+// DIS: ajmp
 // DIS-LABEL: <__mcs51_start>:
 // DIS: mov 129, #127
 // DIS: mov dptr, #0

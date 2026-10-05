@@ -990,6 +990,131 @@ void LinkerScript::distributeMCS51AutoBankSections() {
     llvm::erase(candidate.source->sectionBases, candidate.section);
   }
 
+  // Direct calls to automatically banked functions are emitted as references
+  // to the function body. Keep a common-area trampoline only if a live caller
+  // can cross banks or if code takes the function's address. Calls within one
+  // bank can branch straight to the body, and their unused trampoline sections
+  // should not consume the scarce common flash window.
+  if (ctx.arg.gcSections) {
+    constexpr StringLiteral BankCallPrefix("__mcs51_bankcall_");
+    auto findDefined = [&](InputFile *file, StringRef name) -> Defined * {
+      if (file && file->kind() == InputFile::ObjKind)
+        for (Symbol *symbol : file->getSymbols())
+          if (symbol->getName() == name)
+            if (auto *defined = dyn_cast<Defined>(symbol))
+              return defined;
+      if (Symbol *symbol = ctx.symtab->find(name))
+        return dyn_cast<Defined>(symbol);
+      return nullptr;
+    };
+    auto getBankForSection = [](const OutputSection *output) {
+      if (!output || !output->name.starts_with(".bank"))
+        return 0U;
+      unsigned bank = 0;
+      StringRef bankName = output->name.drop_front(5);
+      if (bankName.getAsInteger(10, bank) || bank < 1 || bank > 7)
+        return 0U;
+      return bank;
+    };
+    auto getBank = [&](const Symbol *symbol) {
+      auto *defined = dyn_cast_or_null<Defined>(symbol);
+      auto *section = defined
+                          ? dyn_cast_or_null<InputSection>(defined->section)
+                          : nullptr;
+      return getBankForSection(section ? section->getOutputSection() : nullptr);
+    };
+    auto isDirectTransfer = [](const InputSection &source, uint32_t type,
+                               uint64_t offset) {
+      if (!(source.flags & SHF_EXECINSTR) || !offset ||
+          offset > source.content().size())
+        return false;
+      uint8_t opcode = source.content()[offset - 1];
+      if (type == R_8051_16_BE)
+        return opcode == 0x12 || opcode == 0x02; // LCALL or LJMP
+      return type == R_8051_11 && (opcode & 0x1f) == 0x01;
+    };
+    DenseSet<InputSectionBase *> neededThunks;
+    auto processRelocation = [&](InputSection &source,
+                                 const auto &relocation) {
+      if (source.name.starts_with(".text.autobankthunks.") ||
+          source.name.starts_with(".text.bankthunks."))
+        return;
+      unsigned callerBank = getBankForSection(source.getOutputSection());
+      Symbol &symbol = source.file->getRelocTargetSym(relocation);
+      auto *defined = dyn_cast<Defined>(&symbol);
+      if (!defined)
+        return;
+      // Local bank-call thunks can be referenced through their section symbol
+      // instead of the __mcs51_bankcall_* alias. The linker cannot prove that
+      // such a relocation is a direct same-bank call, so preserve its section.
+      if (auto *targetSection =
+              dyn_cast_or_null<InputSectionBase>(defined->section))
+        if (targetSection->name.starts_with(".text.autobankthunks.")) {
+          neededThunks.insert(targetSection);
+          return;
+        }
+      uint32_t type = relocation.getType(ctx.arg.isMips64EL);
+      bool direct = isDirectTransfer(source, type, relocation.r_offset);
+      Defined *function = defined;
+      bool isThunk = symbol.getName().starts_with(BankCallPrefix);
+      if (isThunk)
+        function = findDefined(
+            defined->file, symbol.getName().drop_front(BankCallPrefix.size()));
+      unsigned targetBank = getBank(function);
+      // Non-call references (for example entries in callback tables) must
+      // keep the thunk even when its target lives in common flash: the
+      // relocation names the thunk section itself and is not rewritten to
+      // point at the target function. Only a direct transfer can bypass it.
+      bool needsThunk = !function || !direct ||
+                        (targetBank && targetBank != callerBank);
+      if (!needsThunk)
+        return;
+      if (isThunk) {
+        if (auto *thunkSection =
+                dyn_cast_or_null<InputSectionBase>(defined->section))
+          neededThunks.insert(thunkSection);
+      } else if (symbol.isFunc()) {
+        std::string thunkName =
+            (Twine(BankCallPrefix) + symbol.getName()).str();
+        if (Defined *thunk = findDefined(defined->file, thunkName))
+          if (auto *thunkSection =
+                  dyn_cast_or_null<InputSectionBase>(thunk->section))
+            neededThunks.insert(thunkSection);
+      }
+    };
+    for (InputSectionBase *base : ctx.inputSections) {
+      auto *source = dyn_cast<InputSection>(base);
+      if (!source || !source->isLive() ||
+          source->file->kind() != InputFile::ObjKind)
+        continue;
+      const RelsOrRelas<ELF32LE> relocs = source->relsOrRelas<ELF32LE>();
+      for (const ELF32LE::Rel &relocation : relocs.rels)
+        processRelocation(*source, relocation);
+      for (const ELF32LE::Rela &relocation : relocs.relas)
+        processRelocation(*source, relocation);
+      for (const ELF32LE::Crel &relocation : relocs.crels)
+        processRelocation(*source, relocation);
+    }
+
+    SmallVector<InputSectionBase *, 0> discardThunks;
+    for (InputSectionBase *section : ctx.inputSections)
+      if (section->isLive() &&
+          section->name.starts_with(".text.autobankthunks.") &&
+          !neededThunks.contains(section))
+        discardThunks.push_back(section);
+    for (InputSectionBase *section : discardThunks) {
+      section->markDead();
+      for (SectionCommand *cmd : sectionCommands) {
+        auto *osd = dyn_cast<OutputDesc>(cmd);
+        if (!osd)
+          continue;
+        for (SectionCommand *subCmd : osd->osec.commands)
+          if (auto *isd = dyn_cast<InputSectionDescription>(subCmd))
+            llvm::erase(isd->sectionBases, section);
+      }
+    }
+  }
+
   llvm::erase_if(sectionCommands, [](SectionCommand *cmd) {
     auto *osd = dyn_cast<OutputDesc>(cmd);
     return osd && osd->osec.name.starts_with(".mcs51.autobank.");

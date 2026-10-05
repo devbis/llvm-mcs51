@@ -3,16 +3,18 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
 // RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s %t.caller.o \
 // RUN:   %t.callee.o -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
-// RUN:   -Wl,--no-check-sections -o %t.elf
+// RUN:   -Wl,--no-check-sections -Wl,--gc-sections -o %t.elf
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=LINK
 // RUN: clang -target mcs51 -mcpu=cc2530 -O0 -S %s -o - \
 // RUN:   | FileCheck %s --check-prefix=ASM
+// RUN: clang -target mcs51 -mcpu=cc2530 -O0 -DOMIT_BANK_ATTRIBUTE -S %s -o - \
+// RUN:   | FileCheck %s --check-prefix=NOATTR-ASM
 // RUN: clang -target mcs51 -mcpu=cc2530 -O0 -DOMIT_BANK_ATTRIBUTE -c %s \
 // RUN:   -o %t.bad-caller.o
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
 // RUN:   %S/../../../lib/Target/MCS51/cc2530_startup.s %t.bad-caller.o \
 // RUN:   %t.callee.o -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
-// RUN:   -Wl,--no-check-sections -o %t.bad.elf
+// RUN:   -Wl,--no-check-sections -Wl,--gc-sections -o %t.bad.elf
 // RUN: llvm-objdump -d %t.bad.elf | FileCheck %s --check-prefix=NOATTR
 
 #ifdef DEFINE_BANKED
@@ -41,8 +43,14 @@ int main(void) { return cross_tu_caller(0); }
 // ASM: lcall __mcs51_bankcall_banked_add
 // ASM: .short __mcs51_bankcall_banked_add
 
+// A declaration without bank placement emits a direct relocation. LLD picks
+// the target bank after placing both translation units and redirects only
+// cross-bank calls through the target's trampoline.
+// NOATTR-ASM-LABEL: cross_tu_caller:
+// NOATTR-ASM: lcall banked_add
+
 // Even without a section attribute on the declaration, LLD resolves the
-// cross-translation-unit call through the definition's common-area thunk.
+// cross-translation-unit call after automatic bank placement.
 // NOATTR-LABEL: <__mcs51_bankcall_banked_add>:
 // NOATTR: mov 159, #2
 // NOATTR: lcall 32768

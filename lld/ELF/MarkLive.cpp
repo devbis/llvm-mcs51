@@ -30,6 +30,7 @@
 #include "lld/Common/Strings.h"
 #include "llvm/ADT/DenseMapInfoVariant.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Parallel.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <variant>
@@ -530,6 +531,29 @@ static void processSectionEdges(
           word->fetch_or(liveBit, std::memory_order_relaxed);
         }
         fn(relSec, offset);
+        // A direct call to an automatically banked function may need its
+        // common-area bank-call trampoline after the linker assigns banks.
+        // Keep that candidate alive through section assignment; the MCS-51
+        // linker later drops it when the caller and callee land in one bank.
+        if (ctx.arg.emachine == EM_8051 && sym.isFunc() &&
+            !sym.getName().starts_with("__mcs51_bankcall_")) {
+          auto getThunkSection = [&](InputFile *file) -> InputSectionBase * {
+            if (file && file->kind() == InputFile::ObjKind) {
+              std::string thunkName =
+                  (Twine("__mcs51_bankcall_") + sym.getName()).str();
+              for (Symbol *candidate : file->getSymbols())
+                if (candidate->getName() == thunkName)
+                  if (auto *thunk = dyn_cast<Defined>(candidate))
+                    if (auto *thunkSec =
+                            dyn_cast_or_null<InputSectionBase>(thunk->section))
+                      return thunkSec;
+            }
+            return nullptr;
+          };
+          if (auto *target = dyn_cast<Defined>(&sym))
+            if (InputSectionBase *thunk = getThunkSection(target->file))
+              fn(thunk, 0);
+        }
       }
       return;
     }
