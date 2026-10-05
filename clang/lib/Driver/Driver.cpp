@@ -168,6 +168,25 @@ public:
       }
   }
 
+  void addClangTargetOptions(const ArgList &DriverArgs,
+                             ArgStringList &CC1Args, BoundArch BA,
+                             Action::OffloadKind DeviceOffloadKind) const
+      override {
+    Generic_ELF::addClangTargetOptions(DriverArgs, CC1Args, BA,
+                                       DeviceOffloadKind);
+    const Arg *ABIArg = DriverArgs.getLastArg(options::OPT_mabi_EQ);
+    if (!ABIArg)
+      return;
+    ABIArg->claim();
+    if (StringRef(ABIArg->getValue()) != "iar") {
+      getDriver().Diag(diag::err_drv_unsupported_opt_for_target)
+          << ABIArg->getAsString(DriverArgs) << getTriple().str();
+      return;
+    }
+    CC1Args.push_back("-target-abi");
+    CC1Args.push_back("iar");
+  }
+
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args, BoundArch BA,
                 Action::OffloadKind DeviceOffloadKind) const override {
