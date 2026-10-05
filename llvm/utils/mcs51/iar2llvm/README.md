@@ -34,8 +34,8 @@ python3 -m iar2llvm convert-library-listing /private/tmp/Router-Pro.lst \
   --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
 ```
 
-This scans the listing, converts each module with public `BANKED_CODE`
-or `RCODE` functions, and combines their ELF objects into one archive. It
+This scans the listing, converts each module with public `BANKED_CODE`, `RCODE`,
+or `CSTART` functions, and combines their ELF objects into one archive. It
 defaults to XLIB's `LAN=00` variant when a library contains duplicate module
 names. Repeat `--symbol NAME` to limit conversion to modules that define
 specific public symbols, such as runtime helpers. It reports unresolved IAR
@@ -148,8 +148,8 @@ CC2530 startup copy from CODE. The converter supports 16-bit pointers to public
 `CODE_C` objects; other relocations and unsupported IAR initialization
 metadata are rejected.
 
-`convert-code-listing` can select one public `BANKED_CODE` or `RCODE` function
-with `--symbol`, collect public `BANKED_CODE` functions with
+`convert-code-listing` can select one public `BANKED_CODE`, `RCODE`, or `CSTART`
+function with `--symbol`, collect public `BANKED_CODE` functions with
 `--all-public-banked`, or collect public banked and common code with
 `--all-public-code`. The all-public forms also keep referenced code segments,
 relays, literal private
@@ -173,12 +173,16 @@ python3 -m iar2llvm convert-code-listing /private/tmp/Router-Pro.lst \
   --llvm-ar ../../../../llvm-mcs51-build/bin/llvm-ar
 ```
 
-This remains a partial record decoder. In the selected Z-Stack RouterEB
-libraries, module-wide conversion can still stop on unsupported records or
-unresolved symbol forms. The converter reports the first unsupported record
-and does not write a partial archive. The generated objects preserve the IAR
-machine code and supported relocations, but do not adapt IAR calling
-conventions or runtime symbols to Clang's ABI.
+This remains a partial UBROF record decoder in general. For the fixed
+`GenericApp.ewp` `RouterEB` library selection listed in the manifests, all 76
+selected modules convert without unsupported records. For other builds or
+unselected modules, the converter continues through the listing, reports all
+unsupported modules together, and writes an archive from the modules that did
+convert. Unresolved external names are also reported; these include IAR
+runtime and application-provided symbols that must be supplied separately.
+The generated objects preserve the IAR machine-code bytes and encode supported
+references as ELF relocations, but do not adapt IAR calling conventions or
+runtime symbols to Clang's ABI.
 
 For the first executable slice, produce an XLIB listing of `ecc.r51` and
 convert one public banked function together with its relay and referenced code
