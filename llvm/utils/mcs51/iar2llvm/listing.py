@@ -317,8 +317,9 @@ def convert_listing_to_archive(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iar2llvm-", dir=output.parent) as temp:
         temp_dir = Path(temp)
-        asm_path = temp_dir / f"{module_name}.s"
-        object_path = temp_dir / f"{module_name}.o"
+        module_stem = _module_file_stem(module_name)
+        asm_path = temp_dir / f"{module_stem}.s"
+        object_path = temp_dir / f"{module_stem}.o"
         archive_path = temp_dir / output.name
         asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
 
@@ -529,9 +530,9 @@ def convert_const_listing_to_archive(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iar2llvm-", dir=output.parent) as temp:
         temp_dir = Path(temp)
-        module_token = module_name.encode("utf-8").hex()
-        asm_path = temp_dir / f"{module_token}.s"
-        object_path = temp_dir / f"{module_token}.o"
+        module_stem = _module_file_stem(module_name)
+        asm_path = temp_dir / f"{module_stem}.s"
+        object_path = temp_dir / f"{module_stem}.o"
         archive_path = temp_dir / output.name
         asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
 
@@ -861,9 +862,9 @@ def convert_initialized_listing_to_archive(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iar2llvm-", dir=output.parent) as temp:
         temp_dir = Path(temp)
-        module_token = module_name.encode("utf-8").hex()
-        asm_path = temp_dir / f"{module_token}.s"
-        object_path = temp_dir / f"{module_token}.o"
+        module_stem = _module_file_stem(module_name)
+        asm_path = temp_dir / f"{module_stem}.s"
+        object_path = temp_dir / f"{module_stem}.o"
         archive_path = temp_dir / output.name
         asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
 
@@ -945,6 +946,22 @@ class _IARValue:
 def _asm_name(name: str) -> str:
     """Keep the ELF symbol name identical to the source IAR name."""
     return name
+
+
+def _module_file_stem(module_name: str) -> str:
+    """Keep readable module names, replacing ? and unsafe filename bytes."""
+    stem = re.sub(r"[^A-Za-z0-9_.@-]", "_", module_name.replace("?", "_"))
+    if not stem or stem in (".", ".."):
+        return "_iar_module"
+    return stem
+
+
+def _local_label_fragment(name: str) -> str:
+    """Make an IAR module name usable in a private temporary assembler label."""
+    fragment = re.sub(r"[^A-Za-z0-9_]", "_", name)
+    if not fragment or fragment[0].isdigit():
+        fragment = "m_" + fragment
+    return fragment
 
 
 def _asm_symbol(name: str) -> str:
@@ -1326,10 +1343,10 @@ def _parse_code_item_records(
             return None
         expression = operand.group(1).strip()
         has_byte_mask = bool(
-            re.search(r"&\s*(?:0x)?ff\b", expression, re.IGNORECASE)
+            re.search(r"&\s*(?:0x\s*)?ff\b", expression, re.IGNORECASE)
         )
         expression = re.sub(
-            r"&\s*(?:0x)?ff\b", "", expression, flags=re.IGNORECASE
+            r"&\s*(?:0x\s*)?ff\b", "", expression, flags=re.IGNORECASE
         ).strip()
 
         def strip_outer_parentheses(value: str) -> str:
@@ -2135,12 +2152,13 @@ def convert_code_listing_to_archive(
                 selected_xdata_segments.add(target)
 
     module_token = module_name.encode("utf-8").hex()
+    module_label = _local_label_fragment(module_name)
     segment_labels = {
-        ident: f"__iar_seg_{module_token}_{ident.lower()}" for ident in selected_segments
+        ident: f".Liar_seg_{module_label}_{ident.lower()}" for ident in selected_segments
     }
     segment_labels.update(
         {
-            ident: f"__iar_const_{module_token}_{ident.lower()}"
+            ident: f".Liar_const_{module_label}_{ident.lower()}"
             for ident in selected_constant_segments
         }
     )
@@ -2156,7 +2174,7 @@ def convert_code_listing_to_archive(
 
     for ident in selected_xdata_segments:
         if not public_data_symbols.get(ident):
-            segment_labels[ident] = f"__iar_data_{module_token}_{ident.lower()}"
+            segment_labels[ident] = f".Liar_data_{module_label}_{ident.lower()}"
 
     private_xdata: dict[str, tuple[int, bytes | list[_InitializerAtom] | None]] = {}
     for ident in selected_xdata_segments:
@@ -2572,8 +2590,9 @@ def convert_code_listing_to_archive(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iar2llvm-", dir=output.parent) as temp:
         temp_dir = Path(temp)
-        asm_path = temp_dir / f"{module_token}.s"
-        object_path = temp_dir / f"{module_token}.o"
+        module_stem = _module_file_stem(module_name)
+        asm_path = temp_dir / f"{module_stem}.s"
+        object_path = temp_dir / f"{module_stem}.o"
         archive_path = temp_dir / output.name
         asm_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -2665,9 +2684,9 @@ def convert_library_listing_to_archive(
                     if not exports:
                         skipped_modules.append(module_name)
                         continue
-                    module_token = module_name.encode("utf-8").hex()
-                    asm_path = temp_dir / f"{module_token}.s"
-                    object_path = temp_dir / f"{module_token}.o"
+                    module_stem = _module_file_stem(module_name)
+                    asm_path = temp_dir / f"{module_stem}.s"
+                    object_path = temp_dir / f"{module_stem}.o"
                     asm_path.write_text(
                         "\n".join(assembly) + "\n", encoding="utf-8"
                     )

@@ -48,6 +48,9 @@ all omitted modules and reasons together in `unsupported_modules` at the end.
 Use `--fail-fast` to stop at the first unsupported module. A partial archive may
 omit a function required by the application; the linker will report unresolved
 symbols for those functions.
+Archive member `.o` names use the XLIB module name; `?` and other filename-unsafe
+characters are replaced by `_` in the filename only. The ELF symbol name remains
+unchanged.
 
 The `VIRTUAL_REGISTERS` data-only module is included when present. Its `?V0` to
 `?V7` symbols map to this checkout's reserved DATA addresses `0x30` to `0x37`;
