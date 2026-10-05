@@ -928,6 +928,88 @@ def _asm_name(name: str) -> str:
     return "__iar_sym_" + name.encode("utf-8").hex()
 
 
+def _virtual_register_support(
+    records: list[tuple[str, str]],
+) -> tuple[list[str], set[str], set[str]]:
+    """Emit the IAR DATA symbols used by the selected CC2530 runtime model."""
+    segments: dict[str, Segment] = {}
+    symbols: list[tuple[str, str, int]] = []
+    extents: dict[str, int] = {}
+    for tag, text in records:
+        if tag == "t_seg":
+            match = re.search(
+                r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+<rel,([A-Z0-9_]+)>\s+'([^']+)'",
+                text,
+            )
+            if match:
+                ident, address_space, name = match.groups()
+                segments[ident.upper()] = Segment(
+                    ident.upper(), address_space, name
+                )
+        elif tag == "t_symbol_def2":
+            match = re.search(
+                r"PUBLIC_REL\s+\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)\s+"
+                r"N[0-9A-Fa-f]+\"([^\"]+)\"",
+                text,
+            )
+            if match:
+                segment, offset, name = match.groups()
+                symbols.append((segment.upper(), name, int(offset, 16)))
+        elif tag == "t_org_rel1":
+            match = re.search(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+            if match:
+                segment, offset = match.groups()
+                segment = segment.upper()
+                extents[segment] = max(
+                    extents.get(segment, 0), int(offset, 16)
+                )
+
+    lines = ["; Generated IAR virtual-register support."]
+    exports: set[str] = set()
+    names: set[str] = set()
+    for segment_id, name, offset in symbols:
+        segment = segments.get(segment_id)
+        if segment is None or segment.address_space != "DATA":
+            continue
+        if segment.name == "VREG" and (
+            match := re.fullmatch(r"\?V([0-7])", name)
+        ):
+            if offset != 0:
+                raise ListingError(
+                    f"IAR virtual register {name} has a nonzero offset"
+                )
+            alias = _asm_name(name)
+            lines.extend(
+                [f".globl {alias}", f".equ {alias}, {0x30 + int(match.group(1))}"]
+            )
+            exports.add(alias)
+            names.add(name)
+            continue
+        if segment.name not in ("XSP", "PSP") or name not in ("?XSP", "?PSP"):
+            continue
+        size = extents.get(segment_id, 0) - offset
+        expected_size = 2 if name == "?XSP" else 1
+        if offset != 0 or size != expected_size:
+            raise ListingError(
+                f"unexpected IAR {name} data layout: offset {offset}, size {size}"
+            )
+        alias = _asm_name(name)
+        lines.extend(
+            [
+                '.section .mcs51.data1.bss,"aw",@nobits',
+                ".balign 1",
+                f".globl {alias}",
+                f".type {alias},@object",
+                f"{alias}:",
+                f".zero {size}",
+                f".size {alias}, {size}",
+            ]
+        )
+        exports.add(alias)
+        names.add(name)
+    return lines, exports, names
+
+
 def _code_group(segment: Segment) -> str | None:
     if segment.address_space == "HUGECODE" and segment.name == "BANKED_CODE":
         return "banked"
@@ -2170,11 +2252,54 @@ def convert_library_listing_to_archive(
     defined_symbols: set[str] = set()
     unsupported_public_data: dict[str, dict[str, str]] = {}
     wanted_symbols = set(symbol_names or [])
+    requested_symbols_found = False
 
     with tempfile.TemporaryDirectory(prefix="iar2llvm-lib-", dir=output.parent) as temp:
         temp_dir = Path(temp)
         member_objects: list[Path] = []
         for module_name, records in modules.items():
+            is_virtual_register_module = (
+                module_name.split("@LAN", 1)[0] == "VIRTUAL_REGISTERS"
+            )
+            language_match = re.search(r"@LAN([A-Fa-f0-9]+)(?:_\d+)?$", module_name)
+            if language_match and language_match.group(1).upper() != language.upper():
+                skipped_modules.append(module_name)
+                continue
+            if is_virtual_register_module:
+                assembly, exports, original_names = _virtual_register_support(records)
+                if wanted_symbols and original_names.intersection(wanted_symbols):
+                    requested_symbols_found = True
+                if not exports:
+                    skipped_modules.append(module_name)
+                    continue
+                module_token = module_name.encode("utf-8").hex()
+                asm_path = temp_dir / f"{module_token}.s"
+                object_path = temp_dir / f"{module_token}.o"
+                asm_path.write_text("\n".join(assembly) + "\n", encoding="utf-8")
+                assemble = subprocess.run(
+                    [
+                        str(llvm_mc),
+                        "-triple",
+                        "mcs51",
+                        "-filetype=obj",
+                        str(asm_path),
+                        "-o",
+                        str(object_path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if assemble.returncode:
+                    raise ListingError(
+                        f"llvm-mc failed for {module_name} ({assemble.returncode}):\n"
+                        f"{assemble.stderr.strip()}"
+                    )
+                member_objects.append(object_path)
+                converted_modules.append(module_name)
+                defined_symbols.update(exports)
+                continue
+
             segments: dict[str, Segment] = {}
             public_symbols: list[tuple[str, str]] = []
             for tag, text in records:
@@ -2202,16 +2327,14 @@ def convert_library_listing_to_archive(
             public_names = {name for _ident, name in public_symbols}
             if wanted_symbols and not public_names.intersection(wanted_symbols):
                 continue
-            language_match = re.search(r"@LAN([A-Fa-f0-9]+)(?:_\d+)?$", module_name)
-            if language_match and language_match.group(1).upper() != language.upper():
-                skipped_modules.append(module_name)
-                continue
 
             if any(
                 ident in segments
                 and _code_group(segments[ident]) in ("banked", "common_code")
                 for ident, _name in public_symbols
             ):
+                if wanted_symbols and public_names.intersection(wanted_symbols):
+                    requested_symbols_found = True
                 module_archive = temp_dir / f"{module_name.encode('utf-8').hex()}.a"
                 result = convert_code_listing_to_archive(
                     listing_path,
@@ -2253,7 +2376,7 @@ def convert_library_listing_to_archive(
             elif public_symbols and (not wanted_symbols or public_names.intersection(wanted_symbols)):
                 skipped_modules.append(module_name)
 
-        if not member_objects:
+        if not member_objects or (wanted_symbols and not requested_symbols_found):
             if wanted_symbols:
                 raise ListingError(
                     "XLIB listing has no convertible modules defining: "
@@ -2291,6 +2414,20 @@ def convert_library_listing_to_archive(
         "unsupported_public_data": unsupported_public_data,
         "language": language,
         "format": "ELF32 MCS-51 archive",
-        "scope": "module-wide public executable code and supported public data",
+        "scope": (
+            "module-wide public executable code, supported public data, and "
+            "IAR virtual-register symbols"
+        ),
+        "limitations": (
+            [
+                "IAR PSP/XSP storage is emitted as DATA bss, but stack regions "
+                "are not reserved and PSP/XSP are not initialized; startup must do so"
+            ]
+            if any(
+                module.split("@LAN", 1)[0] == "VIRTUAL_REGISTERS"
+                for module in converted_modules
+            )
+            else []
+        ),
         "abi": "IAR calling convention preserved; no Clang ABI adaptation",
     }

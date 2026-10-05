@@ -169,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Unresolved IAR symbols: {len(payload['unresolved'])}")
             for module, symbols in payload["unsupported_public_data"].items():
                 print(f"Unsupported public data in {module}: " + ", ".join(symbols))
+            for limitation in payload["limitations"]:
+                print(f"Limitation: {limitation}")
         return 0
 
     if args.command in (
