@@ -94,6 +94,16 @@ void MCS51InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     MoveImagByte(ImagHi(DestReg), ImagHi(SrcReg), KillSrc);
     return;
   }
+  if (IsImagPair(DestReg) && IsPair(SrcReg)) {
+    MoveImagByte(ImagLo(DestReg), Lo(SrcReg), KillSrc);
+    MoveImagByte(ImagHi(DestReg), Hi(SrcReg), KillSrc);
+    return;
+  }
+  if (IsPair(DestReg) && IsImagPair(SrcReg)) {
+    MoveImagByte(Lo(DestReg), ImagLo(SrcReg), KillSrc);
+    MoveImagByte(Hi(DestReg), ImagHi(SrcReg), KillSrc);
+    return;
+  }
   if (DestReg == MCS51::DPTR && IsImagPair(SrcReg)) {
     MoveImagByte(MCS51::DPL, ImagLo(SrcReg), KillSrc);
     MoveImagByte(MCS51::DPH, ImagHi(SrcReg), KillSrc);
@@ -240,6 +250,7 @@ void MCS51InstrInfo::storeRegToStackSlot(
   // The allocator also asks for subclasses of the word class when a
   // subregister restricts the possible pairs.
   bool IsWord = MCS51::MCS51GPR16RegClass.hasSubClassEq(RC) ||
+                MCS51::MCS51IARGPR16RegClass.hasSubClassEq(RC) ||
                 MCS51::MCS51PTRRegClass.hasSubClassEq(RC);
   if (!IsByte && !IsImagByte && !IsIndirectByte && !IsAccumulator && !IsWord)
     report_fatal_error(Twine("unsupported MCS-51 spill register class ") +
@@ -274,6 +285,7 @@ void MCS51InstrInfo::loadRegFromStackSlot(
   // The allocator also asks for subclasses of the word class when a
   // subregister restricts the possible pairs.
   bool IsWord = MCS51::MCS51GPR16RegClass.hasSubClassEq(RC) ||
+                MCS51::MCS51IARGPR16RegClass.hasSubClassEq(RC) ||
                 MCS51::MCS51PTRRegClass.hasSubClassEq(RC);
   if ((!IsByte && !IsImagByte && !IsIndirectByte && !IsAccumulator &&
        !IsWord) ||

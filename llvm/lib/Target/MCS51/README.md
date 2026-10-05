@@ -1,5 +1,21 @@
 # MCS-51 frame overlay
 
+## Opt-in IAR ABI
+
+`clang -target mcs51 -mabi=iar` selects the IAR 8051 scalar register ABI.
+The default ABI is unchanged when `-mabi=iar` is absent. The current slice
+passes byte arguments in the first available `R1`-`R5` register, word arguments
+in `R3:R2` and `R5:R4`, returns bytes in `R1`, and returns words in
+`R3:R2`/`R5:R4`. It also preserves the IAR virtual registers and `R6`/`R7`.
+
+This does not yet implement the project's XDATA reentrant stack. Compilation
+diagnoses stack-passed arguments, variadic calls, and aggregate arguments or
+returns. Clang locals and spills still use its IDATA hardware stack, so taking
+the address of an automatic object and passing it to IAR code is not supported.
+The selected Clang runtime must also be built with `-mabi=iar` before using its
+helpers from an IAR ABI translation unit. Treat this option as an ABI bring-up
+step; it is not yet sufficient to link arbitrary Z-Stack code.
+
 The experimental module pass can move eligible fixed-size local objects into
 one static arena and reuse function ranges when their functions cannot be
 active at the same time. Enable it with `llc -mcs51-overlay`, or through Clang

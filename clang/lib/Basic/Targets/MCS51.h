@@ -17,6 +17,7 @@ namespace targets {
 
 class LLVM_LIBRARY_VISIBILITY MCS51TargetInfo : public TargetInfo {
   bool IsCC2530;
+  std::string ABI;
 
 public:
   MCS51TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
@@ -70,6 +71,14 @@ public:
 
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
+
+  StringRef getABI() const override { return ABI; }
+  bool setABI(const std::string &Name) override {
+    if (!Name.empty() && Name != "iar")
+      return false;
+    ABI = Name;
+    return true;
+  }
 
   std::optional<LangAS> getConstantAddressSpace() const override {
     // Keep string literals in CODE. This hook is used for literals, while

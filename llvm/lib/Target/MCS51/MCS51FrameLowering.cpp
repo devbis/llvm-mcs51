@@ -1,5 +1,6 @@
 #include "MCS51FrameLowering.h"
 #include <set>
+#include "MCS51.h"
 #include "MCS51InstrInfo.h"
 #include "MCS51RegisterInfo.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
@@ -135,6 +136,10 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   unsigned Counts[NumCSRGroups];
   getCSRHelperCounts(TRI, CSI, Counts);
+  bool UseIARABI = usesMCS51IARABI(MBB.getParent()->getFunction());
+  if (UseIARABI)
+    for (unsigned &Count : Counts)
+      Count = 0;
   for (const CalleeSavedInfo &CS : CSI)
     MBB.addLiveIn(CS.getReg());
 
@@ -154,6 +159,10 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
 
     Register Reg = Action.Reg;
     unsigned Direct = TRI->getEncodingValue(Reg);
+    if (UseIARABI && Reg == MCS51::DPL)
+      Direct = 0x82;
+    else if (UseIARABI && Reg == MCS51::DPH)
+      Direct = 0x83;
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::Implicit)
@@ -170,6 +179,10 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   unsigned Counts[NumCSRGroups];
   getCSRHelperCounts(TRI, CSI, Counts);
+  bool UseIARABI = usesMCS51IARABI(MBB.getParent()->getFunction());
+  if (UseIARABI)
+    for (unsigned &Count : Counts)
+      Count = 0;
   SmallVector<CSRSaveAction, 16> Actions =
       getCSRSaveActions(TRI, CSI, Counts);
   for (const CSRSaveAction &Action : llvm::reverse(Actions)) {
@@ -185,6 +198,10 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
     }
     Register Reg = Action.Reg;
     unsigned Direct = TRI->getEncodingValue(Reg);
+    if (UseIARABI && Reg == MCS51::DPL)
+      Direct = 0x82;
+    else if (UseIARABI && Reg == MCS51::DPH)
+      Direct = 0x83;
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::POP_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::ImplicitDefine)
@@ -259,7 +276,8 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
       SaveImag.insert(TRI.getEncodingValue(Reg));
       return;
     }
-    if (MCS51::MCS51GPR16RegClass.contains(Reg)) {
+    if (MCS51::MCS51GPR16RegClass.contains(Reg) ||
+        MCS51::MCS51IARGPR16RegClass.contains(Reg)) {
       SaveImag.insert(TRI.getEncodingValue(TRI.getSubReg(Reg, MCS51::sub_lo)));
       SaveImag.insert(TRI.getEncodingValue(TRI.getSubReg(Reg, MCS51::sub_hi)));
       return;
@@ -357,14 +375,17 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
                                      MachineBasicBlock &MBB) const {
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
-  if (StackSize + MF.getFrameInfo().getCalleeSavedInfo().size() > 255)
+  bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
+  bool SaveDptr = usesMCS51IARABI(MF.getFunction()) && !IsInterrupt;
+  if (StackSize + MF.getFrameInfo().getCalleeSavedInfo().size() +
+          (SaveDptr ? 2 : 0) >
+      255)
     report_fatal_error(Twine("MCS-51 stack frame exceeds 255-byte stack address "
                              "space in '") +
                        MF.getName() + "': " + Twine(StackSize) +
                        " bytes of locals and " +
                        Twine(MF.getFrameInfo().getCalleeSavedInfo().size()) +
                        " saved registers");
-  bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
   // Frame-setup instructions load incoming stack arguments relative to the
   // entry SP, so the frame is allocated after the last of them. Copies that
   // the allocator placed ahead of some of them do not end the sequence.
@@ -374,6 +395,23 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
       I = std::next(It);
   while (I != MBB.end() && I->isDebugInstr())
     ++I;
+  if (SaveDptr) {
+    // Keep DPTR below the callee-saved registers so those registers are
+    // restored first, followed by DPH and DPL.
+    auto Entry = MBB.begin();
+    BuildMI(MBB, Entry, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0x82)
+        .addReg(MCS51::SP, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::Implicit)
+        .addReg(MCS51::DPL, RegState::Implicit)
+        .setMIFlag(MachineInstr::FrameSetup);
+    BuildMI(MBB, Entry, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0x83)
+        .addReg(MCS51::SP, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::Implicit)
+        .addReg(MCS51::DPH, RegState::Implicit)
+        .setMIFlag(MachineInstr::FrameSetup);
+  }
   if (IsInterrupt) {
     // The 8051 hardware already saved the return PC. Preserve the subset of
     // registers the allocated handler can change.
@@ -414,6 +452,22 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   bool PreserveA = I != MBB.end() && I->getOpcode() == MCS51::RET_A &&
                    I->getNumOperands() && I->getOperand(0).isReg() &&
                    I->getOperand(0).getReg() == MCS51::A;
+  bool RestoreDptr = usesMCS51IARABI(MF.getFunction()) &&
+                     !MF.getFunction().hasFnAttribute("interrupt");
+  if (RestoreDptr) {
+    BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
+        .addImm(0x83)
+        .addReg(MCS51::SP, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::Implicit)
+        .addReg(MCS51::DPH, RegState::ImplicitDefine)
+        .setMIFlag(MachineInstr::FrameDestroy);
+    BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
+        .addImm(0x82)
+        .addReg(MCS51::SP, RegState::ImplicitDefine)
+        .addReg(MCS51::SP, RegState::Implicit)
+        .addReg(MCS51::DPL, RegState::ImplicitDefine)
+        .setMIFlag(MachineInstr::FrameDestroy);
+  }
   // The frame lies above the pushed callee-saved registers, so it is
   // released before they are popped.
   auto Release = I;

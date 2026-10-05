@@ -25,6 +25,8 @@ void MCS51TargetInfo::getTargetDefines(const LangOptions &,
   Builder.defineMacro("__sbit", "__attribute__((address_space(6)))");
   Builder.defineMacro("__sfr", "__attribute__((address_space(7)))");
   Builder.defineMacro("__generic", "__attribute__((address_space(8)))");
+  if (getABI() == "iar")
+    Builder.defineMacro("__IAR8051_ABI__");
   if (IsCC2530)
     Builder.defineMacro("__CC2530__");
 }

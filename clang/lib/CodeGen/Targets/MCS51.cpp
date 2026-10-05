@@ -10,12 +10,15 @@
 #include "TargetInfo.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace clang;
 using namespace clang::CodeGen;
 
 namespace {
 class MCS51ABIInfo final : public DefaultABIInfo {
+  bool UseIARABI;
+
   bool canExpandAggregate(QualType Ty) const {
     Ty = Ty.getCanonicalType();
     if (Ty->isScalarType())
@@ -67,9 +70,13 @@ class MCS51ABIInfo final : public DefaultABIInfo {
   }
 
 public:
-  explicit MCS51ABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+  explicit MCS51ABIInfo(CodeGen::CodeGenTypes &CGT, bool UseIARABI)
+      : DefaultABIInfo(CGT), UseIARABI(UseIARABI) {}
 
   ABIArgInfo classifyReturnType(QualType RetTy) const {
+    if (UseIARABI && isAggregateTypeForABI(RetTy))
+      llvm::report_fatal_error("MCS-51 IAR ABI aggregate returns are not "
+                               "implemented yet");
     if (isAggregateTypeForABI(RetTy)) {
       if (llvm::Type *CoerceTy = getAggregateCoerceType(RetTy))
         return ABIArgInfo::getDirect(CoerceTy);
@@ -83,6 +90,9 @@ public:
 
   ABIArgInfo classifyArgumentType(QualType Ty) const {
     Ty = useFirstFieldIfTransparentUnion(Ty);
+    if (UseIARABI && isAggregateTypeForABI(Ty))
+      llvm::report_fatal_error("MCS-51 IAR ABI aggregate arguments are not "
+                               "implemented yet");
     if (isAggregateTypeForABI(Ty)) {
       if (Ty->getAs<RecordType>() && getRecordArgABI(Ty, getCXXABI()))
         return DefaultABIInfo::classifyArgumentType(Ty);
@@ -104,9 +114,12 @@ public:
 };
 
 class MCS51TargetCodeGenInfo final : public TargetCodeGenInfo {
+  bool UseIARABI;
+
 public:
-  explicit MCS51TargetCodeGenInfo(CodeGenTypes &CGT)
-      : TargetCodeGenInfo(std::make_unique<MCS51ABIInfo>(CGT)) {}
+  explicit MCS51TargetCodeGenInfo(CodeGenTypes &CGT, bool UseIARABI)
+      : TargetCodeGenInfo(std::make_unique<MCS51ABIInfo>(CGT, UseIARABI)),
+        UseIARABI(UseIARABI) {}
 
   LangAS getGlobalVarAddressSpace(CodeGenModule &CGM,
                                   const VarDecl *D) const override {
@@ -121,9 +134,11 @@ public:
 
   void setTargetAttributes(const Decl *D, llvm::GlobalValue *GV,
                            CodeGen::CodeGenModule &M) const override {
+    const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
+    if (UseIARABI && FD)
+      cast<llvm::Function>(GV)->addFnAttr("mcs51-abi", "iar");
     if (GV->isDeclaration())
       return;
-    const auto *FD = dyn_cast_or_null<FunctionDecl>(D);
     const auto *InterruptAttr = FD ? FD->getAttr<MCS51InterruptAttr>() : nullptr;
     if (!InterruptAttr)
       return;
@@ -136,5 +151,6 @@ public:
 
 std::unique_ptr<TargetCodeGenInfo>
 CodeGen::createMCS51TargetCodeGenInfo(CodeGenModule &CGM) {
-  return std::make_unique<MCS51TargetCodeGenInfo>(CGM.getTypes());
+  return std::make_unique<MCS51TargetCodeGenInfo>(
+      CGM.getTypes(), CGM.getTarget().getABI() == "iar");
 }
