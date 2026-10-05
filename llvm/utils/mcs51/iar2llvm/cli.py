@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     convert_library.add_argument("--out", type=Path, required=True)
     convert_library.add_argument("--llvm-mc", type=Path)
     convert_library.add_argument("--llvm-ar", type=Path)
+    convert_library.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="stop at the first unsupported module instead of collecting errors",
+    )
     convert_library.add_argument("--json", action="store_true")
 
     convert_const = subparsers.add_parser(
@@ -133,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.llvm_ar,
                 args.symbols,
                 args.language,
+                args.fail_fast,
             )
         elif args.command == "convert-const-listing":
             payload = convert_const_listing_to_archive(
@@ -166,9 +172,17 @@ def main(argv: list[str] | None = None) -> int:
             print("Converted modules: " + ", ".join(payload["modules"]))
             if payload["skipped_modules"]:
                 print("Skipped public modules: " + ", ".join(payload["skipped_modules"]))
-            print(f"Unresolved IAR symbols: {len(payload['unresolved'])}")
+            print(f"Unresolved IAR symbols ({len(payload['unresolved'])}):")
+            for symbol in payload["unresolved"]:
+                print(f"  {symbol}")
+            if payload["partial"]:
+                print("Partial archive; unsupported conversion details follow:")
             for module, symbols in payload["unsupported_public_data"].items():
-                print(f"Unsupported public data in {module}: " + ", ".join(symbols))
+                print(f"Unsupported public data in {module}:")
+                for symbol, reason in symbols.items():
+                    print(f"  {symbol}: {reason}")
+            for module, reason in payload["unsupported_modules"].items():
+                print(f"Skipped unsupported module {module}: {reason}")
             for limitation in payload["limitations"]:
                 print(f"Limitation: {limitation}")
         return 0
