@@ -167,10 +167,12 @@ public:
 
     HasLinkerScript = Args.hasArg(options::OPT_T);
     HasNoGC = false;
+    HasICF = false;
     for (const Arg *A : Args.filtered(options::OPT_Wl_COMMA))
       for (StringRef Value : llvm::split(A->getValue(), ',')) {
         HasLinkerScript |= Value == "-T" || Value.starts_with("-T");
         HasNoGC |= Value == "--no-gc-sections";
+        HasICF |= Value.starts_with("--icf=");
       }
   }
 
@@ -238,6 +240,8 @@ public:
     }
     if (!HasNoGC)
       CmdArgs.push_back("--gc-sections");
+    if (!HasICF)
+      CmdArgs.push_back("--icf=safe");
     if (AddStartup)
       CmdArgs.push_back(StartupObjectPath.c_str());
     if (UseIARABI)
@@ -259,6 +263,7 @@ private:
   bool AddStartup = false;
   bool HasLinkerScript = false;
   bool HasNoGC = false;
+  bool HasICF = false;
   std::string RuntimeObjectPath;
   std::string StartupObjectPath;
   std::string IARXStackObjectPath;

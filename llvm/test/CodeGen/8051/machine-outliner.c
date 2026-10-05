@@ -43,7 +43,7 @@ __attribute__((noinline)) unsigned char outline_xdata_second(void) {
 // CHECK: lcall OUTLINED_FUNCTION_
 // CHECK-LABEL: outline_xdata_second:
 // CHECK: lcall OUTLINED_FUNCTION_
-// CHECK: .section .text.__mcs51_outlined,"ax"
+// CHECK: .section .text.__mcs51_outlined.OUTLINED_FUNCTION_{{[0-9]+}},"ax"
 // CHECK: OUTLINED_FUNCTION_0:
 // CHECK: ret
 // CHECK-NOT: lcall __mcs51_bankcall_OUTLINED_FUNCTION
