@@ -54,7 +54,10 @@ The `VIRTUAL_REGISTERS` data-only module is included when present. Its `?V0` to
 `?PSP` and `?XSP` are emitted as DATA bss objects. This only provides storage:
 the converter does not reserve IAR stack regions or initialize either stack
 pointer, so startup must do that before calling IAR reentrant code. Other
-virtual registers from this module are not mapped yet.
+virtual registers from this module are not mapped yet. The IAR linker config
+also places `?VB` in bit-addressable DATA `0x20` to `0x2f`; pass its configured
+byte address with `--vb-byte-address 0x2f` when converting. The chosen byte
+must be reserved from Clang `__bit` globals. See the [IAR 8051 compiler guide](https://updates.iar.com/FileStore/STANDARD/001/000/590/ew/doc/EW8051_CompilerGuide.pdf).
 
 ```sh
 python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \

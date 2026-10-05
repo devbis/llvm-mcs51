@@ -946,6 +946,7 @@ def _asm_name(name: str) -> str:
 
 def _virtual_register_support(
     records: list[tuple[str, str]],
+    vb_byte_address: int | None = None,
 ) -> tuple[list[str], set[str], set[str]]:
     """Emit the IAR DATA symbols used by the selected CC2530 runtime model."""
     segments: dict[str, Segment] = {}
@@ -1023,6 +1024,15 @@ def _virtual_register_support(
         )
         exports.add(alias)
         names.add(name)
+    if vb_byte_address is not None:
+        if not 0x20 <= vb_byte_address <= 0x2F:
+            raise ListingError(
+                f"IAR ?VB byte address 0x{vb_byte_address:x} is outside 0x20..0x2f"
+            )
+        alias = _asm_name("?VB")
+        lines.extend([f".globl {alias}", f".equ {alias}, {vb_byte_address}"])
+        exports.add(alias)
+        names.add("?VB")
     return lines, exports, names
 
 
@@ -2265,6 +2275,7 @@ def convert_library_listing_to_archive(
     symbol_names: list[str] | None = None,
     language: str = "00",
     fail_fast: bool = False,
+    vb_byte_address: int | None = None,
 ) -> dict[str, object]:
     """Convert public code modules from an XLIB listing into an ELF archive."""
     listing_text = listing_path.read_text(encoding="latin1")
@@ -2297,7 +2308,7 @@ def convert_library_listing_to_archive(
             if is_virtual_register_module:
                 try:
                     assembly, exports, original_names = _virtual_register_support(
-                        records
+                        records, vb_byte_address
                     )
                     if not exports:
                         skipped_modules.append(module_name)
@@ -2482,6 +2493,17 @@ def convert_library_listing_to_archive(
                 "IAR PSP/XSP storage is emitted as DATA bss, but stack regions "
                 "are not reserved and PSP/XSP are not initialized; startup must do so"
             ]
+            + (
+                [
+                    f"IAR ?VB is fixed at 0x{vb_byte_address:02x}; reserve that "
+                    "byte from other bit-addressed storage"
+                ]
+                if vb_byte_address is not None
+                else [
+                    "IAR ?VB has no address in XLIB; provide "
+                    "--vb-byte-address to define it"
+                ]
+            )
             if any(
                 module.split("@LAN", 1)[0] == "VIRTUAL_REGISTERS"
                 for module in converted_modules
