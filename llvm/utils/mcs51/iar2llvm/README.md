@@ -152,17 +152,18 @@ metadata are rejected.
 function with `--symbol`, collect public `BANKED_CODE` functions with
 `--all-public-banked`, or collect public banked and common code with
 `--all-public-code`. The all-public forms also keep referenced code segments,
-relays, literal private
-constants, all public `CODE_C` and literal `CONST/XDATA_ROM_C` objects, and
+literal private constants, all public `CODE_C` and literal `CONST/XDATA_ROM_C` objects, and
 public `XDATA_Z`/literal `XDATA_I` objects in the same ELF member. Public
 constant and data symbols are exported so other converted modules can
 reference them. Literal initializers and 16-bit relocations to public
 `CODE_C` objects are supported. Other unsupported public data initializers
-are reported and remain unresolved. Each IAR banked code segment gets its own
-label within the module's `.mcs51.autobank.*` section; this preserves short
-branches between IAR code segments while the module remains one placement unit
-for CC2530 bank assignment. `CODE_C` tables are exported in read-only
-common-flash sections. For example, all
+are reported and remain unresolved. Each selected IAR code segment gets its
+own ELF section. This lets LLD discard unreferenced segments and place banked
+segments independently while keeping short branches within each segment.
+`CODE_C` tables are exported in read-only common-flash sections. IAR relay
+symbols are redirected to the corresponding public function; the converter
+emits one CC2530 bank-call thunk per exported banked function so LLD can
+resolve calls and function pointers after bank placement. For example, all
 currently supported code in `cGP_stub`:
 
 ```sh
@@ -185,8 +186,7 @@ references as ELF relocations, but do not adapt IAR calling conventions or
 runtime symbols to Clang's ABI.
 
 For the first executable slice, produce an XLIB listing of `ecc.r51` and
-convert one public banked function together with its relay and referenced code
-segments:
+convert one public banked function together with its referenced code segments:
 
 ```sh
 python3 -m iar2llvm convert-code-listing /private/tmp/iar2llvm-ecc.lst \
@@ -208,12 +208,14 @@ Generated assembly quotes names that need it; JSON output lists the unchanged
 names and unresolved IAR runtime references.
 
 This does not adapt an IAR function body to the standard Clang calling
-convention. `-mabi=iar` opts into the current scalar register ABI bring-up;
-stack-passed arguments, aggregate arguments and returns, and IAR's XDATA
-reentrant frames are not implemented yet. The converted relay still depends
-on IAR bank-switching runtime routines, and banked functions use IAR's 24-bit
-return-address convention. This archive is therefore a linker-input
-milestone, not yet callable arbitrary Z-Stack code or a deployable firmware
-library. Other UBROF expression records, relocatable constants, and initialized
-XDATA data outside the supported `XDATA_ID` subset are still unsupported by
-the converter.
+convention. `-mabi=iar` opts into the scalar register and stack-argument ABI;
+aggregate arguments and returns, and IAR-compatible XDATA frames for Clang
+locals and spills, are not implemented. On CC2530, that option selects an IAR
+runtime and reserves 512 bytes of XDATA at `0x1d00` through `0x1eff` for the
+reentrant argument stack. Clang locals and spills still use the internal
+8051 stack, so their addresses are not yet interchangeable with IAR XDATA
+locals. IAR runtime helpers used by selected code can also remain unresolved.
+The converted archive is therefore a linker input, not yet a compatible
+replacement for the full IAR runtime. Other UBROF expression records,
+relocatable constants, and initialized XDATA data outside the supported
+`XDATA_ID` subset are still unsupported by the converter.

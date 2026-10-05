@@ -95,6 +95,38 @@ public:
 
 char MCS51RemoveOptNone::ID = 0;
 
+// The IAR ABI keeps its reentrant XDATA stack pointer in DATA memory. Make
+// that symbol visible to SelectionDAG lowering when this ABI is selected.
+// A startup object or a converted IAR runtime provides the actual storage.
+class MCS51IARXSPDeclaration final : public ModulePass {
+public:
+  static char ID;
+  MCS51IARXSPDeclaration() : ModulePass(ID) {}
+
+  bool runOnModule(Module &M) override {
+    if (llvm::none_of(M, [](const Function &F) {
+          return usesMCS51IARABI(F);
+        }))
+      return false;
+
+    if (GlobalVariable *XSP = M.getGlobalVariable("?XSP")) {
+      if (XSP->getAddressSpace() != MCS51::Data ||
+          !XSP->getValueType()->isIntegerTy(16))
+        report_fatal_error("MCS-51 IAR ABI requires ?XSP to be a 16-bit "
+                           "DATA object");
+      return false;
+    }
+
+    new GlobalVariable(M, Type::getInt16Ty(M.getContext()),
+                       /*isConstant=*/false, GlobalValue::ExternalLinkage,
+                       /*Initializer=*/nullptr, "?XSP", nullptr,
+                       GlobalVariable::NotThreadLocal, MCS51::Data);
+    return true;
+  }
+};
+
+char MCS51IARXSPDeclaration::ID = 0;
+
 // Large volatile XDATA operands are expensive to keep in caller registers on
 // the 8051. Outline their unsigned i32 comparison into one target runtime
 // helper, matching the helper-call strategy used by established 8051
@@ -2779,6 +2811,7 @@ public:
   }
 
   void addIRPasses() override {
+    addPass(new MCS51IARXSPDeclaration());
     addPass(createMCS51CodeConstantEscapePass());
     addPass(createMCS51OverlayPass());
     addPass(createMCS51StackAddressLoweringPass());

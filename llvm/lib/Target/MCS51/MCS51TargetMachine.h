@@ -3,6 +3,7 @@
 
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "MCS51.h"
 #include "MCS51Subtarget.h"
 #include <memory>
 #include <optional>
@@ -28,6 +29,12 @@ public:
   TargetPassConfig *createPassConfig(PassManagerBase &PM) override;
 
   TargetTransformInfo getTargetTransformInfo(const Function &F) const override;
+
+  bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DstAS) const override {
+    return SrcAS == DstAS ||
+           (SrcAS == MCS51::Default && DstAS == MCS51::XData) ||
+           (SrcAS == MCS51::XData && DstAS == MCS51::Default);
+  }
 
   MachineFunctionInfo *
   createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,

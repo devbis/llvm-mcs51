@@ -23,8 +23,9 @@ MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 }
 
 const uint32_t *MCS51RegisterInfo::getCallPreservedMask(
-    const MachineFunction &, CallingConv::ID) const {
-  return CSR_MCS51_RegMask;
+    const MachineFunction &MF, CallingConv::ID) const {
+  return usesMCS51IARABI(MF.getFunction()) ? CSR_MCS51_IAR_RegMask
+                                           : CSR_MCS51_RegMask;
 }
 
 BitVector MCS51RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
