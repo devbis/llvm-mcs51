@@ -1060,10 +1060,14 @@ def _constant_segment(segment: Segment) -> bool:
 
 
 def _parse_literal_segment(
-    records: list[tuple[str, str]], segment_id: str
-) -> bytes:
-    emitted: dict[int, int] = {}
+    records: list[tuple[str, str]],
+    segment_id: str,
+    relocation_aliases: dict[str, str] | None = None,
+) -> bytes | list[_InitializerAtom]:
+    emitted: dict[int, _InitializerAtom] = {}
+    occupied: set[int] = set()
     cursor = 0
+    pending_relocation: tuple[str, int] | None = None
     for tag, text in records:
         if tag == "t_org_rel1":
             match = re.search(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
@@ -1081,20 +1085,63 @@ def _parse_literal_segment(
                 raise ListingError(f"malformed {tag} record in segment {segment_id}")
             data = bytes.fromhex(text)
             for offset, value in enumerate(data, cursor):
-                if offset in emitted:
+                if offset in occupied:
                     raise ListingError(f"overlapping bytes in segment {segment_id}")
                 emitted[offset] = value
+                occupied.add(offset)
             cursor += len(data)
+        elif tag == "t_push_rel":
+            match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+([0-9A-Fa-f]+)", text)
+            if (
+                relocation_aliases is None
+                or not match
+                or pending_relocation is not None
+            ):
+                raise ListingError(
+                    f"unsupported relocation expression in literal constant segment "
+                    f"{segment_id}"
+                )
+            pending_relocation = (match.group(1).upper(), int(match.group(2), 16))
+        elif tag == "t_pop_16":
+            if relocation_aliases is None or pending_relocation is None:
+                raise ListingError(
+                    f"16-bit initializer relocation has no target in segment {segment_id}"
+                )
+            target, addend = pending_relocation
+            alias = relocation_aliases.get(target)
+            if alias is None:
+                raise ListingError(
+                    f"initializer relocation target {target} has no ELF symbol "
+                    f"in segment {segment_id}"
+                )
+            if cursor in occupied or cursor + 1 in occupied:
+                raise ListingError(
+                    f"overlapping relocation bytes in segment {segment_id}"
+                )
+            emitted[cursor] = _InitializerRelocation(alias, addend)
+            occupied.update((cursor, cursor + 1))
+            cursor += 2
+            pending_relocation = None
         elif tag not in ("t_asm_mode_change", "t_stack_error", "t_end"):
             raise ListingError(
                 f"unsupported record {tag} in literal constant segment {segment_id}"
             )
     if not emitted:
         raise ListingError(f"constant segment {segment_id} has no emitted bytes")
-    size = max(emitted) + 1
-    if set(emitted) != set(range(size)):
+    if pending_relocation is not None:
+        raise ListingError(f"unterminated relocation in segment {segment_id}")
+    size = max(occupied) + 1
+    if occupied != set(range(size)):
         raise ListingError(f"constant segment {segment_id} contains uninitialized gaps")
-    return bytes(emitted[offset] for offset in range(size))
+    contents: list[_InitializerAtom] = []
+    offset = 0
+    while offset < size:
+        atom = emitted[offset]
+        contents.append(atom)
+        offset += 2 if isinstance(atom, _InitializerRelocation) else 1
+    if all(isinstance(atom, int) for atom in contents):
+        return bytes(int(atom) for atom in contents)
+    return contents
 
 
 def _parse_private_xdata_segment(
@@ -1102,9 +1149,11 @@ def _parse_private_xdata_segment(
     segment_id: str,
     segment: Segment,
     segments: dict[str, Segment],
+    symbols: dict[str, Symbol],
+    segment_labels: dict[str, str],
     records_by_segment: dict[str, list[tuple[str, str]]],
     external_names: dict[str, str],
-) -> tuple[int, bytes | None]:
+) -> tuple[int, bytes | list[_InitializerAtom] | None]:
     cursors: list[int] = []
     relative_targets: list[str] = []
     initializer_markers: list[str] = []
@@ -1160,8 +1209,48 @@ def _parse_private_xdata_segment(
         initializer_segment.name,
     ) != ("CODE", "XDATA_ID"):
         raise ListingError(f"initializer for XDATA segment {segment_id} is not XDATA_ID")
-    contents = _parse_literal_segment(records_by_segment.get(initializer, []), initializer)
-    if len(contents) != size:
+    initializer_records = records_by_segment.get(initializer, [])
+    relocation_aliases: dict[str, str] = {}
+    for tag, text in initializer_records:
+        if tag != "t_push_rel":
+            continue
+        match = re.fullmatch(r"\(([0-9A-Fa-f]+)\)\s+[0-9A-Fa-f]+", text)
+        if not match:
+            raise ListingError(f"malformed initializer relocation in segment {initializer}")
+        target = match.group(1).upper()
+        target_segment = segments.get(target)
+        if target_segment is None or not (
+            (
+                target_segment.address_space == "XDATA"
+                and target_segment.name in ("XDATA_I", "XDATA_Z")
+            )
+            or (
+                target_segment.address_space == "CODE"
+                and target_segment.name == "CODE_C"
+            )
+        ):
+            raise ListingError(
+                f"initializer in segment {initializer} references unsupported "
+                f"segment {target}"
+            )
+        target_symbols = [
+            candidate
+            for candidate in symbols.values()
+            if candidate.segment == target and candidate.offset == 0
+        ]
+        if len(target_symbols) == 1:
+            relocation_aliases[target] = _asm_name(target_symbols[0].name)
+        elif target in segment_labels:
+            relocation_aliases[target] = segment_labels[target]
+        else:
+            raise ListingError(
+                f"initializer target segment {target} has no unique public base "
+                "or private ELF section"
+            )
+    contents = _parse_literal_segment(
+        initializer_records, initializer, relocation_aliases
+    )
+    if _initializer_size(contents) != size:
         raise ListingError(
             f"initializer size for XDATA segment {segment_id} does not match its load image"
         )
@@ -1422,17 +1511,65 @@ def _parse_code_item_records(
                 )
             else:
                 raise ListingError(f"unsupported t_minus expression in segment {segment_id}")
+        elif tag == "t_BNOT":
+            value = pop_value(tag)
+            # XLINK evaluates this together with SFB(EXT_STACK); expose the
+            # combined result as a linker-defined byte symbol.
+            if value.kind == "external" and value.value == "?ESP_MASK":
+                stack.append(_IARValue("external_not", value.value, value.addend))
+            else:
+                raise ListingError(f"unsupported t_BNOT expression in segment {segment_id}")
         elif tag == "t_and":
             rhs = pop_value(tag)
             lhs = pop_value(tag)
             if (
+                lhs.kind in ("external", "external_high", "external_high_single")
+                and rhs.kind == "external_not"
+                and rhs.value == "?ESP_MASK"
+                and str(lhs.value).startswith("__iar_sfb_")
+            ):
+                segment_name = str(lhs.value).removeprefix("__iar_sfb_")
+                stack.append(
+                    _IARValue(
+                        "external",
+                        _iar_segment_boundary_symbol("sfb_highmask", segment_name),
+                    )
+                )
+            elif (
                 lhs.kind in ("rel", "relative_high", "external", "external_high")
                 and rhs.kind == "absolute"
                 and int(rhs.value) in (0xFF, 0xFFFF)
             ):
                 stack.append(lhs)
+            elif (
+                lhs.kind == "sfb_byte3"
+                and rhs.kind == "absolute"
+                and int(rhs.value) in (7, 8)
+            ):
+                # The output bank fields depend on the final IAR segment bank.
+                stack.append(
+                    _IARValue("sfb_byte3_mask", lhs.value, int(rhs.value))
+                )
             else:
-                raise ListingError(f"unsupported t_and expression in segment {segment_id}")
+                raise ListingError(
+                    f"unsupported t_and operands {lhs.kind}={lhs.value!r}, "
+                    f"{rhs.kind}={rhs.value!r} in segment {segment_id}"
+                )
+        elif tag == "t_SHL":
+            rhs = pop_value(tag)
+            lhs = pop_value(tag)
+            if lhs.kind == "absolute" and rhs.kind == "absolute":
+                stack.append(
+                    _IARValue("absolute", int(lhs.value) << int(rhs.value))
+                )
+            elif lhs.kind == "sfb_byte3_mask" and rhs.kind == "absolute":
+                alias = _iar_segment_boundary_symbol(
+                    f"sfb_byte3_mask{lhs.addend:02x}_shift{int(rhs.value)}",
+                    str(lhs.value),
+                )
+                stack.append(_IARValue("external", alias))
+            else:
+                raise ListingError(f"unsupported t_SHL expression in segment {segment_id}")
         elif tag == "t_copy":
             if not stack:
                 raise ListingError(f"t_copy underflows the expression stack in segment {segment_id}")
@@ -1489,6 +1626,13 @@ def _parse_code_item_records(
                         f"{prefix}_{part}_single", value.value, value.addend
                     )
                 )
+            elif (
+                value.kind == "external"
+                and byte_index == 2
+                and str(value.value).startswith("__iar_sfb_")
+            ):
+                segment_name = str(value.value).removeprefix("__iar_sfb_")
+                stack.append(_IARValue("sfb_byte3", segment_name, value.addend))
             else:
                 raise ListingError(
                     f"unsupported t_get_byte index {byte_index} in segment {segment_id}"
@@ -1580,7 +1724,12 @@ def _parse_code_item_records(
                             else str(value.addend)
                         )
                     items.append(
-                        _CodeItem("byte_reloc_lo", operand, alias if external else None)
+                        _CodeItem(
+                            "byte_reloc_lo",
+                            operand,
+                            alias if external else None,
+                            alias if external else None,
+                        )
                     )
                     continue
                 expected_high_kind = (
@@ -1971,7 +2120,11 @@ def convert_code_listing_to_archive(
             segment_labels[ident] = _asm_name(candidates[0].name)
             external_data_segments.add(ident)
 
-    private_xdata: dict[str, tuple[int, bytes | None]] = {}
+    for ident in selected_xdata_segments:
+        if not public_data_symbols.get(ident):
+            segment_labels[ident] = f"__iar_data_{module_token}_{ident.lower()}"
+
+    private_xdata: dict[str, tuple[int, bytes | list[_InitializerAtom] | None]] = {}
     for ident in selected_xdata_segments:
         candidates = public_data_symbols.get(ident, [])
         if ident in external_data_segments:
@@ -1986,11 +2139,12 @@ def convert_code_listing_to_archive(
             ident,
             segment,
             segments,
+            symbols,
+            segment_labels,
             code_records,
             external_names,
         )
         private_xdata[ident] = (size, contents)
-        segment_labels[ident] = f"__iar_data_{module_token}_{ident.lower()}"
 
     decoded: dict[str, list[_CodeItem]] = {}
     segment_names = {ident: segment.name for ident, segment in segments.items()}
@@ -2654,8 +2808,8 @@ def convert_library_listing_to_archive(
         name.startswith(("__iar_sfb_", "__iar_sfe_")) for name in unresolved
     ):
         limitations.append(
-            "IAR SFB/SFE references need linker definitions for the named segment "
-            "boundaries before those runtime helpers can link"
+            "IAR SFB/SFE references and derived masked-address bytes need linker "
+            "definitions before those runtime helpers can link"
         )
     return {
         "output": str(output),

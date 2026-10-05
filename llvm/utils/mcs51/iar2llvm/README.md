@@ -63,7 +63,12 @@ must be reserved from Clang `__bit` globals. See the [IAR 8051 compiler guide](h
 Some IAR runtime modules reference segment boundaries with `SFB`/`SFE`. The
 converter emits these as unresolved ELF symbols named
 `__iar_sfb_<SEGMENT>` and `__iar_sfe_<SEGMENT>`; define the corresponding
-addresses in the linker script before linking those helpers.
+addresses in the linker script before linking those helpers. Extended-stack
+helpers also need `__iar_sfb_highmask_EXT_STACK`, the linker-computed byte for
+`(HIGH(SFB(EXT_STACK)) & ~?ESP_MASK)`. `?RESTORE_MCB` additionally needs
+`__iar_sfb_byte3_mask07_shift4_BANKED_CODE_EXT2_C` and
+`__iar_sfb_byte3_mask08_shift4_BANKED_CODE_EXT2_C`, the two linker-computed
+extended-bank fields used to initialize `?MEX2` and `?MEX3`.
 
 ```sh
 python3 -m iar2llvm convert-listing /private/tmp/Router-Pro.lst \
