@@ -1340,9 +1340,13 @@ def _parse_code_item_records(
                         external = target in external_segments
                     operand = alias
                     if value.addend:
-                        operand += f"+{value.addend}"
+                        operand += (
+                            f"+{value.addend}"
+                            if value.addend > 0
+                            else str(value.addend)
+                        )
                     items.append(
-                        _CodeItem("byte_reloc", operand, alias if external else None)
+                        _CodeItem("byte_reloc_lo", operand, alias if external else None)
                     )
                     continue
                 expected_high_kind = (
@@ -1873,21 +1877,13 @@ def convert_code_listing_to_archive(
         if not group_segments:
             continue
         section_flags = "a" if group == "common_const" else "ax"
-        if group != "banked":
-            lines.extend(
-                [
-                    f'.section {section_names[group]},"{section_flags}",@progbits',
-                    ".balign 1",
-                ]
-            )
+        lines.extend(
+            [
+                f'.section {section_names[group]},"{section_flags}",@progbits',
+                ".balign 1",
+            ]
+        )
         for ident in group_segments:
-            if group == "banked":
-                lines.extend(
-                    [
-                        f'.section {section_names[group]}_{ident.lower()},"ax",@progbits',
-                        ".balign 1",
-                    ]
-                )
             exports = exports_by_segment.get(ident, [])
             for alias in exports:
                 symbol_type = "object" if group == "common_const" else "function"

@@ -99,8 +99,10 @@ constant and data symbols are exported so other converted modules can
 reference them. Literal initializers and 16-bit relocations to public
 `CODE_C` objects are supported. Other unsupported public data initializers
 are reported and remain unresolved. Each IAR banked code segment gets its own
-`.mcs51.autobank.*` section for independent CC2530 bank placement. `CODE_C`
-tables are exported in read-only common-flash sections. For example, all
+label within the module's `.mcs51.autobank.*` section; this preserves short
+branches between IAR code segments while the module remains one placement unit
+for CC2530 bank assignment. `CODE_C` tables are exported in read-only
+common-flash sections. For example, all
 currently supported code in `cGP_stub`:
 
 ```sh
