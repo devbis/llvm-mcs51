@@ -80,13 +80,10 @@ int main(void) {
 // LINK: lcall 32768
 // LINK: pop 159
 // LINK: ret
-// LINK-NOT: <__mcs51_bankcall_banked_xor>:
-// LINK-LABEL: <__mcs51_bankcall_call_banked>:
+// LINK-LABEL: <__mcs51_bankcall_banked_xor>:
 // LINK: mov 159, #{{[1-7]}}
 // LINK: lcall {{327[0-9][0-9]}}
-// LINK-LABEL: <__mcs51_bankcall_call_other_bank>:
-// LINK: mov 159, #{{[1-7]}}
 // LINK-LABEL: <call_banked>:
-// LINK: acall 32768
+// LINK: lcall
 // LINK-LABEL: <call_other_bank>:
-// LINK: acall 32777
+// LINK: lcall

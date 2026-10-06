@@ -20,8 +20,8 @@ unsigned char call_probes(unsigned char x) {
 
 int main(void) { return call_probes(1); }
 
-// The runtime symbol is placed in a regular function section but stays in the
-// common window. Its call is direct; ordinary user code remains auto-banked.
+// Runtime and ordinary user functions use common flash while it has room.
+// This caller has an explicit bank-3 placement and calls both directly.
 // ASM-LABEL: call_probes:
 // ASM: lcall __mcs51_runtime_probe
 // ASM: lcall user_probe
@@ -29,5 +29,6 @@ int main(void) { return call_probes(1); }
 // LINK: Disassembly of section .text:
 // LINK: <__mcs51_bankcall_user_probe>:
 // LINK: <__mcs51_runtime_probe>:
-// LINK: Disassembly of section .bank1:
 // LINK: <user_probe>:
+// LINK: Disassembly of section .bank3:
+// LINK: <call_probes>:

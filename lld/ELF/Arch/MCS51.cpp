@@ -405,7 +405,10 @@ void MCS51::finalizeRelax(int Passes) const {
         PreviousDelta = Delta;
         if (!RemovedHere)
           continue;
-        size_t OpcodeOffset = R.offset - 1;
+        // Keep the input offset: R.offset is rewritten below for an 11-bit
+        // relocation, while Src must continue to index the original bytes.
+        size_t OriginalRelocOffset = R.offset;
+        size_t OpcodeOffset = OriginalRelocOffset - 1;
         size_t CopySize = OpcodeOffset - Src;
         std::memcpy(New + Dst, Old.data() + Src, CopySize);
         Dst += CopySize;
@@ -414,18 +417,18 @@ void MCS51::finalizeRelax(int Passes) const {
           // ACALL/AJMP (opcode, low address). R.offset already points at the
           // low byte in the shortened instruction after earlier removals.
           New[Dst++] = Old[OpcodeOffset] == 0x12 ? 0x11 : 0x01;
-          New[Dst++] = Old[R.offset + 1];
+          New[Dst++] = Old[OriginalRelocOffset + 1];
           R.type = R_8051_11;
           R.offset = OpcodeOffset;
         } else {
           New[Dst++] = 0xa3; // INC DPTR replaces MOV DPTR,#symbol.
-          Src = R.offset + 2;
+          Src = OriginalRelocOffset + 2;
           R.type = R_8051_NONE;
           if (I + 1 < Relocs.size() && Relocs[I + 1].type == R_8051_RELAX)
             Relocs[I + 1].type = R_8051_NONE;
         }
         if (RemovedHere == 1)
-          Src = R.offset + 2;
+          Src = OriginalRelocOffset + 2;
       }
       std::memcpy(New + Dst, Old.data() + Src, Old.size() - Src);
       Sec->content_ = New;

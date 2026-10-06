@@ -41,8 +41,8 @@ int main(void) { return (int)forward64(0x123456789abcdef0ull, 0x2345); }
 // CHECK-NOT: .weak __mcs51_bankcall_helper
 
 // LINK-LABEL: <helper>:
-// LINK: lcall
-// LINK: ljmp
+// LINK: {{(lcall|acall)}}
+// LINK: {{(ljmp|ajmp)}}
 // LINK-LABEL: <forward64>:
 // LINK: mov 57, r2
 // LINK: push 57

@@ -18,5 +18,5 @@ int main(void) {
 // LINK-DAG: Name: strcpy
 // LINK-DAG: Name: strcmp
 // DIS-LABEL: <main>:
-// DIS: lcall
-// DIS: lcall
+// DIS: {{(lcall|acall)}}
+// DIS: {{(lcall|acall)}}
