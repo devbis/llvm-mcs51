@@ -8,8 +8,8 @@
 reset:
   nop
 
-# If every flash bank is full, an auto-banked function should spill into the
-# remaining common CODE space rather than overflowing bank 7.
+# If all available banked flash is full, an auto-banked function should spill
+# into the remaining common CODE space rather than overflowing bank 7.
 .section .bank1.text,"ax"
 .space 0x8000
 .section .bank2.text,"ax"
@@ -23,7 +23,7 @@ reset:
 .section .bank6.text,"ax"
 .space 0x8000
 .section .bank7.text,"ax"
-.space 0x8000
+.space 0x4800
 
 .section .mcs51.autobank.routine,"ax"
 .globl routine
@@ -36,6 +36,6 @@ routine:
 # CHECK: Name: .bank1
 # CHECK: Size: 32768
 # CHECK: Name: .bank7
-# CHECK: Size: 32768
+# CHECK: Size: 18432
 # CHECK: Name: routine
 # CHECK: Value: 0x94

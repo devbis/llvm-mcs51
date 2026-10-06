@@ -897,6 +897,14 @@ static OutputSection *findByName(ArrayRef<SectionCommand *> vec,
   return nullptr;
 }
 
+static uint64_t getMCS51BankCapacity(const LinkerScript &script,
+                                     const OutputSection *bank) {
+  MemoryRegion *region = bank->memRegion;
+  if (!region && !bank->memoryRegionName.empty())
+    region = script.memoryRegions.lookup(bank->memoryRegionName);
+  return region ? region->getLength() : 0x8000;
+}
+
 struct MCS51AutoBankGroup {
   SmallVector<unsigned, 2> members;
   uint64_t size = 0;
@@ -1168,6 +1176,7 @@ void LinkerScript::distributeMCS51AutoBankSections() {
 
   std::array<InputSectionDescription *, 7> bankDescriptions{};
   std::array<uint64_t, 7> bankSizes{};
+  std::array<uint64_t, 7> bankCapacities{};
   for (unsigned bank = 0; bank != banks.size(); ++bank) {
     std::string name = (Twine(".bank") + Twine(bank + 1)).str();
     if (!banks[bank]) {
@@ -1175,6 +1184,7 @@ void LinkerScript::distributeMCS51AutoBankSections() {
                << "'";
       return;
     }
+    bankCapacities[bank] = getMCS51BankCapacity(*this, banks[bank]);
     for (SectionCommand *subCmd : banks[bank]->commands) {
       if (auto *isd = dyn_cast<InputSectionDescription>(subCmd)) {
         bankDescriptions[bank] = isd;
@@ -1191,12 +1201,11 @@ void LinkerScript::distributeMCS51AutoBankSections() {
 
   for (const MCS51AutoBankGroup &group : groups) {
     // Fill the banks in order, so the image uses as few as possible: the
-    // first bank with room takes the group (largest groups first).
-    // Every bank is a 32 KiB window.
-    constexpr uint64_t bankCapacity = 0x8000;
+    // first bank with room takes the group (largest groups first). A bank's
+    // MEMORY region can reduce its capacity for device-specific reservations.
     unsigned bank = 0;
     while (bank + 1 != bankSizes.size() &&
-           bankSizes[bank] + group.size > bankCapacity)
+           bankSizes[bank] + group.size > bankCapacities[bank])
       ++bank;
     for (unsigned candidateIndex : group.members) {
       const Candidate &candidate = candidates[candidateIndex];
@@ -1247,11 +1256,13 @@ void LinkerScript::fillMCS51CommonSpace() {
   std::array<OutputSection *, 7> banks{};
   std::array<SmallVector<InputSectionDescription *, 2>, 7> bankDescriptions;
   std::array<uint64_t, 7> bankSizes{};
+  std::array<uint64_t, 7> bankCapacities{};
   for (unsigned bank = 0; bank != banks.size(); ++bank) {
     std::string name = (Twine(".bank") + Twine(bank + 1)).str();
     banks[bank] = findByName(sectionCommands, name);
     if (!banks[bank])
       return;
+    bankCapacities[bank] = getMCS51BankCapacity(*this, banks[bank]);
     for (SectionCommand *cmd : banks[bank]->commands)
       if (auto *isd = dyn_cast<InputSectionDescription>(cmd)) {
         bankDescriptions[bank].push_back(isd);
@@ -1331,10 +1342,9 @@ void LinkerScript::fillMCS51CommonSpace() {
     bankSizes[bank] = endAfterGroup(bankSizes[bank], group);
   };
   for (const MCS51AutoBankGroup &group : groups) {
-    constexpr uint64_t bankCapacity = 0x8000;
     unsigned bank = 0;
     while (bank != banks.size() &&
-           endAfterGroup(bankSizes[bank], group) > bankCapacity)
+           endAfterGroup(bankSizes[bank], group) > bankCapacities[bank])
       ++bank;
     if (bank != banks.size()) {
       addGroupToBank(bank, group);
