@@ -1786,22 +1786,17 @@ int32_t __ashrsi3(int32_t Value, int Count) {
 #endif
 
 /* 32-bit multiply, called instead of expanding four word multiplies at every
-   use. Written over byte products so it needs no multiply of its own. */
+   use. Shift-and-add keeps this helper compact on the MCS-51, whose hardware
+   multiplier operates on bytes. */
 uint32_t __mulsi3(uint32_t LHS, uint32_t RHS) {
-  union {
-    uint32_t Value;
-    uint8_t Bytes[4];
-  } Left = {.Value = LHS}, Right = {.Value = RHS}, Product = {.Value = 0};
-  for (unsigned I = 0; I != 4; ++I) {
-    uint16_t Carry = 0;
-    for (unsigned J = 0; J != 4 - I; ++J) {
-      uint16_t Partial = (uint16_t)Left.Bytes[I] * Right.Bytes[J];
-      uint16_t Sum = Partial + Product.Bytes[I + J] + Carry;
-      Product.Bytes[I + J] = (uint8_t)Sum;
-      Carry = Sum >> 8;
-    }
+  uint32_t Product = 0;
+  while (RHS != 0) {
+    if (RHS & 1)
+      Product += LHS;
+    RHS >>= 1;
+    LHS <<= 1;
   }
-  return Product.Value;
+  return Product;
 }
 
 uint64_t __muldi3(uint64_t LHS, uint64_t RHS) {
