@@ -22,6 +22,7 @@
 #include "Writer.h"
 #include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Strings.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/StringRef.h"
@@ -896,6 +897,219 @@ static OutputSection *findByName(ArrayRef<SectionCommand *> vec,
   return nullptr;
 }
 
+struct MCS51AutoBankGroup {
+  SmallVector<unsigned, 2> members;
+  uint64_t size = 0;
+};
+
+static SmallVector<MCS51AutoBankGroup, 0>
+groupMCS51AutoBankSections(ArrayRef<InputSectionBase *> sections) {
+  DenseMap<InputSectionBase *, unsigned> sectionIndices;
+  SmallVector<unsigned, 0> parent;
+  for (unsigned i = 0; i != sections.size(); ++i) {
+    sectionIndices[sections[i]] = i;
+    parent.push_back(i);
+  }
+  auto findRoot = [&](unsigned index) {
+    while (parent[index] != index) {
+      parent[index] = parent[parent[index]];
+      index = parent[index];
+    }
+    return index;
+  };
+  auto join = [&](unsigned lhs, unsigned rhs) {
+    lhs = findRoot(lhs);
+    rhs = findRoot(rhs);
+    if (lhs != rhs)
+      parent[rhs] = lhs;
+  };
+  auto joinPCRelativeTarget = [&](InputSection &source,
+                                  const auto &relocation) {
+    if (relocation.getType(false) != R_8051_PCREL8)
+      return;
+    auto sourceIt = sectionIndices.find(&source);
+    if (sourceIt == sectionIndices.end())
+      return;
+    Symbol &targetSymbol = source.file->getRelocTargetSym(relocation);
+    auto *targetDefinition = dyn_cast<Defined>(&targetSymbol);
+    auto *targetSection = targetDefinition
+                              ? dyn_cast_or_null<InputSectionBase>(
+                                    targetDefinition->section)
+                              : nullptr;
+    auto targetIt = sectionIndices.find(targetSection);
+    if (targetIt != sectionIndices.end())
+      join(sourceIt->second, targetIt->second);
+  };
+  for (InputSectionBase *base : sections) {
+    auto *source = dyn_cast<InputSection>(base);
+    if (!source)
+      continue;
+    const RelsOrRelas<ELF32LE> relocs = source->relsOrRelas<ELF32LE>();
+    for (const ELF32LE::Rel &relocation : relocs.rels)
+      joinPCRelativeTarget(*source, relocation);
+    for (const ELF32LE::Rela &relocation : relocs.relas)
+      joinPCRelativeTarget(*source, relocation);
+    for (const ELF32LE::Crel &relocation : relocs.crels)
+      joinPCRelativeTarget(*source, relocation);
+  }
+
+  SmallVector<MCS51AutoBankGroup, 0> groups;
+  DenseMap<unsigned, unsigned> groupIndices;
+  for (unsigned i = 0; i != sections.size(); ++i) {
+    unsigned root = findRoot(i);
+    auto groupIt = groupIndices.find(root);
+    unsigned groupIndex;
+    if (groupIt == groupIndices.end()) {
+      groupIndex = groups.size();
+      groupIndices[root] = groupIndex;
+      groups.emplace_back();
+    } else {
+      groupIndex = groupIt->second;
+    }
+    MCS51AutoBankGroup &group = groups[groupIndex];
+    group.members.push_back(i);
+    group.size = alignToPowerOf2(group.size, sections[i]->addralign) +
+                 sections[i]->getSize();
+  }
+  for (MCS51AutoBankGroup &group : groups)
+    llvm::sort(group.members, [&](unsigned lhs, unsigned rhs) {
+      if (sections[lhs]->name != sections[rhs]->name)
+        return sections[lhs]->name < sections[rhs]->name;
+      return sections[lhs]->file->getName() < sections[rhs]->file->getName();
+    });
+  llvm::sort(groups, [&](const MCS51AutoBankGroup &lhs,
+                         const MCS51AutoBankGroup &rhs) {
+    if (lhs.size != rhs.size)
+      return lhs.size > rhs.size;
+    InputSectionBase *lhsFirst = sections[lhs.members.front()];
+    InputSectionBase *rhsFirst = sections[rhs.members.front()];
+    if (lhsFirst->name != rhsFirst->name)
+      return lhsFirst->name < rhsFirst->name;
+    return lhsFirst->file->getName() < rhsFirst->file->getName();
+  });
+  return groups;
+}
+
+static void pruneMCS51AutoBankThunks(Ctx &ctx,
+                                    ArrayRef<SectionCommand *> commands) {
+  if (!ctx.arg.gcSections)
+    return;
+
+  constexpr StringLiteral BankCallPrefix("__mcs51_bankcall_");
+  auto findDefined = [&](InputFile *file, StringRef name) -> Defined * {
+    if (file && file->kind() == InputFile::ObjKind)
+      for (Symbol *symbol : file->getSymbols())
+        if (symbol->getName() == name)
+          if (auto *defined = dyn_cast<Defined>(symbol))
+            return defined;
+    if (Symbol *symbol = ctx.symtab->find(name))
+      return dyn_cast<Defined>(symbol);
+    return nullptr;
+  };
+  auto getBankForSection = [](const OutputSection *output) {
+    if (!output || !output->name.starts_with(".bank"))
+      return 0U;
+    unsigned bank = 0;
+    StringRef bankName = output->name.drop_front(5);
+    if (bankName.getAsInteger(10, bank) || bank < 1 || bank > 7)
+      return 0U;
+    return bank;
+  };
+  auto getBank = [&](const Symbol *symbol) {
+    auto *defined = dyn_cast_or_null<Defined>(symbol);
+    auto *section = defined
+                        ? dyn_cast_or_null<InputSection>(defined->section)
+                        : nullptr;
+    return getBankForSection(section ? section->getOutputSection() : nullptr);
+  };
+  auto isDirectTransfer = [](const InputSection &source, uint32_t type,
+                             uint64_t offset) {
+    if (!(source.flags & SHF_EXECINSTR) || !offset ||
+        offset > source.content().size())
+      return false;
+    uint8_t opcode = source.content()[offset - 1];
+    if (type == R_8051_16_BE)
+      return opcode == 0x12 || opcode == 0x02; // LCALL or LJMP
+    return type == R_8051_11 && (opcode & 0x1f) == 0x01;
+  };
+  DenseSet<InputSectionBase *> neededThunks;
+  auto processRelocation = [&](InputSection &source,
+                               const auto &relocation) {
+    if (source.name.starts_with(".text.autobankthunks.") ||
+        source.name.starts_with(".text.bankthunks."))
+      return;
+    unsigned callerBank = getBankForSection(source.getOutputSection());
+    Symbol &symbol = source.file->getRelocTargetSym(relocation);
+    auto *defined = dyn_cast<Defined>(&symbol);
+    if (!defined)
+      return;
+    if (auto *targetSection =
+            dyn_cast_or_null<InputSectionBase>(defined->section))
+      if (targetSection->name.starts_with(".text.autobankthunks.")) {
+        neededThunks.insert(targetSection);
+        return;
+      }
+    uint32_t type = relocation.getType(ctx.arg.isMips64EL);
+    bool direct = isDirectTransfer(source, type, relocation.r_offset);
+    Defined *function = defined;
+    bool isThunk = symbol.getName().starts_with(BankCallPrefix);
+    if (isThunk)
+      function = findDefined(
+          defined->file, symbol.getName().drop_front(BankCallPrefix.size()));
+    unsigned targetBank = getBank(function);
+    bool needsThunk = !function || !direct ||
+                      (targetBank && targetBank != callerBank);
+    if (!needsThunk)
+      return;
+    if (isThunk) {
+      if (auto *thunkSection =
+              dyn_cast_or_null<InputSectionBase>(defined->section))
+        neededThunks.insert(thunkSection);
+    } else if (symbol.isFunc()) {
+      std::string thunkName =
+          (Twine(BankCallPrefix) + symbol.getName()).str();
+      if (Defined *thunk = findDefined(defined->file, thunkName))
+        if (auto *thunkSection =
+                dyn_cast_or_null<InputSectionBase>(thunk->section))
+          neededThunks.insert(thunkSection);
+    }
+  };
+  for (InputSectionBase *base : ctx.inputSections) {
+    auto *source = dyn_cast<InputSection>(base);
+    if (!source || !source->isLive() ||
+        source->file->kind() != InputFile::ObjKind)
+      continue;
+    const RelsOrRelas<ELF32LE> relocs = source->relsOrRelas<ELF32LE>();
+    for (const ELF32LE::Rel &relocation : relocs.rels)
+      processRelocation(*source, relocation);
+    for (const ELF32LE::Rela &relocation : relocs.relas)
+      processRelocation(*source, relocation);
+    for (const ELF32LE::Crel &relocation : relocs.crels)
+      processRelocation(*source, relocation);
+  }
+
+  SmallVector<InputSectionBase *, 0> discardThunks;
+  for (InputSectionBase *section : ctx.inputSections)
+    if (section->isLive() &&
+        section->name.starts_with(".text.autobankthunks.") &&
+        !neededThunks.contains(section))
+      discardThunks.push_back(section);
+  for (InputSectionBase *section : discardThunks) {
+    section->markDead();
+    auto *input = dyn_cast<InputSection>(section);
+    if (!input)
+      continue;
+    for (SectionCommand *cmd : commands) {
+      auto *osd = dyn_cast<OutputDesc>(cmd);
+      if (!osd)
+        continue;
+      for (SectionCommand *subCmd : osd->osec.commands)
+        if (auto *isd = dyn_cast<InputSectionDescription>(subCmd))
+          llvm::erase(isd->sections, input);
+    }
+  }
+}
+
 void LinkerScript::distributeMCS51AutoBankSections() {
   if (ctx.arg.emachine != EM_8051)
     return;
@@ -946,6 +1160,12 @@ void LinkerScript::distributeMCS51AutoBankSections() {
   if (candidates.empty())
     return;
 
+  SmallVector<InputSectionBase *, 0> candidateSections;
+  for (const Candidate &candidate : candidates)
+    candidateSections.push_back(candidate.section);
+  SmallVector<MCS51AutoBankGroup, 0> groups =
+      groupMCS51AutoBankSections(candidateSections);
+
   std::array<InputSectionDescription *, 7> bankDescriptions{};
   std::array<uint64_t, 7> bankSizes{};
   for (unsigned bank = 0; bank != banks.size(); ++bank) {
@@ -969,150 +1189,22 @@ void LinkerScript::distributeMCS51AutoBankSections() {
     }
   }
 
-  llvm::sort(candidates, [](const Candidate &lhs, const Candidate &rhs) {
-    if (lhs.section->getSize() != rhs.section->getSize())
-      return lhs.section->getSize() > rhs.section->getSize();
-    return lhs.section->name < rhs.section->name;
-  });
-
-  for (const Candidate &candidate : candidates) {
+  for (const MCS51AutoBankGroup &group : groups) {
     // Fill the banks in order, so the image uses as few as possible: the
-    // first bank with room takes the section (largest sections first).
+    // first bank with room takes the group (largest groups first).
     // Every bank is a 32 KiB window.
     constexpr uint64_t bankCapacity = 0x8000;
     unsigned bank = 0;
     while (bank + 1 != bankSizes.size() &&
-           bankSizes[bank] + candidate.section->getSize() > bankCapacity)
+           bankSizes[bank] + group.size > bankCapacity)
       ++bank;
-    bankDescriptions[bank]->sectionBases.push_back(candidate.section);
-    candidate.section->parent = banks[bank];
-    bankSizes[bank] += candidate.section->getSize();
-    llvm::erase(candidate.source->sectionBases, candidate.section);
-  }
-
-  // Direct calls to automatically banked functions are emitted as references
-  // to the function body. Keep a common-area trampoline only if a live caller
-  // can cross banks or if code takes the function's address. Calls within one
-  // bank can branch straight to the body, and their unused trampoline sections
-  // should not consume the scarce common flash window.
-  if (ctx.arg.gcSections) {
-    constexpr StringLiteral BankCallPrefix("__mcs51_bankcall_");
-    auto findDefined = [&](InputFile *file, StringRef name) -> Defined * {
-      if (file && file->kind() == InputFile::ObjKind)
-        for (Symbol *symbol : file->getSymbols())
-          if (symbol->getName() == name)
-            if (auto *defined = dyn_cast<Defined>(symbol))
-              return defined;
-      if (Symbol *symbol = ctx.symtab->find(name))
-        return dyn_cast<Defined>(symbol);
-      return nullptr;
-    };
-    auto getBankForSection = [](const OutputSection *output) {
-      if (!output || !output->name.starts_with(".bank"))
-        return 0U;
-      unsigned bank = 0;
-      StringRef bankName = output->name.drop_front(5);
-      if (bankName.getAsInteger(10, bank) || bank < 1 || bank > 7)
-        return 0U;
-      return bank;
-    };
-    auto getBank = [&](const Symbol *symbol) {
-      auto *defined = dyn_cast_or_null<Defined>(symbol);
-      auto *section = defined
-                          ? dyn_cast_or_null<InputSection>(defined->section)
-                          : nullptr;
-      return getBankForSection(section ? section->getOutputSection() : nullptr);
-    };
-    auto isDirectTransfer = [](const InputSection &source, uint32_t type,
-                               uint64_t offset) {
-      if (!(source.flags & SHF_EXECINSTR) || !offset ||
-          offset > source.content().size())
-        return false;
-      uint8_t opcode = source.content()[offset - 1];
-      if (type == R_8051_16_BE)
-        return opcode == 0x12 || opcode == 0x02; // LCALL or LJMP
-      return type == R_8051_11 && (opcode & 0x1f) == 0x01;
-    };
-    DenseSet<InputSectionBase *> neededThunks;
-    auto processRelocation = [&](InputSection &source,
-                                 const auto &relocation) {
-      if (source.name.starts_with(".text.autobankthunks.") ||
-          source.name.starts_with(".text.bankthunks."))
-        return;
-      unsigned callerBank = getBankForSection(source.getOutputSection());
-      Symbol &symbol = source.file->getRelocTargetSym(relocation);
-      auto *defined = dyn_cast<Defined>(&symbol);
-      if (!defined)
-        return;
-      // Local bank-call thunks can be referenced through their section symbol
-      // instead of the __mcs51_bankcall_* alias. The linker cannot prove that
-      // such a relocation is a direct same-bank call, so preserve its section.
-      if (auto *targetSection =
-              dyn_cast_or_null<InputSectionBase>(defined->section))
-        if (targetSection->name.starts_with(".text.autobankthunks.")) {
-          neededThunks.insert(targetSection);
-          return;
-        }
-      uint32_t type = relocation.getType(ctx.arg.isMips64EL);
-      bool direct = isDirectTransfer(source, type, relocation.r_offset);
-      Defined *function = defined;
-      bool isThunk = symbol.getName().starts_with(BankCallPrefix);
-      if (isThunk)
-        function = findDefined(
-            defined->file, symbol.getName().drop_front(BankCallPrefix.size()));
-      unsigned targetBank = getBank(function);
-      // Non-call references (for example entries in callback tables) must
-      // keep the thunk even when its target lives in common flash: the
-      // relocation names the thunk section itself and is not rewritten to
-      // point at the target function. Only a direct transfer can bypass it.
-      bool needsThunk = !function || !direct ||
-                        (targetBank && targetBank != callerBank);
-      if (!needsThunk)
-        return;
-      if (isThunk) {
-        if (auto *thunkSection =
-                dyn_cast_or_null<InputSectionBase>(defined->section))
-          neededThunks.insert(thunkSection);
-      } else if (symbol.isFunc()) {
-        std::string thunkName =
-            (Twine(BankCallPrefix) + symbol.getName()).str();
-        if (Defined *thunk = findDefined(defined->file, thunkName))
-          if (auto *thunkSection =
-                  dyn_cast_or_null<InputSectionBase>(thunk->section))
-            neededThunks.insert(thunkSection);
-      }
-    };
-    for (InputSectionBase *base : ctx.inputSections) {
-      auto *source = dyn_cast<InputSection>(base);
-      if (!source || !source->isLive() ||
-          source->file->kind() != InputFile::ObjKind)
-        continue;
-      const RelsOrRelas<ELF32LE> relocs = source->relsOrRelas<ELF32LE>();
-      for (const ELF32LE::Rel &relocation : relocs.rels)
-        processRelocation(*source, relocation);
-      for (const ELF32LE::Rela &relocation : relocs.relas)
-        processRelocation(*source, relocation);
-      for (const ELF32LE::Crel &relocation : relocs.crels)
-        processRelocation(*source, relocation);
+    for (unsigned candidateIndex : group.members) {
+      const Candidate &candidate = candidates[candidateIndex];
+      bankDescriptions[bank]->sectionBases.push_back(candidate.section);
+      candidate.section->parent = banks[bank];
+      llvm::erase(candidate.source->sectionBases, candidate.section);
     }
-
-    SmallVector<InputSectionBase *, 0> discardThunks;
-    for (InputSectionBase *section : ctx.inputSections)
-      if (section->isLive() &&
-          section->name.starts_with(".text.autobankthunks.") &&
-          !neededThunks.contains(section))
-        discardThunks.push_back(section);
-    for (InputSectionBase *section : discardThunks) {
-      section->markDead();
-      for (SectionCommand *cmd : sectionCommands) {
-        auto *osd = dyn_cast<OutputDesc>(cmd);
-        if (!osd)
-          continue;
-        for (SectionCommand *subCmd : osd->osec.commands)
-          if (auto *isd = dyn_cast<InputSectionDescription>(subCmd))
-            llvm::erase(isd->sectionBases, section);
-      }
-    }
+    bankSizes[bank] += group.size;
   }
 
   llvm::erase_if(sectionCommands, [](SectionCommand *cmd) {
@@ -1191,11 +1283,11 @@ void LinkerScript::fillMCS51CommonSpace() {
     }
 
   }
-  llvm::sort(candidates, [](const Candidate &lhs, const Candidate &rhs) {
-    if (lhs.section->getSize() != rhs.section->getSize())
-      return lhs.section->getSize() > rhs.section->getSize();
-    return lhs.section->name < rhs.section->name;
-  });
+  SmallVector<InputSectionBase *, 0> candidateSections;
+  for (const Candidate &candidate : candidates)
+    candidateSections.push_back(candidate.section);
+  SmallVector<MCS51AutoBankGroup, 0> groups =
+      groupMCS51AutoBankSections(candidateSections);
 
   uint64_t commonLimit = 0x8000;
   if (commonText->memRegion)
@@ -1221,34 +1313,52 @@ void LinkerScript::fillMCS51CommonSpace() {
     return;
   commonLimit -= loadReserve;
   InputSectionDescription *commonDestination = commonDescriptions.back();
-  for (const Candidate &candidate : candidates) {
+  auto endAfterGroup = [&](uint64_t start,
+                           const MCS51AutoBankGroup &group) {
+    for (unsigned index : group.members) {
+      InputSection *section = cast<InputSection>(candidateSections[index]);
+      start = alignToPowerOf2(start, section->addralign) + section->getSize();
+    }
+    return start;
+  };
+  auto addGroupToBank = [&](unsigned bank,
+                            const MCS51AutoBankGroup &group) {
+    for (unsigned index : group.members) {
+      InputSection *section = cast<InputSection>(candidateSections[index]);
+      bankDescriptions[bank].back()->sections.push_back(section);
+      banks[bank]->commitSection(section);
+    }
+    bankSizes[bank] = endAfterGroup(bankSizes[bank], group);
+  };
+  for (const MCS51AutoBankGroup &group : groups) {
     constexpr uint64_t bankCapacity = 0x8000;
     unsigned bank = 0;
     while (bank != banks.size() &&
-           bankSizes[bank] + candidate.section->getSize() > bankCapacity)
+           endAfterGroup(bankSizes[bank], group) > bankCapacity)
       ++bank;
     if (bank != banks.size()) {
-      bankDescriptions[bank].back()->sections.push_back(candidate.section);
-      banks[bank]->commitSection(candidate.section);
-      bankSizes[bank] += candidate.section->getSize();
+      addGroupToBank(bank, group);
       continue;
     }
 
-    uint64_t start = alignToPowerOf2(commonEnd, candidate.section->addralign);
-    uint64_t end = start + candidate.section->getSize();
-    if (end <= commonLimit) {
-      commonDestination->sections.push_back(candidate.section);
-      commonText->commitSection(candidate.section);
-      commonEnd = end;
+    uint64_t commonCandidateEnd = endAfterGroup(commonEnd, group);
+    if (commonCandidateEnd <= commonLimit) {
+      for (unsigned index : group.members) {
+        InputSection *section = cast<InputSection>(candidateSections[index]);
+        commonDestination->sections.push_back(section);
+        commonText->commitSection(section);
+      }
+      commonEnd = commonCandidateEnd;
       continue;
     }
 
     // Preserve the usual bank overflow diagnostic if neither flash area can
-    // hold this section.
-    bankDescriptions.back().back()->sections.push_back(candidate.section);
-    banks.back()->commitSection(candidate.section);
-    bankSizes.back() += candidate.section->getSize();
+    // hold this group.
+    addGroupToBank(banks.size() - 1, group);
   }
+  // The second placement pass can change a function's bank after ICF. Prune
+  // common-area thunks only now, using the final caller and callee banks.
+  pruneMCS51AutoBankThunks(ctx, sectionCommands);
 }
 
 static OutputDesc *createSection(Ctx &ctx, InputSectionBase *isec,
