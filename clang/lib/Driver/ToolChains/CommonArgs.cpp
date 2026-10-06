@@ -1138,6 +1138,15 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
   if (Args.getLastArg(options::OPT_O_Group)) {
     unsigned OptimizationLevel =
         getOptimizationLevel(Args, InputKind(), D.getDiags());
+    const Arg *OptArg = Args.getLastArg(options::OPT_O_Group);
+    // MCS-51 has an 8-bit stack-address space. Full LTO at the O2 pipeline
+    // level can inline enough code to exceed its 255-byte frame limit, even
+    // for -Oz inputs. The size attributes recorded in the bitcode still guide
+    // size decisions at O1, while the smaller interprocedural pipeline keeps
+    // frames representable and produces smaller CC2530 firmware.
+    if (Triple.getArch() == llvm::Triple::mcs51 && OptArg->getNumValues() == 1 &&
+        StringRef(OptArg->getValue()) == "z")
+      OptimizationLevel = 1;
     CmdArgs.push_back(Args.MakeArgString(Twine(PluginOptPrefix) + ExtraDash +
                                          "O" + Twine(OptimizationLevel)));
     if (IsAMDGCN)
