@@ -52,7 +52,9 @@ int main(void) { return background(); }
 // DIS: 0000008b <.mcs51_vector_17>:
 // DIS: ajmp
 // DIS-LABEL: <__mcs51_bankcall_background>:
-// DIS: mov 159, #{{[1-7]}}
-// DIS: lcall 32768
+// DIS: mov 159, #0
+// DIS: acall 457
+// DIS-LABEL: <main>:
+// DIS: acall 457
 // DIS-LABEL: <background>:
 // DIS: ret

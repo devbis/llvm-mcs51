@@ -1342,6 +1342,24 @@ void LinkerScript::fillMCS51CommonSpace() {
     bankSizes[bank] = endAfterGroup(bankSizes[bank], group);
   };
   for (const MCS51AutoBankGroup &group : groups) {
+    bool IsAutoTextGroup = llvm::all_of(group.members, [&](unsigned index) {
+      return candidateSections[index]->name.starts_with(".text.");
+    });
+    uint64_t commonCandidateEnd = endAfterGroup(commonEnd, group);
+    // Ordinary compiler-generated functions use free common flash first so
+    // small images avoid bank-call trampolines. Explicit .mcs51.autobank.*
+    // sections keep their bank-preferred placement and spill to common flash
+    // only when all banks are full.
+    if (IsAutoTextGroup && commonCandidateEnd <= commonLimit) {
+      for (unsigned index : group.members) {
+        InputSection *section = cast<InputSection>(candidateSections[index]);
+        commonDestination->sections.push_back(section);
+        commonText->commitSection(section);
+      }
+      commonEnd = commonCandidateEnd;
+      continue;
+    }
+
     unsigned bank = 0;
     while (bank != banks.size() &&
            endAfterGroup(bankSizes[bank], group) > bankCapacities[bank])
@@ -1351,7 +1369,6 @@ void LinkerScript::fillMCS51CommonSpace() {
       continue;
     }
 
-    uint64_t commonCandidateEnd = endAfterGroup(commonEnd, group);
     if (commonCandidateEnd <= commonLimit) {
       for (unsigned index : group.members) {
         InputSection *section = cast<InputSection>(candidateSections[index]);
