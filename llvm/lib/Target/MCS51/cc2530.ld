@@ -1,5 +1,5 @@
-/* CC2530 root-bank memory map for firmware that fits the common flash area.
- * CODE and XDATA have independent address buses, so their VMAs overlap. */
+/* CC2530 flash map for Z-Stack RouterEB-compatible firmware. CODE and XDATA
+ * have independent address buses, so their VMAs overlap. */
 ENTRY(reset)
 
 MEMORY
@@ -12,6 +12,9 @@ MEMORY
   SFR_XDATA (rw) : ORIGIN = 0x7080, LENGTH = 0x0080
   INFO_PAGE (r)  : ORIGIN = 0x7800, LENGTH = 0x0800
   XDATA_BANK(r)  : ORIGIN = 0x8000, LENGTH = 0x8000
+  /* IAR's CC2530 RouterEB layout reserves flash from physical 0x3c800 for
+     Zigbee NV and device metadata. Bank 7 can therefore use only 0x4800 bytes. */
+  BANK7_CODE (rx) : ORIGIN = 0x8000, LENGTH = 0x4800
 }
 
 /* XDATA aliases for registers and the upper 256 bytes of the SRAM. */
@@ -108,7 +111,7 @@ SECTIONS
   .bank7 0x8000 : AT(0x38000)
   {
     __cc2530_bank7_start = .; *(.bank7 .bank7.*) __cc2530_bank7_end = .;
-  } > XDATA_BANK
+  } > BANK7_CODE
 
   /* Initial values are stored in flash and copied to XDATA by reset startup. */
   .data :
@@ -246,6 +249,7 @@ ASSERT(SIZEOF(.bank3) <= LENGTH(XDATA_BANK), "CC2530 bank 3 exceeds 32 KiB")
 ASSERT(SIZEOF(.bank4) <= LENGTH(XDATA_BANK), "CC2530 bank 4 exceeds 32 KiB")
 ASSERT(SIZEOF(.bank5) <= LENGTH(XDATA_BANK), "CC2530 bank 5 exceeds 32 KiB")
 ASSERT(SIZEOF(.bank6) <= LENGTH(XDATA_BANK), "CC2530 bank 6 exceeds 32 KiB")
-ASSERT(SIZEOF(.bank7) <= LENGTH(XDATA_BANK), "CC2530 bank 7 exceeds 32 KiB")
+ASSERT(SIZEOF(.bank7) <= LENGTH(BANK7_CODE),
+       "CC2530 bank 7 overlaps reserved Z-Stack flash")
 ASSERT(SIZEOF(.bank7) == 0 || 0x38000 + SIZEOF(.bank7) <= 0x40000,
        "CC2530 banked image exceeds 256-KiB flash")
