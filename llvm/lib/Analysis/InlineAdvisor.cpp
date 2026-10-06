@@ -355,7 +355,7 @@ shouldBeDeferred(Function *Caller, TargetTransformInfo &CalleeTTI,
   // be removed entirely.  We did not account for this above unless there
   // is only one caller of Caller.
   if (ApplyLastCallBonus)
-    TotalSecondaryCost -= CalleeTTI.getInliningLastCallToStaticBonus();
+    TotalSecondaryCost -= CalleeTTI.getInliningLastCallToStaticBonus(Caller);
 
   // If InlineDeferralScale is negative, then ignore the cost of primary
   // inlining -- IC.getCost() multiplied by the number of callers to Caller.

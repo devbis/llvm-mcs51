@@ -95,7 +95,7 @@ public:
   virtual unsigned getInliningCostBenefitAnalysisProfitableMultiplier() const {
     return 8;
   }
-  virtual int getInliningLastCallToStaticBonus() const {
+  virtual int getInliningLastCallToStaticBonus(const Function *) const {
     // This is the value of InlineConstants::LastCallToStaticBonus before it was
     // removed along with the introduction of this function.
     return 15000;

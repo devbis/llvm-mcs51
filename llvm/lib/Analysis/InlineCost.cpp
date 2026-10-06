@@ -2105,7 +2105,7 @@ void InlineCostCallAnalyzer::updateThreshold(CallBase &Call, Function &Callee) {
   // and the callsite.
   int SingleBBBonusPercent = 50;
   int VectorBonusPercent = TTI.getInlinerVectorBonusPercent();
-  int LastCallToStaticBonus = TTI.getInliningLastCallToStaticBonus();
+  int LastCallToStaticBonus = TTI.getInliningLastCallToStaticBonus(&Callee);
 
   // Lambda to set all the above bonus and bonus percentages to 0.
   auto DisallowAllBonuses = [&]() {
