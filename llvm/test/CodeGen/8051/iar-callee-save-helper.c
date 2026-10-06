@@ -35,6 +35,10 @@ __attribute__((noinline)) void keep_one_word_live(void) {
   result = value;
 }
 
+__attribute__((noinline)) void clobber_r6_r7(void) {
+  __asm__ volatile("" : : : "r6", "r7");
+}
+
 int main(void) {
   keep_values_live();
   keep_one_word_live();
@@ -62,7 +66,17 @@ int main(void) {
 // IAR: lcall __mcs51_restore_im0_2
 // IAR: ret
 
+// IAR keeps DPTR saved around the restore helper.
+// IAR-LABEL: clobber_r6_r7:
+// IAR: lcall __mcs51_save_r67_2
+// IAR: lcall __mcs51_restore_r67_2
+
 // The default Clang ABI is not changed by the IAR-only call and save rules.
 // CLANG-LABEL: keep_values_live:
 // CLANG-NOT: "?XSP"
 // CLANG: lcall barrier
+// The standard Clang ABI retains its register convention and can tail-return
+// through the helper because it does not need to restore DPTR.
+// CLANG-LABEL: clobber_r6_r7:
+// CLANG: lcall __mcs51_save_r67_2
+// CLANG: ljmp __mcs51_return_r67_2

@@ -17,14 +17,19 @@ using namespace llvm;
 MCS51FrameLowering::MCS51FrameLowering()
     : TargetFrameLowering(StackGrowsUp, Align(1), 1) {}
 
-// Callee-saved registers fall into three groups that the runtime can save and
-// restore with shared routines: R2.., IM8.., and IAR's IM0..7. A group uses
-// the routines when it is a prefix of its register range with enough members.
-enum { CSRGroupR, CSRGroupIM, CSRGroupIM0, NumCSRGroups };
+// Callee-saved registers fall into groups that the runtime can save and
+// restore with shared routines: R2..R5, R6..R7, IM8.., and IAR's IM0..7. A
+// group uses the routines when it is a prefix of its register range with
+// enough members.
+enum { CSRGroupR, CSRGroupR67, CSRGroupIM, CSRGroupIM0, NumCSRGroups };
 
 static int getCSRGroup(const TargetRegisterInfo *TRI, MCRegister Reg,
                        unsigned &Index) {
   unsigned Enc = TRI->getEncodingValue(Reg);
+  if (Enc == 6 || Enc == 7) {
+    Index = Enc - 6;
+    return CSRGroupR67;
+  }
   if (Enc >= 2 && Enc <= 7) {
     Index = Enc - 2;
     return CSRGroupR;
@@ -43,6 +48,7 @@ static int getCSRGroup(const TargetRegisterInfo *TRI, MCRegister Reg,
 static MCRegister getCSRGroupReg(int Group, unsigned Index) {
   switch (Group) {
   case CSRGroupR: return MCRegister(MCS51::R2 + Index);
+  case CSRGroupR67: return MCRegister(MCS51::R6 + Index);
   case CSRGroupIM: return MCRegister(MCS51::IM8 + Index);
   default: return MCRegister(MCS51::IM0 + Index);
   }
@@ -51,7 +57,7 @@ static MCRegister getCSRGroupReg(int Group, unsigned Index) {
 static unsigned getCSRHelperMinimum(int Group) {
   // A two-register helper saves two bytes over inline PUSH/POP.
   // The other groups keep the existing three-register threshold.
-  return Group == CSRGroupIM0 ? 2 : 3;
+  return Group == CSRGroupR67 || Group == CSRGroupIM0 ? 2 : 3;
 }
 
 // Number of registers of each group handled by the shared routines (0 if the

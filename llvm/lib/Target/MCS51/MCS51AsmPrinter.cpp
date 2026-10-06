@@ -297,8 +297,9 @@ public:
       }
       const char *GroupName = "r";
       switch (MI->getOperand(0).getImm()) {
-      case 1: GroupName = "im"; break;
-      case 2: GroupName = "im0_"; break;
+      case 1: GroupName = "r67_"; break;
+      case 2: GroupName = "im"; break;
+      case 3: GroupName = "im0_"; break;
       }
       SmallString<32> Name;
       raw_svector_ostream(Name)
