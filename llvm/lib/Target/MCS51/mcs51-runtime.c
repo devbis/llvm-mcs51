@@ -110,6 +110,10 @@ uint32_t __fixunssfsi(float Value) {
   return (Magnitude & ValidMask) | (UINT32_MAX & SaturateMask);
 }
 
+/* These float conversions use compiler-generated 64-bit shifts. The current
+   IAR ABI lowering cannot emit those wide-result libcalls, while its direct
+   64-bit runtime helpers remain available below. */
+#ifndef MCS51_IAR_RUNTIME
 static uint32_t uint64_to_float32_bits(uint64_t Magnitude, uint32_t Sign) {
   if (!Magnitude)
     return 0;
@@ -227,6 +231,7 @@ float __floatundisf(uint64_t Value) {
   Float32Bits Result = {.Bits = uint64_to_float32_bits(Value, 0)};
   return Result.Float;
 }
+#endif
 
 static uint32_t shift_right_jam32(uint32_t Value, unsigned Count) {
   if (!Count)
@@ -344,6 +349,7 @@ float __subsf3(float LHS, float RHS) {
   return __addsf3(LHS, Operand.Float);
 }
 
+#ifndef MCS51_IAR_RUNTIME
 static uint64_t round_shift_right_even64(uint64_t Value, unsigned Count) {
   if (!Count)
     return Value;
@@ -451,6 +457,7 @@ float __mulsf3(float LHS, float RHS) {
   Float32Bits Result = {.Bits = ResultSign | (uint32_t)RoundedSignificand};
   return Result.Float;
 }
+#endif
 
 float __divsf3(float LHS, float RHS) {
   const uint32_t SignMask = UINT32_C(0x80000000);
