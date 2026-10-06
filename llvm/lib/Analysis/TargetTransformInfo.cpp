@@ -229,8 +229,9 @@ TargetTransformInfo::getInliningCostBenefitAnalysisProfitableMultiplier()
   return TTIImpl->getInliningCostBenefitAnalysisProfitableMultiplier();
 }
 
-int TargetTransformInfo::getInliningLastCallToStaticBonus() const {
-  return TTIImpl->getInliningLastCallToStaticBonus();
+int TargetTransformInfo::getInliningLastCallToStaticBonus(
+    const Function *Callee) const {
+  return TTIImpl->getInliningLastCallToStaticBonus(Callee);
 }
 
 unsigned

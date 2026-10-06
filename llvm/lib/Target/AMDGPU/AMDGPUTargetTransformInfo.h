@@ -258,7 +258,7 @@ public:
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const override;
 
-  int getInliningLastCallToStaticBonus() const override;
+  int getInliningLastCallToStaticBonus(const Function *Callee) const override;
   unsigned getInliningThresholdMultiplier() const override { return 11; }
   unsigned adjustInliningThreshold(const CallBase *CB) const override;
   unsigned getCallerAllocaCost(const CallBase *CB,

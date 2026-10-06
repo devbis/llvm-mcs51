@@ -426,7 +426,7 @@ public:
   LLVM_ABI unsigned getInliningCostBenefitAnalysisProfitableMultiplier() const;
 
   /// \returns The bonus of inlining the last call to a static function.
-  LLVM_ABI int getInliningLastCallToStaticBonus() const;
+  LLVM_ABI int getInliningLastCallToStaticBonus(const Function *Callee) const;
 
   /// \returns A value to be added to the inlining threshold.
   LLVM_ABI unsigned adjustInliningThreshold(const CallBase *CB) const;

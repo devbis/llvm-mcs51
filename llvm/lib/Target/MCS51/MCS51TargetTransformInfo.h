@@ -38,6 +38,20 @@ public:
     return MinSize ? 0 : 1;
   }
 
+  int getInliningLastCallToStaticBonus(const Function *Callee) const override {
+    if (!MinSize)
+      return BaseT::getInliningLastCallToStaticBonus(Callee);
+
+    // LLVM's default bonus assumes that deleting the last call to any local
+    // helper makes inlining a code-size win. On MCS-51 a large helper can cost
+    // far more than its three-byte LCALL, so reserve that bonus for small
+    // optimized callees. This applies to both ABIs under -Oz.
+    constexpr unsigned SmallCalleeInstructionLimit = 48;
+    if (!Callee || Callee->getInstructionCount() > SmallCalleeInstructionLimit)
+      return 0;
+    return BaseT::getInliningLastCallToStaticBonus(Callee);
+  }
+
   // The generic cost model charges one unit for an i32 or i64 operation, but
   // the 8-bit MCS-51 expands it into a sequence per byte, and shifts,
   // multiplies and divisions into loops or runtime calls. Scale the costs so
