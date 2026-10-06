@@ -95,6 +95,38 @@ public:
 
 char MCS51RemoveOptNone::ID = 0;
 
+// Private, non-address-taken functions can use Clang's local calling
+// convention in an IAR-ABI translation unit. External calls and calls through
+// function pointers keep the IAR ABI.
+class MCS51IARPrivateABI final : public ModulePass {
+public:
+  static char ID;
+  MCS51IARPrivateABI() : ModulePass(ID) {}
+
+  bool runOnModule(Module &M) override {
+    SmallPtrSet<Function *, 32> Candidates;
+    for (Function &F : M) {
+      if (F.isDeclaration() || !F.hasLocalLinkage() || F.hasAddressTaken() ||
+          F.isVarArg() || F.hasFnAttribute("interrupt") || F.hasSection() ||
+          !usesMCS51IARABI(F))
+        continue;
+      bool HasIndirectCall = false;
+      for (BasicBlock &BB : F)
+        for (Instruction &I : BB)
+          if (auto *Call = dyn_cast<CallBase>(&I))
+            HasIndirectCall |= Call->getCalledFunction() == nullptr;
+      if (!HasIndirectCall)
+        Candidates.insert(&F);
+    }
+
+    for (Function *F : Candidates)
+      F->addFnAttr("mcs51-abi", "clang");
+    return !Candidates.empty();
+  }
+};
+
+char MCS51IARPrivateABI::ID = 0;
+
 // The IAR ABI keeps its reentrant XDATA stack pointer in DATA memory. Make
 // that symbol visible to SelectionDAG lowering when this ABI is selected.
 // A startup object or a converted IAR runtime provides the actual storage.
@@ -2575,6 +2607,15 @@ public:
       for (MachineInstr &MI : MBB) {
         if (!MI.isCall())
           continue;
+        bool CallsClangABI = false;
+        for (const MachineOperand &MO : MI.operands())
+          if (MO.isGlobal())
+            if (const auto *Callee = dyn_cast<Function>(MO.getGlobal()))
+              CallsClangABI |=
+                  Callee->getFnAttribute("mcs51-abi").getValueAsString() ==
+                  "clang";
+        if (CallsClangABI)
+          continue;
         for (unsigned I = MI.getNumOperands(); I != 0;) {
           --I;
           const MachineOperand &MO = MI.getOperand(I);
@@ -2811,6 +2852,7 @@ public:
   }
 
   void addIRPasses() override {
+    addPass(new MCS51IARPrivateABI());
     addPass(new MCS51IARXSPDeclaration());
     addPass(createMCS51CodeConstantEscapePass());
     addPass(createMCS51OverlayPass());

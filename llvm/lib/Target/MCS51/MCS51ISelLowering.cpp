@@ -1550,6 +1550,22 @@ SDValue MCS51TargetLowering::LowerCall(
   MachineFunction &MF = DAG.getMachineFunction();
   CallingConv::ID CallConv = CLI.CallConv;
   bool UseIARABI = usesMCS51IARABI(MF.getFunction());
+  bool ModuleUsesIARABI =
+      MF.getFunction().getParent()->getGlobalVariable("?XSP") != nullptr;
+  if (CLI.CB) {
+    if (const Function *Callee = CLI.CB->getCalledFunction()) {
+      if (Callee->hasFnAttribute("mcs51-abi"))
+        UseIARABI = usesMCS51IARABI(*Callee);
+      else if (ModuleUsesIARABI)
+        UseIARABI = true;
+    } else if (ModuleUsesIARABI) {
+      UseIARABI = true;
+    }
+  } else if (ModuleUsesIARABI) {
+    // Compiler-generated libcalls in an IAR-ABI module use the IAR runtime,
+    // even when their originating function has a private Clang ABI.
+    UseIARABI = true;
+  }
   bool IsVarArg = CLI.IsVarArg;
   if (UseIARABI && IsVarArg)
     report_fatal_error("MCS-51 IAR ABI variadic calls are not implemented "
@@ -1804,9 +1820,12 @@ SDValue MCS51TargetLowering::LowerReturn(
     if (Outs.size() != OutVals.size() || Outs.size() > 2)
       report_fatal_error("MCS-51 IAR ABI return lowering supports at most "
                          "32-bit scalar values");
-    if (!Outs.empty() && Outs.size() == 1 && Outs.front().VT == MVT::i8) {
-      Chain = DAG.getCopyToReg(Chain, DL, MCS51::R1, OutVals.front());
+    if (Outs.empty())
       return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
+    if (Outs.size() == 1 && Outs.front().VT == MVT::i8) {
+      Chain = DAG.getCopyToReg(Chain, DL, MCS51::R1, OutVals.front());
+      return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain,
+                         DAG.getTargetConstant(0, DL, MVT::i8));
     }
     static constexpr MCRegister WordRegs[] = {MCS51::R2R3, MCS51::R4R5};
     for (unsigned I = 0; I != Outs.size(); ++I) {
@@ -1814,7 +1833,8 @@ SDValue MCS51TargetLowering::LowerReturn(
         report_fatal_error("unsupported MCS-51 IAR ABI return type");
       Chain = DAG.getCopyToReg(Chain, DL, WordRegs[I], OutVals[I]);
     }
-    return DAG.getNode(MCS51ISD::RET_GLUE, DL, MVT::Other, Chain);
+    return DAG.getNode(MCS51ISD::RET_WORD, DL, MVT::Other, Chain,
+                       DAG.getTargetConstant(Outs.size(), DL, MVT::i8));
   }
   if (Outs.size() > 1) {
     // A value of several words: low word first, in IP0 upwards.
@@ -3601,10 +3621,22 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   }
   if (MI.getOpcode() == MCS51::RET16) {
     MachineInstrBuilder Ret = BuildMI(*MBB, MII, DL, TII.get(MCS51::RET_NOA));
-    static constexpr MCRegister WordRegs[] = {MCS51::IP0, MCS51::IP1,
-                                              MCS51::IP2, MCS51::IP3};
-    for (int64_t I = 0; I != MI.getOperand(0).getImm(); ++I)
-      Ret.addReg(WordRegs[I], RegState::Implicit);
+    int64_t NumWords = MI.getOperand(0).getImm();
+    if (usesMCS51IARABI(MBB->getParent()->getFunction())) {
+      if (NumWords == 0) {
+        Ret.addReg(MCS51::R1, RegState::Implicit);
+      } else {
+        static constexpr MCRegister WordRegs[] = {MCS51::R2R3,
+                                                  MCS51::R4R5};
+        for (int64_t I = 0; I != NumWords; ++I)
+          Ret.addReg(WordRegs[I], RegState::Implicit);
+      }
+    } else {
+      static constexpr MCRegister WordRegs[] = {MCS51::IP0, MCS51::IP1,
+                                                MCS51::IP2, MCS51::IP3};
+      for (int64_t I = 0; I != NumWords; ++I)
+        Ret.addReg(WordRegs[I], RegState::Implicit);
+    }
     MI.eraseFromParent();
     return MBB;
   }
