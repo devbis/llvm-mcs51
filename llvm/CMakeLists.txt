@@ -1469,7 +1469,8 @@ if("MCS51" IN_LIST LLVM_TARGETS_TO_BUILD AND TARGET clang AND TARGET llvm-ar)
             "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/cc2530_iar_xstack.s"
             -o "${MCS51_IAR_XSTACK_OBJECT}"
     COMMAND $<TARGET_FILE:clang> -target mcs51 -mcpu=cc2530 -mabi=iar -O2
-            -ffreestanding -fno-builtin -ffunction-sections -fdata-sections
+            -DMCS51_IAR_RUNTIME=1 -ffreestanding -fno-builtin
+            -ffunction-sections -fdata-sections
             -c "${LLVM_MAIN_SRC_DIR}/lib/Target/MCS51/mcs51-runtime.c"
             -o "${MCS51_IAR_RUNTIME_OBJECT}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
