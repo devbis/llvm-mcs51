@@ -284,8 +284,13 @@ public:
     }
     switch (MI->getOpcode()) {
     case MCS51::CSR_SAVE:
-    case MCS51::CSR_RESTORE: {
-      bool IsSave = MI->getOpcode() == MCS51::CSR_SAVE;
+    case MCS51::CSR_RESTORE:
+    case MCS51::CSR_SAVE_IAR:
+    case MCS51::CSR_RESTORE_IAR: {
+      bool IsIARHelper = MI->getOpcode() == MCS51::CSR_SAVE_IAR ||
+                         MI->getOpcode() == MCS51::CSR_RESTORE_IAR;
+      bool IsSave = MI->getOpcode() == MCS51::CSR_SAVE ||
+                    MI->getOpcode() == MCS51::CSR_SAVE_IAR;
       // A restore that is followed by RET jumps to a routine that pops the
       // registers and returns itself.
       bool IsReturn = false;
@@ -305,7 +310,8 @@ public:
       raw_svector_ostream(Name)
           << (IsSave ? "__mcs51_save_"
                      : IsReturn ? "__mcs51_return_" : "__mcs51_restore_")
-          << GroupName << MI->getOperand(1).getImm();
+          << (IsIARHelper && !IsReturn ? "iar_" : "") << GroupName
+          << MI->getOperand(1).getImm();
       MCInst Inst;
       Inst.setOpcode(IsReturn ? MCS51::LJMP : MCS51::LCALL);
       SkipNextReturn = IsReturn;
