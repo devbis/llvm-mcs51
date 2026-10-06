@@ -137,7 +137,10 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
   unsigned Counts[NumCSRGroups];
   getCSRHelperCounts(TRI, CSI, Counts);
   bool UseIARABI = usesMCS51IARABI(MBB.getParent()->getFunction());
-  if (UseIARABI)
+  const Function &F = MBB.getParent()->getFunction();
+  // Interrupt saves currently follow the callee-save spills. Keep IAR
+  // interrupt functions inline until their save set brackets helper calls.
+  if (UseIARABI && F.hasFnAttribute("interrupt"))
     for (unsigned &Count : Counts)
       Count = 0;
   for (const CalleeSavedInfo &CS : CSI)
@@ -180,7 +183,8 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
   unsigned Counts[NumCSRGroups];
   getCSRHelperCounts(TRI, CSI, Counts);
   bool UseIARABI = usesMCS51IARABI(MBB.getParent()->getFunction());
-  if (UseIARABI)
+  const Function &F = MBB.getParent()->getFunction();
+  if (UseIARABI && F.hasFnAttribute("interrupt"))
     for (unsigned &Count : Counts)
       Count = 0;
   SmallVector<CSRSaveAction, 16> Actions =
@@ -395,9 +399,10 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
       I = std::next(It);
   while (I != MBB.end() && I->isDebugInstr())
     ++I;
+  // Shared save helpers borrow DPTR. Save it at the prologue entry, below
+  // the callee-saved registers, so those registers restore first and DPH/DPL
+  // restore afterward.
   if (SaveDptr) {
-    // Keep DPTR below the callee-saved registers so those registers are
-    // restored first, followed by DPH and DPL.
     auto Entry = MBB.begin();
     BuildMI(MBB, Entry, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
         .addImm(0x82)
