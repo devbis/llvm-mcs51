@@ -163,6 +163,11 @@ def MCS51br_ult : SDNode<"MCS51ISD::BR_ULT", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_uge : SDNode<"MCS51ISD::BR_UGE", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_slt : SDNode<"MCS51ISD::BR_SLT", SDT_MCS51Br, [SDNPHasChain]>;
 def MCS51br_sge : SDNode<"MCS51ISD::BR_SGE", SDT_MCS51Br, [SDNPHasChain]>;
+def SDT_MCS51BrBit : SDTypeProfile<0, 4, [SDTCisVT<0, i8>, SDTCisVT<1, i8>,
+                                          SDTCisVT<2, i8>,
+                                          SDTCisVT<3, OtherVT>] >;
+def MCS51br_bit : SDNode<"MCS51ISD::BR_BIT", SDT_MCS51BrBit,
+                          [SDNPHasChain]>;
 def SDT_MCS51BrJT : SDTypeProfile<0, 2, [SDTCisVT<0, i32>,
                                          SDTCisVT<1, i16>] >;
 def MCS51brjt : SDNode<"MCS51ISD::BR_JT", SDT_MCS51BrJT, [SDNPHasChain]>;
@@ -740,6 +745,10 @@ class MCS51BitRelBranch<bits<8> opcode, string mnemonic> : Instruction {
   let Size = 3;
   let hasSideEffects = 1;
   let mayLoad = 1;
+  // ACC's bit addresses overlap this instruction's direct bit-address range.
+  // Model ACC as an input so a preceding MOV into A stays live for JB/JNB on
+  // ACC.n instead of being deleted as an unused accumulator write.
+  let Uses = [A];
   let isBranch = 1;
   let isTerminator = 1;
   bits<8> bitaddr;
@@ -1066,6 +1075,24 @@ def BR_SLT8ri : MCS51BrCCImmPseudo<MCS51br_slt>;
 def BR_SLT8rr : MCS51BrCCRegPseudo<MCS51br_slt>;
 def BR_SGE8ri : MCS51BrCCImmPseudo<MCS51br_sge>;
 def BR_SGE8rr : MCS51BrCCRegPseudo<MCS51br_sge>;
+
+def BR_BIT8 : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins MCS51GPR8:$src, MCS51Imm8:$bit,
+                           MCS51Imm8:$set, MCS51Addr16:$target);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let isBranch = 1;
+  let isTerminator = 1;
+  let usesCustomInserter = 1;
+  let hasSideEffects = 1;
+  let Defs = [A];
+  let Pattern = [(MCS51br_bit MCS51GPR8:$src, MCS51Imm8:$bit,
+                               MCS51Imm8:$set, bb:$target)];
+}
 
 def LOADX8 : Instruction {
   let Namespace = "MCS51";

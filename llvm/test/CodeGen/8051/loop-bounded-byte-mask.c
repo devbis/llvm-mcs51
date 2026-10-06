@@ -14,17 +14,17 @@ unsigned char find_slot(void) {
   return 2;
 }
 
-// The loop bounds the bit index to zero or one. Select the corresponding byte
-// mask instead of emitting a variable-shift loop.
+// The loop bounds the bit index to zero or one. Test the selected ACC bit
+// directly instead of materializing a mask or emitting a variable-shift loop.
 // CHECK-LABEL: find_slot:
 // CHECK: mov dptr, #xdata16(flags)
 // CHECK: movx a, @dptr
-// CHECK: anl a, #1
+// CHECK: jnb 224,
 // CHECK: mov dptr, #xdata16(key_sequence)
 // CHECK: movx a, @dptr
 // CHECK: mov dptr, #xdata16(flags)
 // CHECK: movx a, @dptr
-// CHECK: anl a, #2
+// CHECK: jnb 225,
 // CHECK: mov dptr, #xdata16(key_sequence+1)
 // CHECK-NOT: djnz
 // CHECK: .Lfunc_end

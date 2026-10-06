@@ -1236,6 +1236,58 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
   if (LHS.getValueType() != MVT::i8 || RHS.getValueType() != MVT::i8)
     report_fatal_error("unsupported MCS-51 conditional branch");
 
+  // Signed tests against zero are tests of the sign bit. The equivalent
+  // forms x > -1 and x <= -1 show up after simplifying promoted C bit tests.
+  if (auto *C = dyn_cast<ConstantSDNode>(RHS)) {
+    bool BranchOnSet;
+    bool IsSignBitTest = false;
+    if (C->isZero()) {
+      if (CC == ISD::SETLT || CC == ISD::SETGE) {
+        BranchOnSet = CC == ISD::SETLT;
+        IsSignBitTest = true;
+      }
+    } else if (C->getAPIntValue().isAllOnes()) {
+      if (CC == ISD::SETGT || CC == ISD::SETLE) {
+        BranchOnSet = CC == ISD::SETLE;
+        IsSignBitTest = true;
+      }
+    }
+    if (IsSignBitTest)
+      return DAG.getNode(MCS51ISD::BR_BIT, DL, MVT::Other,
+                         Op.getOperand(0), LHS,
+                         DAG.getConstant(7, DL, MVT::i8),
+                         DAG.getConstant(BranchOnSet, DL, MVT::i8), Dest);
+  }
+
+  // Test a single bit without materializing (value & mask) and comparing the
+  // result with zero. The post-RA expansion tests that bit in ACC directly.
+  if ((CC == ISD::SETNE || CC == ISD::SETEQ)) {
+    SDValue Masked = LHS;
+    SDValue ZeroValue = RHS;
+    if (auto *Zero = dyn_cast<ConstantSDNode>(LHS)) {
+      if (Zero->isZero()) {
+        Masked = RHS;
+        ZeroValue = LHS;
+      }
+    }
+    auto *Zero = dyn_cast<ConstantSDNode>(ZeroValue);
+    if (Zero && Zero->isZero() && Masked.getOpcode() == ISD::AND) {
+      for (unsigned I = 0; I != 2; ++I) {
+        auto *Mask = dyn_cast<ConstantSDNode>(Masked.getOperand(1 - I));
+        if (!Mask || !Mask->getAPIntValue().isPowerOf2())
+          continue;
+        unsigned Bit = Mask->getAPIntValue().logBase2();
+        if (Bit >= 8)
+          continue;
+        return DAG.getNode(MCS51ISD::BR_BIT, DL, MVT::Other,
+                           Op.getOperand(0), Masked.getOperand(I),
+                           DAG.getConstant(Bit, DL, MVT::i8),
+                           DAG.getConstant(CC == ISD::SETNE, DL, MVT::i8),
+                           Dest);
+      }
+    }
+  }
+
   auto BranchUnsignedConstant = [&](SDValue Value, uint8_t Limit,
                                     bool IsLess) {
     unsigned BranchOpcode = IsLess ? MCS51ISD::BR_ULT : MCS51ISD::BR_UGE;
@@ -4258,6 +4310,19 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     MachineBasicBlock *Target = MI.getOperand(1).getMBB();
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Cond);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::JNZ)).addMBB(Target);
+    MI.eraseFromParent();
+    return MBB;
+  }
+  if (MI.getOpcode() == MCS51::BR_BIT8) {
+    Register Src = MI.getOperand(0).getReg();
+    unsigned Bit = MI.getOperand(1).getImm();
+    bool BranchOnSet = MI.getOperand(2).getImm();
+    MachineBasicBlock *Target = MI.getOperand(3).getMBB();
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src);
+    BuildMI(*MBB, MII, DL,
+            TII.get(BranchOnSet ? MCS51::JB : MCS51::JNB))
+        .addImm(0xE0 + Bit)
+        .addMBB(Target);
     MI.eraseFromParent();
     return MBB;
   }
