@@ -28,8 +28,16 @@ __attribute__((noinline)) void keep_values_live(void) {
   result = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 + v10 + v11;
 }
 
+__attribute__((noinline)) void keep_one_word_live(void) {
+  u16 value = inputs[0];
+  barrier();
+  __asm__ volatile("" : "+r"(value));
+  result = value;
+}
+
 int main(void) {
   keep_values_live();
+  keep_one_word_live();
   return 0;
 }
 
@@ -38,12 +46,20 @@ int main(void) {
 // IAR-LABEL: keep_values_live:
 // IAR: push 130
 // IAR: push 131
+// IAR: lcall __mcs51_save_im0_8
 // IAR: lcall __mcs51_save_im{{[3-9]|1[0-6]}}
 // IAR: lcall barrier
 // IAR: lcall __mcs51_restore_im{{[3-9]|1[0-6]}}
-// IAR: pop 55
+// IAR: lcall __mcs51_restore_im0_8
 // IAR: pop 131
 // IAR: pop 130
+// IAR: ret
+
+// A single 16-bit value occupies the two-register IM0..IM1 prefix.
+// IAR-LABEL: keep_one_word_live:
+// IAR: lcall __mcs51_save_im0_2
+// IAR: lcall barrier
+// IAR: lcall __mcs51_restore_im0_2
 // IAR: ret
 
 // The default Clang ABI is not changed by the IAR-only call and save rules.
