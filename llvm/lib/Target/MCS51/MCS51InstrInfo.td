@@ -510,11 +510,11 @@ def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1"> {
   let Defs = [A]; let Uses = [A, R1]; let mayLoad = 1;
 }
 // Prologue/epilogue calls of the shared callee-saved register save and restore
-// routines in the runtime (__mcs51_save_{r,im}N and __mcs51_restore_{r,im}N).
+// routines in the runtime (__mcs51_save_{r,im,im0_}N and matching restores).
 // The helpers pop their return address into DPTR, push or pop the registers,
 // then jump back, so they preserve A and the return-value registers. The
 // AsmPrinter turns a restore that is directly followed by RET into an LJMP.
-// $kind is 0 for R2.. and 1 for IM8..; $n is the number of registers.
+// $kind is 0 for R2.., 1 for IM8.., and 2 for IM0..7; $n is the count.
 let Defs = [A, DPTR, SP], Uses = [SP], Size = 3 in
 def CSR_SAVE : Instruction {
   let Namespace = "MCS51";

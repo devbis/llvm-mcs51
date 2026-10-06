@@ -702,14 +702,15 @@ __asm__(
     ".size __ashrsi3, .-__ashrsi3\n");
 
 /* Shared prologue/epilogue code for the callee-saved registers: R2.. (group
-   "r") and IM8.. (group "im", direct addresses 56..). A function calls
+   "r"), IM8.. (group "im", direct addresses 56..), and IAR's IM0..7 (group
+   "im0_", direct addresses 48..55). A function calls
    __mcs51_save_<group>N at entry. The save routine moves its return address
    into DPTR so the registers lie below it on the stack, then returns with
    JMP @A+DPTR. At exit the function calls __mcs51_restore_<group>N, which
    likewise steps around its return address, or, when the group is the last one
    restored, jumps to __mcs51_return_<group>N, which pops the registers and
-   returns for the function. A and the return-value registers survive. They
-   stay in common flash (".text.__mcs51_" sections). */
+   returns for the function. They stay in common flash (".text.__mcs51_"
+   sections). */
 __asm__(
     ".section .text.__mcs51_save_r3,\"ax\",@progbits\n"
     ".globl __mcs51_save_r3\n"
@@ -1614,6 +1615,73 @@ __asm__(
     "  pop 56\n"
     "  ret\n"
     ".size __mcs51_return_im16, .-__mcs51_return_im16\n");
+
+/* IAR's IM0..IM7 also form a saveable prefix. Generate their helper variants
+   compactly; the assembler expands each fixed-size PUSH/POP sequence. */
+#define MCS51_STRINGIFY_INNER(Value) #Value
+#define MCS51_STRINGIFY(Value) MCS51_STRINGIFY_INNER(Value)
+#define MCS51_IM0_SAVE(N) \
+  ".section .text.__mcs51_save_im0_" MCS51_STRINGIFY(N) ",\"ax\",@progbits\n" \
+  ".globl __mcs51_save_im0_" MCS51_STRINGIFY(N) "\n" \
+  ".type __mcs51_save_im0_" MCS51_STRINGIFY(N) ",@function\n" \
+  "__mcs51_save_im0_" MCS51_STRINGIFY(N) ":\n" \
+  "  pop 131\n" \
+  "  pop 130\n" \
+  "  .set __mcs51_csr_reg, 48\n" \
+  "  .rept " MCS51_STRINGIFY(N) "\n" \
+  "  push __mcs51_csr_reg\n" \
+  "  .set __mcs51_csr_reg, __mcs51_csr_reg + 1\n" \
+  "  .endr\n" \
+  "  clr a\n" \
+  "  jmp @a+dptr\n" \
+  ".size __mcs51_save_im0_" MCS51_STRINGIFY(N) \
+  ", .-__mcs51_save_im0_" MCS51_STRINGIFY(N) "\n"
+#define MCS51_IM0_RESTORE(N) \
+  ".section .text.__mcs51_restore_im0_" MCS51_STRINGIFY(N) \
+  ",\"ax\",@progbits\n" \
+  ".globl __mcs51_restore_im0_" MCS51_STRINGIFY(N) "\n" \
+  ".type __mcs51_restore_im0_" MCS51_STRINGIFY(N) ",@function\n" \
+  "__mcs51_restore_im0_" MCS51_STRINGIFY(N) ":\n" \
+  "  pop 131\n" \
+  "  pop 130\n" \
+  "  .set __mcs51_csr_reg, 48 + " MCS51_STRINGIFY(N) " - 1\n" \
+  "  .rept " MCS51_STRINGIFY(N) "\n" \
+  "  pop __mcs51_csr_reg\n" \
+  "  .set __mcs51_csr_reg, __mcs51_csr_reg - 1\n" \
+  "  .endr\n" \
+  "  push 130\n" \
+  "  push 131\n" \
+  "  ret\n" \
+  ".size __mcs51_restore_im0_" MCS51_STRINGIFY(N) \
+  ", .-__mcs51_restore_im0_" MCS51_STRINGIFY(N) "\n"
+#define MCS51_IM0_RETURN(N) \
+  ".section .text.__mcs51_return_im0_" MCS51_STRINGIFY(N) \
+  ",\"ax\",@progbits\n" \
+  ".globl __mcs51_return_im0_" MCS51_STRINGIFY(N) "\n" \
+  ".type __mcs51_return_im0_" MCS51_STRINGIFY(N) ",@function\n" \
+  "__mcs51_return_im0_" MCS51_STRINGIFY(N) ":\n" \
+  "  .set __mcs51_csr_reg, 48 + " MCS51_STRINGIFY(N) " - 1\n" \
+  "  .rept " MCS51_STRINGIFY(N) "\n" \
+  "  pop __mcs51_csr_reg\n" \
+  "  .set __mcs51_csr_reg, __mcs51_csr_reg - 1\n" \
+  "  .endr\n" \
+  "  ret\n" \
+  ".size __mcs51_return_im0_" MCS51_STRINGIFY(N) \
+  ", .-__mcs51_return_im0_" MCS51_STRINGIFY(N) "\n"
+
+__asm__(MCS51_IM0_SAVE(2) MCS51_IM0_RESTORE(2) MCS51_IM0_RETURN(2)
+        MCS51_IM0_SAVE(3) MCS51_IM0_RESTORE(3) MCS51_IM0_RETURN(3)
+        MCS51_IM0_SAVE(4) MCS51_IM0_RESTORE(4) MCS51_IM0_RETURN(4)
+        MCS51_IM0_SAVE(5) MCS51_IM0_RESTORE(5) MCS51_IM0_RETURN(5)
+        MCS51_IM0_SAVE(6) MCS51_IM0_RESTORE(6) MCS51_IM0_RETURN(6)
+        MCS51_IM0_SAVE(7) MCS51_IM0_RESTORE(7) MCS51_IM0_RETURN(7)
+        MCS51_IM0_SAVE(8) MCS51_IM0_RESTORE(8) MCS51_IM0_RETURN(8));
+
+#undef MCS51_IM0_RETURN
+#undef MCS51_IM0_RESTORE
+#undef MCS51_IM0_SAVE
+#undef MCS51_STRINGIFY
+#undef MCS51_STRINGIFY_INNER
 #else
 /* Portable versions so the helpers can be tested on the host. */
 uint32_t __ashlsi3(uint32_t Value, int Count) {

@@ -17,10 +17,10 @@ using namespace llvm;
 MCS51FrameLowering::MCS51FrameLowering()
     : TargetFrameLowering(StackGrowsUp, Align(1), 1) {}
 
-// Callee-saved registers fall into two groups that the runtime can save and
-// restore with shared routines: R2.. and IM8... A group uses the routines
-// when it is a prefix of its register range with at least three members.
-enum { CSRGroupR, CSRGroupIM, NumCSRGroups };
+// Callee-saved registers fall into three groups that the runtime can save and
+// restore with shared routines: R2.., IM8.., and IAR's IM0..7. A group uses
+// the routines when it is a prefix of its register range with enough members.
+enum { CSRGroupR, CSRGroupIM, CSRGroupIM0, NumCSRGroups };
 
 static int getCSRGroup(const TargetRegisterInfo *TRI, MCRegister Reg,
                        unsigned &Index) {
@@ -28,6 +28,10 @@ static int getCSRGroup(const TargetRegisterInfo *TRI, MCRegister Reg,
   if (Enc >= 2 && Enc <= 7) {
     Index = Enc - 2;
     return CSRGroupR;
+  }
+  if (MCS51::MCS51Imag8RegClass.contains(Reg) && Enc >= 48 && Enc <= 55) {
+    Index = Enc - 48;
+    return CSRGroupIM0;
   }
   if (MCS51::MCS51Imag8RegClass.contains(Reg) && Enc >= 56 && Enc <= 71) {
     Index = Enc - 56;
@@ -37,8 +41,17 @@ static int getCSRGroup(const TargetRegisterInfo *TRI, MCRegister Reg,
 }
 
 static MCRegister getCSRGroupReg(int Group, unsigned Index) {
-  return Group == CSRGroupR ? MCRegister(MCS51::R2 + Index)
-                            : MCRegister(MCS51::IM8 + Index);
+  switch (Group) {
+  case CSRGroupR: return MCRegister(MCS51::R2 + Index);
+  case CSRGroupIM: return MCRegister(MCS51::IM8 + Index);
+  default: return MCRegister(MCS51::IM0 + Index);
+  }
+}
+
+static unsigned getCSRHelperMinimum(int Group) {
+  // A two-register helper saves two bytes over inline PUSH/POP.
+  // The other groups keep the existing three-register threshold.
+  return Group == CSRGroupIM0 ? 2 : 3;
 }
 
 // Number of registers of each group handled by the shared routines (0 if the
@@ -58,7 +71,8 @@ static void getCSRHelperCounts(const TargetRegisterInfo *TRI,
   }
   for (int G = 0; G != NumCSRGroups; ++G) {
     bool Prefix = (Mask[G] & (Mask[G] + 1)) == 0;
-    Counts[G] = Prefix && Members[G] >= 3 ? Members[G] : 0;
+    Counts[G] = Prefix && Members[G] >= getCSRHelperMinimum(G) ? Members[G]
+                                                               : 0;
   }
 }
 
@@ -117,7 +131,7 @@ bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
     Top[Group] = std::max(Top[Group], Index + 1);
   }
   for (int G = 0; G != NumCSRGroups; ++G) {
-    if (Members[G] < 3 || Top[G] - Members[G] > 2)
+    if (Members[G] < getCSRHelperMinimum(G) || Top[G] - Members[G] > 2)
       continue;
     for (unsigned Index = 0; Index != Top[G]; ++Index) {
       MCRegister Reg = getCSRGroupReg(G, Index);

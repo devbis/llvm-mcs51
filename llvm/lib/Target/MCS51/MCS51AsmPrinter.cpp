@@ -295,12 +295,16 @@ public:
                    (Next->getOpcode() == MCS51::RET ||
                     Next->getOpcode() == MCS51::RET_NOA);
       }
+      const char *GroupName = "r";
+      switch (MI->getOperand(0).getImm()) {
+      case 1: GroupName = "im"; break;
+      case 2: GroupName = "im0_"; break;
+      }
       SmallString<32> Name;
       raw_svector_ostream(Name)
           << (IsSave ? "__mcs51_save_"
                      : IsReturn ? "__mcs51_return_" : "__mcs51_restore_")
-          << (MI->getOperand(0).getImm() ? "im" : "r")
-          << MI->getOperand(1).getImm();
+          << GroupName << MI->getOperand(1).getImm();
       MCInst Inst;
       Inst.setOpcode(IsReturn ? MCS51::LJMP : MCS51::LCALL);
       SkipNextReturn = IsReturn;
