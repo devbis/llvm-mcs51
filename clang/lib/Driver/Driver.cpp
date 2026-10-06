@@ -182,6 +182,18 @@ public:
       override {
     Generic_ELF::addClangTargetOptions(DriverArgs, CC1Args, BA,
                                        DeviceOffloadKind);
+    const Arg *OptLevel = DriverArgs.getLastArg(options::OPT_O);
+    if (OptLevel && StringRef(OptLevel->getValue()) == "z") {
+      bool HasOutlinerReruns = false;
+      for (const Arg *A : DriverArgs.filtered(options::OPT_mllvm))
+        HasOutlinerReruns |=
+            StringRef(A->getValue()).contains("machine-outliner-reruns");
+      if (!HasOutlinerReruns) {
+        CC1Args.push_back("-mllvm");
+        CC1Args.push_back("-machine-outliner-reruns=2");
+      }
+    }
+
     const Arg *ABIArg = DriverArgs.getLastArg(options::OPT_mabi_EQ);
     if (!ABIArg)
       return;
