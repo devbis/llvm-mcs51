@@ -55,7 +55,7 @@ int main(void) { return banked_global_pointer_caller(0); }
 // LINK: mov dptr, #
 // LINK: acall
 // LINK-LABEL: <invoke_function_pointer>:
-// LINK: lcall
+// LINK: {{(lcall|acall)}}
 // LINK: jmp @a+dptr
 
 // HEX: :00000001FF

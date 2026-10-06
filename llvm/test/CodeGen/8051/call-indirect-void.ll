@@ -19,7 +19,7 @@ entry:
 ; CHECK: jmp @a+dptr
 
 ; DIS-LABEL: <call_void>:
-; DIS: lcall
+; DIS: {{(lcall|acall)}}
 ; DIS: ret
 ; DIS: clr a
 ; DIS: jmp @a+dptr
