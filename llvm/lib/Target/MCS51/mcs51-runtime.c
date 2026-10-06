@@ -1651,6 +1651,60 @@ __asm__(
    compactly; the assembler expands each fixed-size PUSH/POP sequence. */
 #define MCS51_STRINGIFY_INNER(Value) #Value
 #define MCS51_STRINGIFY(Value) MCS51_STRINGIFY_INNER(Value)
+#define MCS51_IAR_SAVE(GROUP, N, BASE) \
+  ".section .text.__mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) ",\"ax\",@progbits\n" \
+  ".globl __mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) "\n" \
+  ".type __mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) ",@function\n" \
+  "__mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) ":\n" \
+  "  pop 224\n" \
+  "  pop 240\n" \
+  "  .set __mcs51_csr_reg, " MCS51_STRINGIFY(BASE) "\n" \
+  "  .rept " MCS51_STRINGIFY(N) "\n" \
+  "  push __mcs51_csr_reg\n" \
+  "  .set __mcs51_csr_reg, __mcs51_csr_reg + 1\n" \
+  "  .endr\n" \
+  "  push 240\n" \
+  "  push 224\n" \
+  "  ret\n" \
+  ".size __mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) \
+  ", .-__mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) "\n"
+#define MCS51_IAR_RESTORE(GROUP, N, BASE) \
+  ".section .text.__mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) ",\"ax\",@progbits\n" \
+  ".globl __mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) "\n" \
+  ".type __mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) ",@function\n" \
+  "__mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) ":\n" \
+  "  pop 224\n" \
+  "  pop 240\n" \
+  "  .set __mcs51_csr_reg, " MCS51_STRINGIFY(BASE) " + " \
+  MCS51_STRINGIFY(N) " - 1\n" \
+  "  .rept " MCS51_STRINGIFY(N) "\n" \
+  "  pop __mcs51_csr_reg\n" \
+  "  .set __mcs51_csr_reg, __mcs51_csr_reg - 1\n" \
+  "  .endr\n" \
+  "  push 240\n" \
+  "  push 224\n" \
+  "  ret\n" \
+  ".size __mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) \
+  ", .-__mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) "\n"
+#define MCS51_IAR_CSR(GROUP, N, BASE) \
+  MCS51_IAR_SAVE(GROUP, N, BASE) MCS51_IAR_RESTORE(GROUP, N, BASE)
+
+/* IAR save helpers use A/B as a temporary return-address pair. Both are
+   caller-saved in that ABI, so these helpers preserve DPTR without touching
+   the argument or return registers. */
+__asm__(MCS51_IAR_CSR("r67_", 2, 6)
+        MCS51_IAR_CSR("im", 3, 56) MCS51_IAR_CSR("im", 4, 56)
+        MCS51_IAR_CSR("im", 5, 56) MCS51_IAR_CSR("im", 6, 56)
+        MCS51_IAR_CSR("im", 7, 56) MCS51_IAR_CSR("im", 8, 56)
+        MCS51_IAR_CSR("im", 9, 56) MCS51_IAR_CSR("im", 10, 56)
+        MCS51_IAR_CSR("im", 11, 56) MCS51_IAR_CSR("im", 12, 56)
+        MCS51_IAR_CSR("im", 13, 56) MCS51_IAR_CSR("im", 14, 56)
+        MCS51_IAR_CSR("im", 15, 56) MCS51_IAR_CSR("im", 16, 56)
+        MCS51_IAR_CSR("im0_", 2, 48) MCS51_IAR_CSR("im0_", 3, 48)
+        MCS51_IAR_CSR("im0_", 4, 48) MCS51_IAR_CSR("im0_", 5, 48)
+        MCS51_IAR_CSR("im0_", 6, 48) MCS51_IAR_CSR("im0_", 7, 48)
+        MCS51_IAR_CSR("im0_", 8, 48));
+
 #define MCS51_IM0_SAVE(N) \
   ".section .text.__mcs51_save_im0_" MCS51_STRINGIFY(N) ",\"ax\",@progbits\n" \
   ".globl __mcs51_save_im0_" MCS51_STRINGIFY(N) "\n" \
@@ -1711,6 +1765,9 @@ __asm__(MCS51_IM0_SAVE(2) MCS51_IM0_RESTORE(2) MCS51_IM0_RETURN(2)
 #undef MCS51_IM0_RETURN
 #undef MCS51_IM0_RESTORE
 #undef MCS51_IM0_SAVE
+#undef MCS51_IAR_CSR
+#undef MCS51_IAR_RESTORE
+#undef MCS51_IAR_SAVE
 #undef MCS51_STRINGIFY
 #undef MCS51_STRINGIFY_INNER
 #else

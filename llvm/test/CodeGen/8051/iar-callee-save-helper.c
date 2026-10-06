@@ -37,6 +37,7 @@ __attribute__((noinline)) void keep_one_word_live(void) {
 
 __attribute__((noinline)) void clobber_r6_r7(void) {
   __asm__ volatile("" : : : "r6", "r7");
+  barrier();
 }
 
 int main(void) {
@@ -50,26 +51,32 @@ int main(void) {
 // IAR-LABEL: keep_values_live:
 // IAR: push 130
 // IAR: push 131
-// IAR: lcall __mcs51_save_im0_8
-// IAR: lcall __mcs51_save_im{{[3-9]|1[0-6]}}
+// IAR: lcall __mcs51_save_iar_im0_8
+// IAR: lcall __mcs51_save_iar_im{{[3-9]|1[0-6]}}
 // IAR: lcall barrier
-// IAR: lcall __mcs51_restore_im{{[3-9]|1[0-6]}}
-// IAR: lcall __mcs51_restore_im0_8
+// IAR: lcall __mcs51_restore_iar_im{{[3-9]|1[0-6]}}
+// IAR: lcall __mcs51_restore_iar_im0_8
 // IAR: pop 131
 // IAR: pop 130
 // IAR: ret
 
 // A single 16-bit value occupies the two-register IM0..IM1 prefix.
 // IAR-LABEL: keep_one_word_live:
-// IAR: lcall __mcs51_save_im0_2
+// IAR: push 130
+// IAR: push 131
+// IAR: lcall __mcs51_save_iar_im0_2
 // IAR: lcall barrier
-// IAR: lcall __mcs51_restore_im0_2
+// IAR: lcall __mcs51_restore_iar_im0_2
 // IAR: ret
 
-// IAR keeps DPTR saved around the restore helper.
+// Prologue helpers and direct calls do not require a DPTR frame when the
+// function body itself leaves DPTR untouched.
 // IAR-LABEL: clobber_r6_r7:
-// IAR: lcall __mcs51_save_r67_2
-// IAR: lcall __mcs51_restore_r67_2
+// IAR-NOT: push 130
+// IAR-NOT: push 131
+// IAR: lcall __mcs51_save_iar_r67_2
+// IAR: lcall barrier
+// IAR: ljmp __mcs51_return_r67_2
 
 // The default Clang ABI is not changed by the IAR-only call and save rules.
 // CLANG-LABEL: keep_values_live:
@@ -79,4 +86,5 @@ int main(void) {
 // through the helper because it does not need to restore DPTR.
 // CLANG-LABEL: clobber_r6_r7:
 // CLANG: lcall __mcs51_save_r67_2
+// CLANG: lcall barrier
 // CLANG: ljmp __mcs51_return_r67_2

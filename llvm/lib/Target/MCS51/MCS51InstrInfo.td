@@ -510,11 +510,11 @@ def XRL_A_R1_IND : MCS51Inst<0x67, "xrl a, @r1"> {
   let Defs = [A]; let Uses = [A, R1]; let mayLoad = 1;
 }
 // Prologue/epilogue calls of the shared callee-saved register save and restore
-// routines in the runtime (__mcs51_save_{r,im,im0_}N and matching restores).
-// The helpers pop their return address into DPTR, push or pop the registers,
-// then jump back, so they preserve A and the return-value registers. The
-// AsmPrinter turns a restore that is directly followed by RET into an LJMP.
-// $kind is 0 for R2.., 1 for IM8.., and 2 for IM0..7; $n is the count.
+// routines in the runtime. The standard helpers use DPTR to return and
+// preserve A. IAR helpers use A/B, which are scratch registers in that ABI,
+// and leave DPTR untouched. The AsmPrinter turns a restore followed by RET
+// into an LJMP to a helper that pops the registers and returns. $kind is 0
+// for R2.., 1 for IM8.., 2 for IM0..7, and 3 for R6/R7; $n is the count.
 let Defs = [A, DPTR, SP], Uses = [SP], Size = 3 in
 def CSR_SAVE : Instruction {
   let Namespace = "MCS51";
@@ -527,6 +527,26 @@ def CSR_SAVE : Instruction {
 }
 let Defs = [DPTR, SP], Uses = [SP], Size = 3 in
 def CSR_RESTORE : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i8imm:$kind, i8imm:$n);
+  let AsmString = "";
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+}
+let Defs = [A, B, SP], Uses = [SP], Size = 3 in
+def CSR_SAVE_IAR : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i8imm:$kind, i8imm:$n);
+  let AsmString = "";
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+}
+let Defs = [A, B, SP], Uses = [SP], Size = 3 in
+def CSR_RESTORE_IAR : Instruction {
   let Namespace = "MCS51";
   let OutOperandList = (outs);
   let InOperandList = (ins i8imm:$kind, i8imm:$n);

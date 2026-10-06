@@ -60,6 +60,32 @@ static unsigned getCSRHelperMinimum(int Group) {
   return Group == CSRGroupR67 || Group == CSRGroupIM0 ? 2 : 3;
 }
 
+static bool usesDPTROutsideCalls(const MachineFunction &MF) {
+  const auto &TRI = *MF.getSubtarget().getRegisterInfo();
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB) {
+      if (MI.getFlag(MachineInstr::FrameSetup) ||
+          MI.getFlag(MachineInstr::FrameDestroy))
+        continue;
+      // Direct calls obey the IAR ABI and preserve DPTR. Outlined sequences
+      // are internal helpers and may clobber it; indirect calls use it for
+      // their target.
+      if (MI.getOpcode() == MCS51::LCALL || MI.getOpcode() == MCS51::ACALL)
+        continue;
+      if (MI.getOpcode() == MCS51::OUTLINE_CALL)
+        return true;
+      for (const MachineOperand &MO : MI.operands()) {
+        if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical() &&
+            TRI.regsOverlap(MO.getReg(), MCS51::DPTR))
+          return true;
+        if (MO.isRegMask() && !MI.isCall() &&
+            MO.clobbersPhysReg(MCS51::DPTR))
+          return true;
+      }
+    }
+  return false;
+}
+
 // Number of registers of each group handled by the shared routines (0 if the
 // group is saved inline).
 static void getCSRHelperCounts(const TargetRegisterInfo *TRI,
@@ -171,7 +197,9 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
   for (const CSRSaveAction &Action : Actions) {
     if (Action.Group >= 0) {
       int Group = Action.Group;
-      auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::CSR_SAVE))
+      unsigned Opcode = usesMCS51IARABI(F) ? MCS51::CSR_SAVE_IAR
+                                           : MCS51::CSR_SAVE;
+      auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(Opcode))
                      .addImm(Group)
                      .addImm(Counts[Group]);
       for (unsigned I = 0; I != Counts[Group]; ++I)
@@ -212,7 +240,9 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
   for (const CSRSaveAction &Action : llvm::reverse(Actions)) {
     if (Action.Group >= 0) {
       int Group = Action.Group;
-      auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::CSR_RESTORE))
+      unsigned Opcode = usesMCS51IARABI(F) ? MCS51::CSR_RESTORE_IAR
+                                           : MCS51::CSR_RESTORE;
+      auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(Opcode))
                      .addImm(Group)
                      .addImm(Counts[Group]);
       for (unsigned I = 0; I != Counts[Group]; ++I)
@@ -400,7 +430,8 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   uint64_t StackSize = MF.getFrameInfo().getStackSize();
   bool IsInterrupt = MF.getFunction().hasFnAttribute("interrupt");
-  bool SaveDptr = usesMCS51IARABI(MF.getFunction()) && !IsInterrupt;
+  bool SaveDptr = usesMCS51IARABI(MF.getFunction()) && !IsInterrupt &&
+                  usesDPTROutsideCalls(MF);
   if (StackSize + MF.getFrameInfo().getCalleeSavedInfo().size() +
           (SaveDptr ? 2 : 0) >
       255)
@@ -421,7 +452,7 @@ void MCS51FrameLowering::emitPrologue(MachineFunction &MF,
     ++I;
   // Shared save helpers borrow DPTR. Save it at the prologue entry, below
   // the callee-saved registers, so those registers restore first and DPH/DPL
-  // restore afterward.
+  // restore afterward. IAR save helpers themselves leave DPTR untouched.
   if (SaveDptr) {
     auto Entry = MBB.begin();
     BuildMI(MBB, Entry, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
@@ -478,7 +509,8 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
                    I->getNumOperands() && I->getOperand(0).isReg() &&
                    I->getOperand(0).getReg() == MCS51::A;
   bool RestoreDptr = usesMCS51IARABI(MF.getFunction()) &&
-                     !MF.getFunction().hasFnAttribute("interrupt");
+                     !MF.getFunction().hasFnAttribute("interrupt") &&
+                     usesDPTROutsideCalls(MF);
   if (RestoreDptr) {
     BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
         .addImm(0x83)
