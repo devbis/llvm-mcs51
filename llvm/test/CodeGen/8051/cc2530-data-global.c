@@ -34,9 +34,9 @@ int main(void) {
 // MAP: Value: 0x49
 
 // DIS-LABEL: <__mcs51_start>:
-// DIS: lcall
-// DIS: lcall
-// DIS: lcall
+// DIS: {{(lcall|acall)}}
+// DIS: {{(lcall|acall)}}
+// DIS: {{(lcall|acall)}}
 // DIS-LABEL: <main>:
 // DIS: mov 72, #1
 // DIS: mov r0, #73

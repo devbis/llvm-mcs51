@@ -250,6 +250,11 @@ bool MCS51::relaxOnce(int Pass) const {
         if (R.type != R_8051_16_BE || !R.sym || R.offset == 0 ||
             R.offset >= Sec->content().size())
           return false;
+        // Relocation may bypass this trampoline and redirect directly to its
+        // callee after bank placement. Until that final target is known, the
+        // trampoline's page is not a safe basis for shortening the transfer.
+        if (R.sym->getName().starts_with("__mcs51_bankcall_"))
+          return false;
         uint8_t Opcode = Sec->content()[R.offset - 1];
         if (Opcode != 0x12 && Opcode != 0x02) // LCALL or LJMP
           return false;
@@ -659,7 +664,8 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     if (rel.sym && rel.sym->isFunc()) {
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
       if (rel.type == R_8051_11 && targetBank != callerBank)
-        Err(ctx) << "MCS-51 AJMP/ACALL cannot cross from bank " << callerBank
+        Err(ctx) << sec.getLocation(rel.offset)
+                 << "MCS-51 AJMP/ACALL cannot cross from bank " << callerBank
                  << " to bank " << targetBank << " for function '"
                  << rel.sym->getName() << "'";
       bool isLongCall = rel.type == R_8051_16_BE &&
@@ -697,8 +703,8 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     if (rel.type == R_8051_11) {
       checkUInt(ctx, loc, val, 16, rel);
       if ((val & ~uint64_t(0x7ff)) != ((place + 2) & ~uint64_t(0x7ff)))
-        Err(ctx)
-            << "MCS-51 AJMP/ACALL target is outside the current 2 KiB page";
+        Err(ctx) << sec.getLocation(rel.offset)
+                 << "MCS-51 AJMP/ACALL target is outside the current 2 KiB page";
       loc[0] = (loc[0] & 0x1f) | ((val >> 3) & 0xe0);
       loc[1] = static_cast<uint8_t>(val);
       continue;

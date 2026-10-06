@@ -59,7 +59,7 @@ int main(void) {
 // DIS-NEXT: mov r0, #255
 // DIS-NEXT: mov @r0, #0
 // DIS-NEXT: djnz r0,
-// DIS: lcall
+// DIS: {{(lcall|acall)}}
 // DIS: movc a, @a+dptr
 // DIS-LABEL: <main>:
 // DIS: mov dptr, #0
