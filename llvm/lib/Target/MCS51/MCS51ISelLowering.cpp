@@ -494,6 +494,7 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   // MCS51ISD::BR_EQ/BR_NE are target opcodes (>= ISD::BUILTIN_OP_END); the
   // DAG combiner always offers them to PerformDAGCombine, and registering them
   // here would index past TargetDAGCombineArray.
+  setTargetDAGCombine(ISD::AND);
   setTargetDAGCombine(ISD::OR);
   setTargetDAGCombine(ISD::SUB);
   setTargetDAGCombine(ISD::SHL);
@@ -1832,6 +1833,62 @@ SDValue MCS51TargetLowering::LowerReturn(
 
 SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
                                                 DAGCombinerInfo &DCI) const {
+  // A one-bit field extracted from a shifted word can be read from the
+  // original byte directly. In particular, (word >> 7) & 4 only needs bit 9
+  // of the word; shifting the whole word seven times is wasteful.
+  if (N->getOpcode() == ISD::AND && N->getValueType(0) == MVT::i8) {
+    for (unsigned I = 0; I != 2; ++I) {
+      auto *Mask = dyn_cast<ConstantSDNode>(N->getOperand(1 - I));
+      SDValue TruncatedShift = N->getOperand(I);
+      if (!Mask || !Mask->getAPIntValue().isPowerOf2() ||
+          TruncatedShift.getOpcode() != ISD::TRUNCATE ||
+          TruncatedShift.getValueType() != MVT::i8 ||
+          !TruncatedShift.hasOneUse())
+        continue;
+
+      SDValue Shift = TruncatedShift.getOperand(0);
+      if (!Shift.hasOneUse() || Shift.getValueType() != MVT::i16 ||
+          (Shift.getOpcode() != ISD::SRL && Shift.getOpcode() != ISD::SHL))
+        continue;
+      auto *Amount = dyn_cast<ConstantSDNode>(Shift.getOperand(1));
+      if (!Amount)
+        continue;
+
+      unsigned OutputBit = Mask->getAPIntValue().logBase2();
+      uint64_t AmountValue = Amount->getZExtValue();
+      bool IsRightShift = Shift.getOpcode() == ISD::SRL;
+      uint64_t SourceBit;
+      if (IsRightShift) {
+        SourceBit = AmountValue + OutputBit;
+        if (SourceBit >= 16)
+          return DCI.DAG.getConstant(0, SDLoc(N), MVT::i8);
+      } else {
+        if (AmountValue > OutputBit)
+          return DCI.DAG.getConstant(0, SDLoc(N), MVT::i8);
+        SourceBit = OutputBit - AmountValue;
+      }
+
+      SelectionDAG &DAG = DCI.DAG;
+      SDLoc DL(N);
+      SDValue ByteIndex = DAG.getConstant(SourceBit / 8, DL, MVT::i16);
+      SDValue Byte = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i8,
+                                 Shift.getOperand(0), ByteIndex);
+      unsigned SourceBitInByte = SourceBit % 8;
+      SDValue Bit = DAG.getNode(
+          ISD::AND, DL, MVT::i8, Byte,
+          DAG.getConstant(uint64_t(1) << SourceBitInByte, DL, MVT::i8));
+      if (SourceBitInByte < OutputBit)
+        return DAG.getNode(ISD::SHL, DL, MVT::i8, Bit,
+                           DAG.getConstant(OutputBit - SourceBitInByte, DL,
+                                           MVT::i8));
+      if (SourceBitInByte > OutputBit)
+        return DAG.getNode(ISD::SRL, DL, MVT::i8, Bit,
+                           DAG.getConstant(SourceBitInByte - OutputBit, DL,
+                                           MVT::i8));
+      return Bit;
+    }
+  }
+
   // A branch on a materialized equality (BR_NE (CMPEQ8 a, b), 1) tests the
   // operands directly.
   if ((N->getOpcode() == MCS51ISD::BR_EQ || N->getOpcode() == MCS51ISD::BR_NE) &&
