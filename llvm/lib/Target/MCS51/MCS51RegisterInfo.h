@@ -9,6 +9,10 @@
 
 namespace llvm {
 
+// True when -mcs51-csr narrows the callee-saved set; calls then carry the
+// matching call-preserved register mask.
+bool mcs51UseCallRegMask();
+
 class MCS51RegisterInfo final : public MCS51GenRegisterInfo {
 public:
   MCS51RegisterInfo();

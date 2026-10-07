@@ -1546,6 +1546,9 @@ SDValue MCS51TargetLowering::LowerCall(
   Ops.push_back(Callee);
   for (const auto &[Reg, Value] : RegsToPass)
     Ops.push_back(DAG.getRegister(Reg, Value.getValueType()));
+  if (mcs51UseCallRegMask())
+    Ops.push_back(DAG.getRegisterMask(
+        STI.getRegisterInfo()->getCallPreservedMask(MF, CLI.CallConv)));
   if (InGlue.getNode())
     Ops.push_back(InGlue);
   SDVTList CallVTs = DAG.getVTList(MVT::Other, MVT::Glue);

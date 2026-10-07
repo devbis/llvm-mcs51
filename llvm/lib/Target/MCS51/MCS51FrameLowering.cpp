@@ -309,10 +309,17 @@ getInterruptSaveAddresses(const MachineFunction &MF, bool Reverse) {
       for (const MachineOperand &MO : MI.operands())
         if (MO.isReg() && MO.isDef() && MO.getReg().isPhysical())
           Mark(MO.getReg());
-        else if (MO.isRegMask())
+        else if (MO.isRegMask()) {
+          // A reduced callee-saved set (-mcs51-csr) lets callees clobber
+          // R2-R7 as well, which is only visible through the mask.
+          for (MCRegister R : {MCS51::R0, MCS51::R1, MCS51::R2, MCS51::R3,
+                               MCS51::R4, MCS51::R5, MCS51::R6, MCS51::R7})
+            if (MO.clobbersPhysReg(R))
+              Mark(R);
           for (unsigned Imag = MCS51::IM0; Imag <= MCS51::IM23; ++Imag)
             if (MO.clobbersPhysReg(Imag))
               Mark(Imag);
+        }
       if (MI.getFlag(MachineInstr::FrameSetup) ||
           MI.getFlag(MachineInstr::FrameDestroy) || MI.getNumOperands() == 0 ||
           !MI.getOperand(0).isImm())

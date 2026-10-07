@@ -19,3 +19,7 @@ def RetCC_MCS51 : CallingConv<[
 // SP-relative path. IM0-IM7 carry arguments and results.
 def CSR_MCS51 : CalleeSavedRegs<(add R2, R3, R4, R5, R6, R7,
                                     (sequence "IM%d", 8, 23))>;
+
+// Reduced callee-saved sets selected by -mcs51-csr (default unchanged).
+def CSR_MCS51_R : CalleeSavedRegs<(add R2, R3, R4, R5, R6, R7)>;
+def CSR_MCS51_None : CalleeSavedRegs<(add)>;
