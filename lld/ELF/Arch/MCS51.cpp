@@ -34,6 +34,34 @@ static unsigned getMCS51CodeBank(const OutputSection *section) {
   return bank;
 }
 
+// A call or function pointer to a declaration is emitted against a weak
+// external bank-call trampoline because the callee's bank is unknown at
+// compile time. If the callee was placed in common flash, return it so the
+// reference can bypass the trampoline. Common functions are already entered
+// directly under any FMAP value (same-unit calls, function pointers), so this
+// keeps a single entry protocol for them; it also matters for the ABI, since
+// direct entry places stack arguments right below the return address.
+static const Defined *getCommonTargetOfExternalBankThunk(Ctx &ctx,
+                                                        const Symbol &sym) {
+  constexpr StringRef prefix = "__mcs51_bankcall_";
+  auto *thunk = dyn_cast<Defined>(&sym);
+  if (!thunk || !sym.getName().starts_with(prefix))
+    return nullptr;
+  auto *thunkSec = dyn_cast_or_null<InputSection>(thunk->section);
+  if (!thunkSec ||
+      !thunkSec->name.starts_with(".text.autobankthunks.external."))
+    return nullptr;
+  auto *target = dyn_cast_or_null<Defined>(
+      ctx.symtab->find(sym.getName().drop_front(prefix.size())));
+  if (!target || !target->isFunc())
+    return nullptr;
+  auto *targetSec = dyn_cast_or_null<InputSection>(target->section);
+  if (!targetSec || !(targetSec->flags & SHF_EXECINSTR) ||
+      getMCS51CodeBank(targetSec->getOutputSection()))
+    return nullptr;
+  return target;
+}
+
 class MCS51 final : public TargetInfo {
 public:
   MCS51(Ctx &ctx) : TargetInfo(ctx) { defaultImageBase = 0; }
@@ -321,6 +349,10 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     uint64_t val = sec.getRelocTargetVA(ctx, rel, place);
     bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
     bool isAutoBankThunk = sec.name.starts_with(".text.autobankthunks.");
+    if (rel.sym && !isBankThunk && !isAutoBankThunk)
+      if (const Defined *direct =
+              getCommonTargetOfExternalBankThunk(ctx, *rel.sym))
+        val = direct->getVA(ctx, rel.addend);
     unsigned targetBank = 0;
     if (rel.sym) {
       // The assembler rewrites references to local functions against their
