@@ -1007,9 +1007,67 @@ private:
     return Call;
   }
 
+  static bool needsChunkedIntegerAccess(Type *Ty) {
+    auto *IT = dyn_cast<IntegerType>(Ty);
+    if (!IT)
+      return false;
+    unsigned Bits = IT->getBitWidth();
+    return Bits % 8 == 0 && Bits < 64 && Bits != 8 && Bits != 16 &&
+           Bits != 32;
+  }
+
+  static Value *lowerChunkedIntegerLoad(IRBuilder<> &B, Module &M,
+                                        Value *Pointer, IntegerType *Ty,
+                                        bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    uint64_t Bytes = Ty->getBitWidth() / 8;
+    Value *Result = ConstantInt::get(Ty, 0);
+    for (uint64_t I = 0; I < Bytes;) {
+      unsigned ChunkBytes = getLargestByteChunk(Bytes - I);
+      Type *ChunkTy = IntegerType::get(C, ChunkBytes * 8);
+      Value *Part = B.CreateZExt(
+          lowerGenericScalarLoadValue(B, M, Pointer, ChunkTy, I, IsVolatile),
+          Ty, "gptr.int.chunk");
+      if (I)
+        Part = B.CreateShl(Part, I * 8, "gptr.int.chunk.shift");
+      Result = B.CreateOr(Result, Part, "gptr.int");
+      I += ChunkBytes;
+    }
+    return Result;
+  }
+
+  static void lowerChunkedIntegerStore(IRBuilder<> &B, Module &M,
+                                       Value *Pointer, Value *Stored,
+                                       IntegerType *Ty, bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    uint64_t Bytes = Ty->getBitWidth() / 8;
+    for (uint64_t I = 0; I < Bytes;) {
+      unsigned ChunkBytes = getLargestByteChunk(Bytes - I);
+      Type *ChunkTy = IntegerType::get(C, ChunkBytes * 8);
+      Value *Part = Stored;
+      if (I)
+        Part = B.CreateLShr(Part, I * 8, "gptr.int.chunk.shift");
+      Part = B.CreateTrunc(Part, ChunkTy, "gptr.int.chunk");
+      lowerGenericScalarStoreValue(B, M, Pointer, Part, ChunkTy, I,
+                                   IsVolatile);
+      I += ChunkBytes;
+    }
+  }
+
   static void lowerLoad(LoadInst &LI) {
     if (LI.getType()->isAggregateType()) {
       lowerAggregateLoad(LI);
+      return;
+    }
+    if (needsChunkedIntegerAccess(LI.getType())) {
+      IRBuilder<> B(&LI);
+      Value *Result = lowerChunkedIntegerLoad(
+          B, *LI.getModule(), LI.getPointerOperand(),
+          cast<IntegerType>(LI.getType()), LI.isVolatile());
+      if (auto *I = dyn_cast<Instruction>(Result))
+        I->setDebugLoc(LI.getDebugLoc());
+      LI.replaceAllUsesWith(Result);
+      LI.eraseFromParent();
       return;
     }
     IRBuilder<> B(&LI);
@@ -1038,6 +1096,14 @@ private:
   static void lowerStore(StoreInst &SI) {
     if (SI.getValueOperand()->getType()->isAggregateType()) {
       lowerAggregateStore(SI);
+      return;
+    }
+    if (needsChunkedIntegerAccess(SI.getValueOperand()->getType())) {
+      IRBuilder<> B(&SI);
+      lowerChunkedIntegerStore(
+          B, *SI.getModule(), SI.getPointerOperand(), SI.getValueOperand(),
+          cast<IntegerType>(SI.getValueOperand()->getType()), SI.isVolatile());
+      SI.eraseFromParent();
       return;
     }
     IRBuilder<> B(&SI);
