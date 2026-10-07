@@ -41,9 +41,9 @@ void caller_mixed_stack(unsigned char a, unsigned char b, unsigned char c,
   callee_mixed_stack(a, b, c, d, 0x5a, 0, 0x1234);
 }
 
+// A constant byte argument is loaded into its argument register directly.
 // CHECK-LABEL: caller:
-// CHECK: mov a, #42
-// CHECK: mov r7, a
+// CHECK: mov r7, #42
 // CHECK: lcall callee
 // CHECK: ret
 
