@@ -158,10 +158,12 @@ int main(void) {
 // ASM: lcall __mcs51_gptrget8
 // ASM-LABEL: store_generic_byte:
 // ASM: lcall __mcs51_gptrput8
+// short has 1-byte alignment, so GenericAggregate is 3 bytes and its load is
+// split into a word and a byte access.
 // ASM-LABEL: load_generic_aggregate:
-// ASM: lcall __mcs51_gptrget32
+// ASM: lcall __mcs51_gptrget16
+// ASM: lcall __mcs51_gptrget8
 // ASM-LABEL: store_generic_aggregate:
-// ASM: lcall __mcs51_gptrput8
 // ASM: lcall __mcs51_gptrput8
 // ASM: lcall __mcs51_gptrput16
 // ASM-LABEL: load_generic_word:
