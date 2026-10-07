@@ -60,6 +60,9 @@ public:
       MachineInstr &MI, MachineBasicBlock *MBB) const override;
 
 private:
+  MachineBasicBlock *emitCustomInserter(MachineInstr &MI,
+                                        MachineBasicBlock *MBB) const;
+
   const MCS51Subtarget &STI;
 };
 
