@@ -2055,6 +2055,22 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
 
 MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     MachineInstr &MI, MachineBasicBlock *MBB) const {
+  MachineFunction &MF = *MBB->getParent();
+  // splitAt does not carry call-frame metadata to new blocks. Preserve the
+  // active frame for every block created while expanding this pseudo, so a
+  // later inserter and the machine verifier see a consistent entry state.
+  unsigned CallFrameSize =
+      MF.getSubtarget().getInstrInfo()->getCallFrameSizeAt(MI);
+  int FirstNewBlock = static_cast<int>(MF.getNumBlockIDs());
+  MachineBasicBlock *Result = emitCustomInserter(MI, MBB);
+  for (MachineBasicBlock &Block : MF)
+    if (Block.getNumber() >= FirstNewBlock)
+      Block.setCallFrameSize(CallFrameSize);
+  return Result;
+}
+
+MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
+    MachineInstr &MI, MachineBasicBlock *MBB) const {
   struct PhysicalLiveInLowering {
     MachineFunction &MF;
     const TargetInstrInfo &TII;
