@@ -2600,6 +2600,18 @@ public:
         Flags |= ELF::SHF_WRITE;
       return getContext().getELFSection(Name, Type, Flags);
     }
+    // The section must match the instructions that access the object: CODE
+    // objects are read with MOVC from flash, and XDATA objects with MOVX from
+    // RAM initialized by startup, whatever their constness says.
+    if (GV && !GV->hasSection()) {
+      unsigned AddressSpace = GV->getAddressSpace();
+      if (AddressSpace == MCS51::Code && !Kind.isReadOnly())
+        Kind = SectionKind::getReadOnly();
+      else if ((AddressSpace == MCS51::XData ||
+                AddressSpace == MCS51::Default) &&
+               Kind.isReadOnly())
+        Kind = SectionKind::getData();
+    }
     return TargetLoweringObjectFileELF::SelectSectionForGlobal(GO, Kind, TM);
   }
 };
@@ -2632,6 +2644,7 @@ public:
   }
 
   void addIRPasses() override {
+    addPass(createMCS51CodeConstantEscapePass());
     addPass(createMCS51OverlayPass());
     addPass(createMCS51StackAddressLoweringPass());
     addPass(new MCS51SinkIdataConstantStore());
