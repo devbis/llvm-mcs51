@@ -6,7 +6,6 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -17,16 +16,7 @@ using namespace llvm;
 MCS51RegisterInfo::MCS51RegisterInfo() : MCS51GenRegisterInfo(MCS51::PC) {}
 
 const MCPhysReg *
-MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  // The freestanding C entry point is entered by startup code and never
-  // returns to a C caller. It does not need to preserve the normal callee-save
-  // register bank around its body.
-  // The imaginary registers IM12-IM23 are callee-saved for every function
-  // that is called; only the freestanding entry point is exempt.
-  static const MCPhysReg MainSaveList[] = {0};
-  if (MF && MF->getFunction().getName() == "main" &&
-      MF->getTarget().getTargetCPU().equals_insensitive("cc2530"))
-    return MainSaveList;
+MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
   return CSR_MCS51_SaveList;
 }
 

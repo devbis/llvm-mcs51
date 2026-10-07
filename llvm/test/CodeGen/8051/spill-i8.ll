@@ -42,17 +42,17 @@ entry:
   ret i8 %abcdefghij
 }
 
-; The freestanding entry point is not called by ordinary C code and need not
-; restore the register bank when it returns to the startup halt loop.
+; The entry point uses the same ordinary function ABI on every MCS-51 profile.
 ; CHECK-LABEL: main:
-; CHECK-NOT: push
+; CHECK: lcall __mcs51_save_r{{[0-7]}}
 ; CHECK: lcall __mcs51_bankcall_entry_barrier
-; CHECK-NOT: pop
-; CHECK-NOT: mov 129, a
+; CHECK: dec 129
+; CHECK: lcall __mcs51_restore_r{{[0-7]}}
 ; CHECK: ret
 
-; Other MCS-51 profiles retain the ordinary function ABI for main.
+; Generic MCS-51 uses the same frame and callee-save behavior.
 ; GENERIC-LABEL: main:
 ; GENERIC: lcall __mcs51_save_r{{[0-7]}}
 ; GENERIC: lcall entry_barrier
+; GENERIC: dec 129
 ; GENERIC: lcall __mcs51_restore_r{{[0-7]}}

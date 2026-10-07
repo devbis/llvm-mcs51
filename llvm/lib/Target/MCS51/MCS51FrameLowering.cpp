@@ -8,7 +8,6 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Target/TargetMachine.h"
 #include <algorithm>
 #include "llvm/ADT/Twine.h"
 
@@ -394,12 +393,8 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   while (Release != MBB.begin() &&
          std::prev(Release)->getFlag(MachineInstr::FrameDestroy))
     --Release;
-  // The freestanding entry point returns to startup's halt loop. No caller
-  // resumes with its stack, so releasing main's final frame is unnecessary.
-  if (MF.getFunction().getName() != "main" ||
-      !MF.getTarget().getTargetCPU().equals_insensitive("cc2530"))
-    emitStackAdjustment(MBB, Release, TII, StackSize, /*Deallocate=*/true,
-                        PreserveA);
+  emitStackAdjustment(MBB, Release, TII, StackSize, /*Deallocate=*/true,
+                      PreserveA);
   if (MF.getFunction().hasFnAttribute("interrupt")) {
     // The prologue pushed the callee-saved registers before the interrupt
     // save set, so the interrupt registers must be popped before the

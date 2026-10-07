@@ -61,11 +61,12 @@ define i8 @explicit_same_bank_reg(i8 %x) noinline section ".bank1.text" {
   ret i8 %r
 }
 
-; The program entry point is never auto-banked. main saves no callee-saved
-; registers, so the unbiased offset is SP-3.
+; The program entry point is never auto-banked. main uses the ordinary ABI and
+; saves R2, so its incoming stack argument is at SP-4.
 ; AUTO-LABEL: main:
+; AUTO: push 2
 ; AUTO: mov a, 129
-; AUTO-NEXT: add a, #253
+; AUTO-NEXT: add a, #252
 define i16 @main(i16 %a, i16 %b, i16 %c, i16 %d, i16 %e) noinline {
   ret i16 %e
 }
