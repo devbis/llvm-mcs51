@@ -470,8 +470,9 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
   setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
   setTargetDAGCombine(ISD::ADD);
-  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::BR_EQ));
-  setTargetDAGCombine(static_cast<ISD::NodeType>(MCS51ISD::BR_NE));
+  // MCS51ISD::BR_EQ/BR_NE are target opcodes (>= ISD::BUILTIN_OP_END); the
+  // DAG combiner always offers them to PerformDAGCombine, and registering them
+  // here would index past TargetDAGCombineArray.
   setTargetDAGCombine(ISD::OR);
   setTargetDAGCombine(ISD::SUB);
   setTargetDAGCombine(ISD::SHL);
