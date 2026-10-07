@@ -16,6 +16,7 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Target/TargetMachine.h"
 #include <algorithm>
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/KnownBits.h"
@@ -1296,6 +1297,9 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
   IsVarArg |= MF.getFunction().isVarArg();
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_MCS51);
+  const unsigned IncomingArgBias = getMCS51IncomingStackArgBias(
+      MF.getFunction(), MF.getTarget().getTargetCPU(),
+      MF.getTarget().getFunctionSections());
 
   for (const CCValAssign &VA : ArgLocs) {
     if (EVT(VA.getLocVT()) != VA.getValVT() ||
@@ -1315,7 +1319,8 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
         Chain = Load.getValue(1);
         return Load;
       };
-      int64_t First = -(static_cast<int64_t>(VA.getLocMemOffset()) + 2);
+      int64_t First = -(static_cast<int64_t>(VA.getLocMemOffset()) +
+                        IncomingArgBias);
       SDValue Low = LoadByte(First);
       if (VA.getValVT() == MVT::i8) {
         InVals.push_back(Low);
@@ -1338,7 +1343,8 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
     InVals.push_back(Value);
   }
   if (IsVarArg) {
-    int64_t Offset = -static_cast<int64_t>(CCInfo.getStackSize() + 2);
+    int64_t Offset =
+        -static_cast<int64_t>(CCInfo.getStackSize() + IncomingArgBias);
     int FI = MF.getFrameInfo().CreateFixedObject(1, Offset, true);
     MF.getInfo<MCS51MachineFunctionInfo>()->setVarArgsFrameIndex(FI);
   }
@@ -1498,7 +1504,10 @@ SDValue MCS51TargetLowering::LowerCall(
     unsigned CallerBank = Caller.hasSection()
                               ? getMCS51CodeBank(Caller.getSection())
                               : 0;
-    if (Bank && Bank != CallerBank) {
+    // A banked callee reads its stack arguments past the trampoline frame,
+    // so a call that passes stack arguments must use the trampoline even
+    // within the same bank.
+    if (Bank && (Bank != CallerBank || CallFrameSize)) {
       std::string Thunk = getMCS51BankThunkName(GV->getName());
       MCSymbol *ThunkSym = MF.getContext().getOrCreateSymbol(Thunk);
       Callee = DAG.getTargetExternalSymbol(ThunkSym->getName().data(),
