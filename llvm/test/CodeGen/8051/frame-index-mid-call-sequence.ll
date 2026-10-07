@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=mcs51 -O2 %s -o - | FileCheck %s
+; RUN: llc -mtriple=mcs51 -O2 -verify-machineinstrs %s -o - | FileCheck %s
 
 ; The i64 abs/select expansions are custom-inserted control flow that lands
 ; between ADJCALLSTACKDOWN and the call, after part of the arguments has been

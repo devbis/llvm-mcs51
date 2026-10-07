@@ -2053,7 +2053,24 @@ SDValue MCS51TargetLowering::PerformDAGCombine(SDNode *N,
   return DCI.DAG.getNode(Opcode, SDLoc(N), MVT::i16, Base, Byte);
 }
 
+// Custom inserters split blocks, and the pseudo may lie inside a call
+// sequence (for example a select between argument pushes). Record the call
+// frame size at the pseudo on every block the expansion creates so the
+// machine verifier and frame index elimination see a consistent frame.
 MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
+    MachineInstr &MI, MachineBasicBlock *MBB) const {
+  MachineFunction &MF = *MBB->getParent();
+  unsigned CallFrameSize =
+      MF.getSubtarget().getInstrInfo()->getCallFrameSizeAt(MI);
+  unsigned FirstNewBlock = MF.getNumBlockIDs();
+  MachineBasicBlock *Result = emitCustomInserter(MI, MBB);
+  for (MachineBasicBlock &Block : MF)
+    if (Block.getNumber() >= (int)FirstNewBlock)
+      Block.setCallFrameSize(CallFrameSize);
+  return Result;
+}
+
+MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     MachineInstr &MI, MachineBasicBlock *MBB) const {
   struct PhysicalLiveInLowering {
     MachineFunction &MF;
