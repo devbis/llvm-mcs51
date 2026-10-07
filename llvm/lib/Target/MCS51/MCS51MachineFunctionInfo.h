@@ -9,15 +9,38 @@
 namespace llvm {
 
 class MCS51MachineFunctionInfo final : public MachineFunctionInfo {
+public:
+  struct CallFrameStateAtEntry {
+    bool Active = false;
+    // Stack adjustment from the SP value at the start of the call sequence.
+    // Stack arguments are pushed explicitly, so this can differ from the
+    // complete logical call frame while argument values are being prepared.
+    int64_t SPAdj = 0;
+  };
+
+private:
   int VarArgsFrameIndex = 0;
   bool HasVarArgsFrameIndex = false;
   DenseMap<Register, std::array<Register, 2>> CompareByteCaptures;
+  DenseMap<const MachineBasicBlock *, CallFrameStateAtEntry>
+      CallFrameStatesAtEntry;
   // DPTR-defining instructions emitted for an address: the word it was built
   // from and the offset it holds right after that instruction.
   DenseMap<const MachineInstr *, std::pair<Register, int64_t>> DptrAddresses;
 
 public:
   MCS51MachineFunctionInfo(const Function &, const TargetSubtargetInfo *) {}
+
+  const CallFrameStateAtEntry *getCallFrameStateAtEntry(
+      const MachineBasicBlock *MBB) const {
+    auto It = CallFrameStatesAtEntry.find(MBB);
+    return It == CallFrameStatesAtEntry.end() ? nullptr : &It->second;
+  }
+
+  void setCallFrameStateAtEntry(
+      const MachineBasicBlock *MBB, CallFrameStateAtEntry State) {
+    CallFrameStatesAtEntry[MBB] = State;
+  }
 
   int getVarArgsFrameIndex() const { return VarArgsFrameIndex; }
   bool hasVarArgsFrameIndex() const { return HasVarArgsFrameIndex; }
