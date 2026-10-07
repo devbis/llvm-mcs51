@@ -42,6 +42,21 @@ define void @escaped_variable_index(i16 %i) {
   ret void
 }
 
+; Rewriting both loads removes their shared GEP and the cast that feeds it.
+; Keep the cast handle valid while dead pointer instructions are collected.
+; CHECK-LABEL: read_through_instruction_cast:
+; CHECK: movc a, @a+dptr
+; CHECK-NOT: movx
+; CHECK: ret
+define i8 @read_through_instruction_cast(i16 %i) {
+  %d = addrspacecast ptr addrspace(5) @table to ptr
+  %p = getelementptr i8, ptr %d, i16 %i
+  %a = load i8, ptr %p
+  %b = load i8, ptr %p
+  %sum = add i8 %a, %b
+  ret i8 %sum
+}
+
 ; Element reads through the converted address stay in CODE.
 ; CHECK-LABEL: read_through_cast:
 ; CHECK: mov 50, #lo8(table)
