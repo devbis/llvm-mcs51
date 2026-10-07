@@ -10198,8 +10198,19 @@ bool PointerExprEvaluator::VisitCastExpr(const CastExpr *E) {
         Result.Designator.setInvalid();
       }
     }
-    if (E->getCastKind() == CK_AddressSpaceConversion && Result.IsNullPtr)
-      ZeroInitialization(E);
+    if (E->getCastKind() == CK_AddressSpaceConversion) {
+      if (Result.IsNullPtr) {
+        ZeroInitialization(E);
+      } else if (!Result.Base &&
+                 Info.Ctx.getTypeSize(SubExpr->getType()) !=
+                     Info.Ctx.getTypeSize(E->getType())) {
+        // An address-space conversion between pointer representations of
+        // different widths is target-defined (it may add a space tag or an
+        // aperture base), so the integer value of a pointer formed from an
+        // integer is not preserved. Leave such conversions to code generation.
+        return Error(E);
+      }
+    }
     return true;
 
   case CK_DerivedToBase:
