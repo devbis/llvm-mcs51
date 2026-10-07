@@ -322,12 +322,16 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
     bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
     bool isAutoBankThunk = sec.name.starts_with(".text.autobankthunks.");
     unsigned targetBank = 0;
-    if (rel.sym && rel.sym->isFunc()) {
+    if (rel.sym) {
+      // The assembler rewrites references to local functions against their
+      // STT_SECTION symbol, so the callee bank cannot depend on isFunc().
       auto *target = dyn_cast<Defined>(rel.sym);
       auto *targetInput =
-          target ? dyn_cast<InputSection>(target->section) : nullptr;
-      targetBank =
-          targetInput ? getMCS51CodeBank(targetInput->getOutputSection()) : 0;
+          target ? dyn_cast_or_null<InputSection>(target->section) : nullptr;
+      if (targetInput && (targetInput->flags & SHF_EXECINSTR))
+        targetBank = getMCS51CodeBank(targetInput->getOutputSection());
+    }
+    if (rel.sym && rel.sym->isFunc()) {
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
       if (rel.type == R_8051_11 && targetBank != callerBank)
         Err(ctx) << "MCS-51 AJMP/ACALL cannot cross from bank " << callerBank
