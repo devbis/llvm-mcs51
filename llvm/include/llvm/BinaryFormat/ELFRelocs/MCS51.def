@@ -11,3 +11,7 @@ ELF_RELOC(R_8051_DPTR16, 6)
 // Low and high byte of an absolute address, for 8-bit immediate fields.
 ELF_RELOC(R_8051_LO8, 7)
 ELF_RELOC(R_8051_HI8, 8)
+// Marks the preceding R_8051_DPTR16 at the same offset as a linker-relaxable
+// MOV DPTR,#imm16. The assembler emits it only when every reference that may
+// span the instruction is left as a symbol-relative relocation.
+ELF_RELOC(R_8051_RELAX, 9)

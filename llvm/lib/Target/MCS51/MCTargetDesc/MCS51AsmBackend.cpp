@@ -4,6 +4,8 @@
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/MCObjectWriter.h"
@@ -16,6 +18,22 @@ using namespace llvm;
 
 namespace {
 class MCS51AsmBackend final : public MCAsmBackend {
+  MCSymbol *PCRelTemp = nullptr;
+
+  // A PC-relative fixup resolved by the assembler must not span a
+  // linker-relaxable instruction, whose size the linker may change.
+  bool isPCRelFixupResolved(const MCSymbol *SymA, const MCFragment &F) {
+    if (!F.getParent()->isLinkerRelaxable())
+      return true;
+    if (!PCRelTemp)
+      PCRelTemp = getContext().createTempSymbol();
+    PCRelTemp->setFragment(const_cast<MCFragment *>(&F));
+    MCValue Res;
+    MCExpr::evaluateSymbolicAdd(Asm, false, MCValue::get(SymA),
+                                MCValue::get(nullptr, PCRelTemp), Res);
+    return !Res.getSubSym();
+  }
+
 public:
   MCS51AsmBackend() : MCAsmBackend(endianness::little) {}
 
@@ -60,6 +78,21 @@ public:
   void applyFixup(const MCFragment &F, const MCFixup &Fixup,
                   const MCValue &Target, uint8_t *Data, uint64_t Value,
                   bool IsResolved) override {
+    bool NeedsRelax = Fixup.isLinkerRelaxable() && !Target.isAbsolute();
+    if (NeedsRelax)
+      IsResolved = false;
+    if (IsResolved && Fixup.isPCRel())
+      IsResolved = isPCRelFixupResolved(Target.getAddSym(), F);
+    if (NeedsRelax) {
+      Asm->getWriter().recordRelocation(F, Fixup, Target, Value);
+      MCFixup RelaxFixup =
+          MCFixup::create(Fixup.getOffset(), nullptr, ELF::R_8051_RELAX);
+      MCValue RelaxTarget = MCValue::get(nullptr);
+      uint64_t RelaxValue;
+      Asm->getWriter().recordRelocation(F, RelaxFixup, RelaxTarget,
+                                        RelaxValue);
+      return;
+    }
     if (Fixup.getKind() == MCS51::fixup_pcrel8 && IsResolved &&
         !isInt<8>(static_cast<int64_t>(Value)))
       getContext().reportError(Fixup.getLoc(),

@@ -5,6 +5,7 @@
 #include "MCS51InstrInfo.h"
 #include "MCS51ISelLowering.h"
 #include "MCS51SelectionDAGInfo.h"
+#include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 
 #define GET_SUBTARGETINFO_HEADER
@@ -41,6 +42,7 @@ public:
                               StringRef FS);
 
 private:
+  bool EnableLinkerRelax = false;
   MCS51InstrInfo InstrInfo;
   MCS51FrameLowering FrameLowering;
   MCS51TargetLowering TLInfo;
