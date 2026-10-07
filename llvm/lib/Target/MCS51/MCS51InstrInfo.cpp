@@ -297,6 +297,34 @@ void MCS51InstrInfo::loadRegFromStackSlot(
       .setMIFlags(Flags);
 }
 
+// Stack arguments are pushed and released one byte at a time by explicit
+// instructions, so the call frame pseudos move nothing themselves. Frame
+// indices materialized between two argument pushes must see only the bytes
+// pushed so far. Stack growth is upward: growth is a negative adjustment.
+int MCS51InstrInfo::getSPAdjust(const MachineInstr &MI) const {
+  switch (MI.getOpcode()) {
+  case MCS51::ADJCALLSTACKDOWN:
+  case MCS51::ADJCALLSTACKUP:
+    return 0;
+  case MCS51::PUSH_DIRECT:
+  case MCS51::PUSH_IM:
+  case MCS51::PUSH_PSW:
+    return -1;
+  case MCS51::POP_DIRECT:
+  case MCS51::POP_IM:
+  case MCS51::POP_PSW:
+  case MCS51::POP_ARG_SP:
+    return 1;
+  case MCS51::INC_DIRECT:
+  case MCS51::DEC_DIRECT:
+    if (MI.getOperand(0).isImm() && MI.getOperand(0).getImm() == 0x81)
+      return MI.getOpcode() == MCS51::INC_DIRECT ? -1 : 1;
+    return 0;
+  default:
+    return 0;
+  }
+}
+
 bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
   if (Opcode == MCS51::LDI16) {
