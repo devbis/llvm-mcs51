@@ -136,6 +136,10 @@ public:
                                     InlineAsm::ConstraintCode ConstraintCode,
                                     std::vector<SDValue> &OutOps) override;
   void Select(SDNode *N) override {
+    if (N->isMachineOpcode()) {
+      N->setNodeId(-1);
+      return;
+    }
     SDLoc DL(N);
     if (N->getOpcode() == ISD::ADDRSPACECAST) {
       auto *Cast = cast<AddrSpaceCastSDNode>(N);

@@ -1468,7 +1468,25 @@ SDValue MCS51TargetLowering::LowerCall(
   while (StackCursor)
     PushPadding();
 
-  for (const auto &[Reg, Value] : RegsToPass) {
+  for (auto &[Reg, Value] : RegsToPass) {
+    // Load a constant byte argument in the class of its argument register.
+    // Otherwise it is selected into A, and every such constant stays live in
+    // the single A register until the call, so all but one are spilled to the
+    // hardware stack.
+    if (auto *C = dyn_cast<ConstantSDNode>(Value);
+        C && Value.getValueType() == MVT::i8) {
+      unsigned Opcode = MCS51::MCS51Imag8RegClass.contains(Reg)
+                            ? MCS51::MOV_IM_IMM
+                        : MCS51::MCS51GPR8RegClass.contains(Reg)
+                            ? MCS51::MOV_RN_IMM
+                            : 0;
+      if (Opcode)
+        Value = SDValue(
+            DAG.getMachineNode(Opcode, DL, MVT::i8,
+                               DAG.getTargetConstant(C->getZExtValue(), DL,
+                                                     MVT::i8)),
+            0);
+    }
     Chain = DAG.getCopyToReg(Chain, DL, Reg, Value, InGlue);
     InGlue = Chain.getValue(1);
   }
