@@ -2416,31 +2416,62 @@ public:
   MCS51CallFramePropagation() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
-    DenseMap<const MachineBasicBlock *, int64_t> Entry;
+    struct CallFrameState {
+      bool Active = false;
+      unsigned FrameSize = 0;
+      int64_t SPAdj = 0;
+
+      bool operator==(const CallFrameState &Other) const {
+        return Active == Other.Active && FrameSize == Other.FrameSize &&
+               SPAdj == Other.SPAdj;
+      }
+    };
+    DenseMap<const MachineBasicBlock *, CallFrameState> Entry;
     SmallVector<MachineBasicBlock *, 16> Work;
-    Entry[&MF.front()] = 0;
+    Entry[&MF.front()] = {};
     Work.push_back(&MF.front());
+    const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
     while (!Work.empty()) {
       MachineBasicBlock *MBB = Work.pop_back_val();
-      int64_t Size = Entry[MBB];
+      CallFrameState State = Entry[MBB];
       for (const MachineInstr &MI : *MBB) {
-        if (MI.getOpcode() == MCS51::ADJCALLSTACKDOWN)
-          Size = MI.getOperand(0).getImm();
-        else if (MI.getOpcode() == MCS51::ADJCALLSTACKUP)
-          Size = 0;
+        if (MI.getOpcode() == MCS51::ADJCALLSTACKDOWN) {
+          if (State.Active)
+            report_fatal_error("nested MCS-51 call frame");
+          State.Active = true;
+          State.FrameSize = MI.getOperand(0).getImm();
+          State.SPAdj = 0;
+        } else if (MI.getOpcode() == MCS51::ADJCALLSTACKUP) {
+          if (!State.Active || State.SPAdj != 0)
+            report_fatal_error("unbalanced MCS-51 call frame");
+          State = {};
+        } else if (State.Active) {
+          State.SPAdj += TII.getSPAdjust(MI);
+          if (State.SPAdj > 0 || -State.SPAdj > State.FrameSize)
+            report_fatal_error("MCS-51 call frame stack adjustment is out of "
+                               "bounds");
+        }
       }
       for (MachineBasicBlock *Succ : MBB->successors())
-        if (Entry.try_emplace(Succ, Size).second)
+        if (auto [It, Inserted] = Entry.try_emplace(Succ, State); Inserted)
           Work.push_back(Succ);
+        else if (!(It->second == State))
+          report_fatal_error("inconsistent MCS-51 call frame state at CFG "
+                             "join");
     }
     bool Changed = false;
+    MCS51MachineFunctionInfo *FuncInfo =
+        MF.getInfo<MCS51MachineFunctionInfo>();
     for (MachineBasicBlock &MBB : MF) {
       auto It = Entry.find(&MBB);
-      unsigned Size = It == Entry.end() ? 0 : It->second;
+      CallFrameState State = It == Entry.end() ? CallFrameState{} : It->second;
+      unsigned Size = State.Active ? State.FrameSize : 0;
       if (MBB.getCallFrameSize() != Size) {
         MBB.setCallFrameSize(Size);
         Changed = true;
       }
+      FuncInfo->setCallFrameStateAtEntry(
+          &MBB, {State.Active, State.SPAdj});
     }
     return Changed;
   }

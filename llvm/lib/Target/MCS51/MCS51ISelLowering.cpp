@@ -2260,6 +2260,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::SELECT_SIGN8) {
     MachineFunction &MF = *MBB->getParent();
+    unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
     Register Dst = MI.getOperand(0).getReg();
     Register LHS = MI.getOperand(1).getReg();
     Register TrueValue = MI.getOperand(2).getReg();
@@ -2271,11 +2272,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Tail->transferSuccessorsAndUpdatePHIs(MBB);
       MBB->addSuccessor(Tail);
     }
+    Tail->setCallFrameSize(CallFrameSize);
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *NegativeBB =
         MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *NonNegativeBB =
         MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    NegativeBB->setCallFrameSize(CallFrameSize);
+    NonNegativeBB->setCallFrameSize(CallFrameSize);
     MF.insert(Tail->getIterator(), NegativeBB);
     MF.insert(Tail->getIterator(), NonNegativeBB);
     while (!MBB->succ_empty())
@@ -2308,6 +2312,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   if (MI.getOpcode() == MCS51::SELECT_EQ8ri ||
       MI.getOpcode() == MCS51::SELECT_EQ8rr) {
     MachineFunction &MF = *MBB->getParent();
+    unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
     Register Dst = MI.getOperand(0).getReg();
     Register LHS = MI.getOperand(1).getReg();
     bool IsImmediate = MI.getOpcode() == MCS51::SELECT_EQ8ri;
@@ -2322,10 +2327,13 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Tail->transferSuccessorsAndUpdatePHIs(MBB);
       MBB->addSuccessor(Tail);
     }
+    Tail->setCallFrameSize(CallFrameSize);
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *EqualBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *NotEqualBB =
         MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    EqualBB->setCallFrameSize(CallFrameSize);
+    NotEqualBB->setCallFrameSize(CallFrameSize);
     MF.insert(Tail->getIterator(), EqualBB);
     MF.insert(Tail->getIterator(), NotEqualBB);
     while (!MBB->succ_empty())
@@ -2365,6 +2373,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     // A select whose condition is a word comparison: compare and branch
     // straight to the arm that produces the value.
     MachineFunction &MF = *MBB->getParent();
+    unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
     MachineRegisterInfo &MRI = MF.getRegInfo();
     bool IsWord = MI.getOpcode() == MCS51::SELECT16_CMP16;
     const TargetRegisterClass *RC =
@@ -2385,9 +2394,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Tail->transferSuccessorsAndUpdatePHIs(MBB);
       MBB->addSuccessor(Tail);
     }
+    Tail->setCallFrameSize(CallFrameSize);
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    TrueBB->setCallFrameSize(CallFrameSize);
+    FalseBB->setCallFrameSize(CallFrameSize);
     MF.insert(Tail->getIterator(), TrueBB);
     MF.insert(Tail->getIterator(), FalseBB);
     while (!MBB->succ_empty())
@@ -2422,6 +2434,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::SELECT16) {
     MachineFunction &MF = *MBB->getParent();
+    unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
     Register Dst = MI.getOperand(0).getReg();
     Register Cond = MI.getOperand(1).getReg();
     Register TrueValue = MI.getOperand(2).getReg();
@@ -2437,6 +2450,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Tail->transferSuccessorsAndUpdatePHIs(MBB);
       MBB->addSuccessor(Tail);
     }
+    Tail->setCallFrameSize(CallFrameSize);
     // DPTR is reloaded from the selected virtual value in the tail. The
     // generic split liveness can retain it as a physical live-in even though
     // it is defined before its first use there, which is invalid for an
@@ -2444,6 +2458,8 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    TrueBB->setCallFrameSize(CallFrameSize);
+    FalseBB->setCallFrameSize(CallFrameSize);
     MF.insert(Tail->getIterator(), TrueBB);
     MF.insert(Tail->getIterator(), FalseBB);
     while (!MBB->succ_empty())
@@ -2474,6 +2490,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   }
   if (MI.getOpcode() == MCS51::SELECT8) {
     MachineFunction &MF = *MBB->getParent();
+    unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
     Register Dst = MI.getOperand(0).getReg();
     Register Cond = MI.getOperand(1).getReg();
     Register TrueValue = MI.getOperand(2).getReg();
@@ -2489,9 +2506,12 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
       Tail->transferSuccessorsAndUpdatePHIs(MBB);
       MBB->addSuccessor(Tail);
     }
+    Tail->setCallFrameSize(CallFrameSize);
     Tail->removeLiveIn(MCS51::DPTR);
     MachineBasicBlock *TrueBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
     MachineBasicBlock *FalseBB = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+    TrueBB->setCallFrameSize(CallFrameSize);
+    FalseBB->setCallFrameSize(CallFrameSize);
     MF.insert(Tail->getIterator(), TrueBB);
     MF.insert(Tail->getIterator(), FalseBB);
     while (!MBB->succ_empty())
@@ -2974,6 +2994,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         CompareKind != 3)
       report_fatal_error("unsupported MCS-51 immediate comparison");
     if (CompareKind == 2) {
+      unsigned CallFrameSize = TII.getCallFrameSizeAt(MI);
       MachineBasicBlock *Tail = MBB->splitAt(MI);
       if (Tail == MBB) {
         Tail = MF.CreateMachineBasicBlock(MBB->getBasicBlock());
@@ -2981,11 +3002,14 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         Tail->transferSuccessorsAndUpdatePHIs(MBB);
         MBB->addSuccessor(Tail);
       }
+      Tail->setCallFrameSize(CallFrameSize);
       Tail->removeLiveIn(MCS51::DPTR);
       MachineBasicBlock *EqualBB =
           MF.CreateMachineBasicBlock(MBB->getBasicBlock());
       MachineBasicBlock *NotEqualBB =
           MF.CreateMachineBasicBlock(MBB->getBasicBlock());
+      EqualBB->setCallFrameSize(CallFrameSize);
+      NotEqualBB->setCallFrameSize(CallFrameSize);
       MF.insert(Tail->getIterator(), EqualBB);
       MF.insert(Tail->getIterator(), NotEqualBB);
       while (!MBB->succ_empty())
