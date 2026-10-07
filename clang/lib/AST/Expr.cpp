@@ -3559,6 +3559,13 @@ bool Expr::isConstantInitializer(ASTContext &Ctx, bool IsForRef,
         CE->getCastKind() == CK_IntToOCLSampler)
       return CE->getSubExpr()->isConstantInitializer(Ctx, false, Culprit);
 
+    // A conversion of a constant pointer to another address space is emitted
+    // as a constant address-space cast even when the evaluator cannot fold
+    // it to a value (for example a pointer formed from an integer).
+    if (CE->getCastKind() == CK_AddressSpaceConversion &&
+        CE->getSubExpr()->isPRValue())
+      return CE->getSubExpr()->isConstantInitializer(Ctx, false, Culprit);
+
     break;
   }
   case MaterializeTemporaryExprClass:

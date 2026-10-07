@@ -32,3 +32,77 @@ hardware stack, and linker placement across separately produced objects is not
 implemented. The internal-space estimate only sees globals in the current
 LLVM module; non-LTO builds with additional DATA/IDATA globals in other objects
 must set the internal budget conservatively or select XDATA explicitly.
+
+# MCS-51 pointer representation
+
+Each MCS-51 memory space is a separate LLVM address space. Clang
+(`clang/lib/Basic/Targets/MCS51.h`) and the target DataLayout
+(`MCS51TargetMachine.cpp`) use the same pointer widths, and the backend lowers
+every pointer to exactly that many bytes. All pointers have byte alignment.
+
+| Qualifier   | AS | Width | DataLayout | Address bits                   |
+|-------------|----|-------|------------|--------------------------------|
+| (none)      | 0  | 2     | `p:16:8`   | XDATA, or IDATA for locals     |
+| `__data`    | 1  | 1     | `p1:8:8`   | direct internal RAM 0x00-0x7F  |
+| `__idata`   | 2  | 1     | `p2:8:8`   | indirect internal RAM 0x00-0xFF|
+| `__pdata`   | 3  | 1     | `p3:8:8`   | offset in the MPAGE XDATA page |
+| `__xdata`   | 4  | 2     | `p4:16:8`  | external RAM 0x0000-0xFFFF     |
+| `__code`    | 5  | 2     | `p5:16:8`  | code memory 0x0000-0xFFFF      |
+| `__bit`     | 6  | 1     | `p6:8:8`   | bit address (no pointers)      |
+| `__sfr`     | 7  | 1     | `p7:8:8`   | SFR address (no pointers)      |
+| `__generic` | 8  | 4     | `p8:32:8`  | tagged, see below              |
+
+Because DATA, IDATA and PDATA pointers are one byte wide, Clang rejects
+objects larger than 255 bytes in those spaces.
+
+A generic pointer is four bytes in memory order: address low, address high,
+tag, and a zero padding byte. As an `i32` this is
+`address | tag << 16`. The tag selects the access instruction in the runtime
+helpers `__mcs51_gptr_read_byte`/`__mcs51_gptr_write_byte`:
+
+| Source space        | Tag  | Address bytes            | Access          |
+|---------------------|------|--------------------------|-----------------|
+| XDATA, plain global | 0x00 | 16-bit address           | `movx @dptr`    |
+| DATA, IDATA, locals | 0x40 | 8-bit address, high = 0  | `mov @r0`       |
+| PDATA               | 0x60 | 8-bit offset, high = 0   | `movx @r0`      |
+| CODE                | 0x80 | 16-bit address           | `movc @a+dptr`  |
+
+Conversions:
+
+* To generic: zero-extend the address to 16 bits and add the tag. A plain
+  (AS0) pointer gets tag 0x40 when it is derived from a local stack object
+  (whose address is an IDATA address), otherwise tag 0x00.
+* From generic: take the low 16 bits (XDATA, CODE, plain) or the low 8 bits
+  (DATA, IDATA, PDATA). The tag is not checked, as in other MCS-51
+  compilers; converting to the wrong space is undefined.
+* BIT and SFR addresses are not indirectly addressable and cannot be
+  converted to a generic pointer; the backend reports an error.
+* Null is address 0 in every space and all four bytes zero for generic. A
+  non-generic null converts to generic null (the tag is only added for a
+  non-zero address), so null comparisons are preserved. As a consequence, a
+  real object at address 0 of its space compares equal to null.
+
+In static initializers the converted address is emitted as its own 1- or
+2-byte relocated field followed by constant tag and padding bytes, because
+there is no 32-bit data relocation; `(u8 __generic *)d + 2` for a DATA array
+`d` becomes `.byte d+2, 0, 0x40, 0`. Clang does not constant-fold a
+conversion of an integer-valued pointer between spaces of different pointer
+widths, since it is not an identity on the integer: such an expression is
+lowered at run time in code, and is not accepted as a static initializer when
+pointer arithmetic is applied to it.
+
+Equality compares all 32 bits; pointer arithmetic changes only the 16 address
+bits. Generic pointers are passed and returned in four bytes like any other
+32-bit value.
+
+Examples (bytes in memory order):
+
+| C expression                                   | Bytes         |
+|------------------------------------------------|---------------|
+| `(u8 __generic *)(u8 __data *)0x30`            | `30 00 40 00` |
+| `(u8 __generic *)(u8 __idata *)0x90`           | `90 00 40 00` |
+| `(u8 __generic *)(u8 __pdata *)0x12`           | `12 00 60 00` |
+| `(u8 __generic *)(u8 __xdata *)0x1234`         | `34 12 00 00` |
+| `(u8 __generic *)(const u8 __code *)0x8000`    | `00 80 80 00` |
+| `(u8 __generic *)(u8 __data *)0`               | `00 00 00 00` |
+| `(u8 __generic *)(u8 __data *)0x30 + 3`        | `33 00 40 00` |
