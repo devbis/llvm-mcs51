@@ -1800,8 +1800,10 @@ int64_t __ashrdi3(int64_t Value, int Count) {
   return (int64_t)Result.Value;
 }
 
-static uint64_t udivmod64(uint64_t Numerator, uint64_t Denominator,
-                          uint64_t *Remainder) {
+// Return the quotient or the remainder. A remainder out-pointer would name a
+// caller stack local, which a plain (XDATA) pointer cannot address.
+static inline __attribute__((always_inline)) uint64_t
+udivmod64(uint64_t Numerator, uint64_t Denominator, unsigned ReturnRemainder) {
   uint64_t Quotient = 0;
   uint64_t Rest = 0;
 
@@ -1827,19 +1829,15 @@ static uint64_t udivmod64(uint64_t Numerator, uint64_t Denominator,
     }
   }
 
-  *Remainder = Rest;
-  return Numerator;
+  return ReturnRemainder ? Rest : Numerator;
 }
 
 uint64_t __udivdi3(uint64_t Numerator, uint64_t Denominator) {
-  uint64_t Remainder;
-  return udivmod64(Numerator, Denominator, &Remainder);
+  return udivmod64(Numerator, Denominator, 0);
 }
 
 uint64_t __umoddi3(uint64_t Numerator, uint64_t Denominator) {
-  uint64_t Remainder;
-  (void)udivmod64(Numerator, Denominator, &Remainder);
-  return Remainder;
+  return udivmod64(Numerator, Denominator, 1);
 }
 
 int64_t __divdi3(int64_t Numerator, int64_t Denominator) {
@@ -1852,9 +1850,7 @@ int64_t __divdi3(int64_t Numerator, int64_t Denominator) {
     UnsignedNumerator = 0 - UnsignedNumerator;
   if (DenominatorNegative)
     UnsignedDenominator = 0 - UnsignedDenominator;
-  uint64_t Remainder;
-  uint64_t Quotient = udivmod64(UnsignedNumerator, UnsignedDenominator,
-                                &Remainder);
+  uint64_t Quotient = udivmod64(UnsignedNumerator, UnsignedDenominator, 0);
   if (NumeratorNegative ^ DenominatorNegative)
     Quotient = 0 - Quotient;
   return (int64_t)Quotient;
@@ -1869,8 +1865,7 @@ int64_t __moddi3(int64_t Numerator, int64_t Denominator) {
     UnsignedNumerator = 0 - UnsignedNumerator;
   if (DenominatorNegative)
     UnsignedDenominator = 0 - UnsignedDenominator;
-  uint64_t Remainder;
-  (void)udivmod64(UnsignedNumerator, UnsignedDenominator, &Remainder);
+  uint64_t Remainder = udivmod64(UnsignedNumerator, UnsignedDenominator, 1);
   if (NumeratorNegative)
     Remainder = 0 - Remainder;
   return (int64_t)Remainder;
@@ -1930,8 +1925,10 @@ int16_t __modhi3(int16_t Numerator, int16_t Denominator) {
   return Numerator < 0 ? (int16_t)(0 - Remainder) : (int16_t)Remainder;
 }
 
-static uint32_t
-udivmod32(uint32_t Numerator, uint32_t Denominator, uint32_t *Remainder) {
+// Return the quotient or the remainder. A remainder out-pointer would name a
+// caller stack local, which a plain (XDATA) pointer cannot address.
+static inline __attribute__((always_inline)) uint32_t
+udivmod32(uint32_t Numerator, uint32_t Denominator, unsigned ReturnRemainder) {
   uint32_t Quotient = 0;
   uint32_t Rest = 0;
   uint16_t DenominatorHigh = (uint16_t)(Denominator >> 16);
@@ -1951,19 +1948,15 @@ udivmod32(uint32_t Numerator, uint32_t Denominator, uint32_t *Remainder) {
     }
   }
 
-  *Remainder = Rest;
-  return Numerator;
+  return ReturnRemainder ? Rest : Numerator;
 }
 
 uint32_t __udivsi3(uint32_t Numerator, uint32_t Denominator) {
-  uint32_t Remainder;
-  return udivmod32(Numerator, Denominator, &Remainder);
+  return udivmod32(Numerator, Denominator, 0);
 }
 
 uint32_t __umodsi3(uint32_t Numerator, uint32_t Denominator) {
-  uint32_t Remainder;
-  (void)udivmod32(Numerator, Denominator, &Remainder);
-  return Remainder;
+  return udivmod32(Numerator, Denominator, 1);
 }
 
 int32_t __divsi3(int32_t Numerator, int32_t Denominator) {
@@ -1975,9 +1968,7 @@ int32_t __divsi3(int32_t Numerator, int32_t Denominator) {
     UnsignedNumerator = 0 - UnsignedNumerator;
   if (DenominatorNegative)
     UnsignedDenominator = 0 - UnsignedDenominator;
-  uint32_t Remainder;
-  uint32_t Quotient = udivmod32(UnsignedNumerator, UnsignedDenominator,
-                                &Remainder);
+  uint32_t Quotient = udivmod32(UnsignedNumerator, UnsignedDenominator, 0);
   if (NumeratorNegative ^ DenominatorNegative)
     Quotient = 0 - Quotient;
   return (int32_t)Quotient;
@@ -1992,8 +1983,7 @@ int32_t __modsi3(int32_t Numerator, int32_t Denominator) {
     UnsignedNumerator = 0 - UnsignedNumerator;
   if (DenominatorNegative)
     UnsignedDenominator = 0 - UnsignedDenominator;
-  uint32_t Remainder;
-  (void)udivmod32(UnsignedNumerator, UnsignedDenominator, &Remainder);
+  uint32_t Remainder = udivmod32(UnsignedNumerator, UnsignedDenominator, 1);
   if (NumeratorNegative)
     Remainder = 0 - Remainder;
   return (int32_t)Remainder;
