@@ -20,6 +20,9 @@ public:
   bool eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
                            unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
+  /// Stack arguments are pushed one by one inside the call sequence. Only the
+  /// forward walk accumulates MCS51InstrInfo::getSPAdjust per instruction.
+  bool eliminateFrameIndicesBackwards() const override { return false; }
   Register getFrameRegister(const MachineFunction &MF) const override;
   const TargetRegisterClass *getPointerRegClass(unsigned Kind = 0) const override;
 };

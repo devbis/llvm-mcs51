@@ -1,0 +1,91 @@
+# RUN: llc -mtriple=mcs51 -run-pass=prolog-epilog %s -o - | FileCheck %s
+
+# Stack arguments are pushed one byte at a time inside the call sequence. A
+# frame address materialized between two pushes must see only the bytes pushed
+# so far; the call frame pseudos themselves move nothing. The frame object e
+# lives at SP+0 when no argument byte has been pushed.
+
+# CHECK-LABEL: name: caller
+# CHECK: $r2 = MOV_RN_A
+# CHECK: $a = MOV_A_DIRECT 129
+# CHECK-NEXT: $a = ADD_A_IMM 0,
+# CHECK-NEXT: $r1 = MOV_RN_A
+# CHECK-NEXT: $r4 = MOV_RN_A
+# CHECK: PUSH_IM $im9
+# CHECK-NEXT: PUSH_IM killed $im8
+# CHECK-NEXT: $a = MOV_A_DIRECT 129
+# CHECK-NEXT: $a = ADD_A_IMM 254,
+# CHECK-NEXT: $r1 = MOV_RN_A
+# CHECK-NEXT: $r5 = MOV_RN_A
+# CHECK: PUSH_IM killed $im9
+# CHECK-NEXT: PUSH_IM killed $im8
+# CHECK-NEXT: $a = MOV_A_DIRECT 129
+# CHECK-NEXT: $a = ADD_A_IMM 252,
+# CHECK-NEXT: $r1 = MOV_RN_A
+# CHECK-NEXT: $r6 = MOV_RN_A
+# CHECK-NEXT: LCALL @callee
+# CHECK-COUNT-4: POP_ARG_SP 129
+# CHECK-NEXT: $r3 = COPY killed $a
+# CHECK-NEXT: $a = MOV_A_DIRECT 129
+# CHECK-NEXT: $a = ADD_A_IMM 0,
+# CHECK-NEXT: $r1 = MOV_RN_A
+# CHECK-NEXT: $r7 = MOV_RN_A
+
+--- |
+  target datalayout = "e-p:16:8-p1:8:8-p2:8:8-p3:8:8-p4:16:8-p5:16:8-p6:8:8-p7:8:8-p8:32:8-A2-i1:8-i8:8-i16:8-i32:8-i64:8-f32:8-f64:8-n8:16"
+  target triple = "mcs51"
+
+  @out = global [4 x i8] zeroinitializer, align 1
+
+  declare i8 @callee(i32, i32, ptr addrspace(8))
+
+  define i8 @caller() {
+  entry:
+    %e = alloca i8, align 1, addrspace(2)
+    ret i8 0
+  }
+...
+---
+name:            caller
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+stack:
+  - { id: 0, name: e, type: default, offset: 0, size: 1, alignment: 1 }
+body:             |
+  bb.0.entry:
+    
+    dead $a = MOV_A_IMM 0
+    $r3 = MOV_RN_IMM 0
+    $r2 = FRAMEADDR8 %stack.0.e, 0, implicit-def dead $a, implicit-def dead $r1, implicit-def dead $c, implicit $sp
+    $r0 = COPY $r2
+    MOV_A_RN killed $r3, implicit-def $a
+    MOV_IND_RI_A $r0, implicit killed $a
+    ADJCALLSTACKDOWN 4, 0, implicit-def dead $sp, implicit $sp
+    dead $r4 = FRAMEADDR8 %stack.0.e, 0, implicit-def dead $a, implicit-def dead $r1, implicit-def dead $c, implicit $sp
+    $ip4 = LDI16 64
+    PUSH_IM $im9, implicit-def $sp, implicit $sp
+    PUSH_IM killed $im8, implicit-def $sp, implicit $sp
+    $r5 = FRAMEADDR8 %stack.0.e, 0, implicit-def dead $a, implicit-def dead $r1, implicit-def dead $c, implicit $sp
+    $im8 = COPY killed $r5
+    $im9 = MOV_IM_IMM 0
+    PUSH_IM killed $im9, implicit-def $sp, implicit $sp
+    PUSH_IM killed $im8, implicit-def $sp, implicit $sp
+    dead $r6 = FRAMEADDR8 %stack.0.e, 0, implicit-def dead $a, implicit-def dead $r1, implicit-def dead $c, implicit $sp
+    LCALL @callee, implicit-def $a, implicit-def dead $b, implicit-def dead $c, implicit-def dead $dptr, implicit-def $sp, implicit-def dead $r0, implicit-def dead $r1, implicit-def dead $im0, implicit-def dead $im1, implicit-def dead $im2, implicit-def dead $im3, implicit-def dead $im4, implicit-def dead $im5, implicit-def dead $im6, implicit-def dead $im7, implicit $sp
+    POP_ARG_SP 129, implicit-def $sp, implicit $sp
+    POP_ARG_SP 129, implicit-def $sp, implicit $sp
+    POP_ARG_SP 129, implicit-def $sp, implicit $sp
+    POP_ARG_SP 129, implicit-def $sp, implicit $sp
+    $r3 = COPY killed $a
+    dead $r7 = FRAMEADDR8 %stack.0.e, 0, implicit-def dead $a, implicit-def dead $r1, implicit-def dead $c, implicit $sp
+    ADJCALLSTACKUP 4, 0, implicit-def dead $sp, implicit $sp
+    $a = COPY killed $r3
+    $dptr = MOV_DPTR_IMM @out + 1
+    MOVX_DPTRA implicit killed $a, implicit $dptr
+    $r0 = COPY killed $r2
+    MOV_A_IND_RI $r0, implicit-def $a
+    $r0 = COPY killed $a
+    RET_A killed $r0
+...

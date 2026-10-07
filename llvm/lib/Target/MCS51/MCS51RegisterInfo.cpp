@@ -68,7 +68,12 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                        .getFixed();
   Offset += MI->getOperand(FIOperandNum + 1).getImm();
   // Stack arguments pushed for a call in progress move SP up, which puts the
-  // frame further below it. PEI reports that growth as a negative SPAdj.
+  // frame further below it. PEI reports that growth as a negative SPAdj,
+  // counted push by push (MCS51InstrInfo::getSPAdjust). A block entered inside
+  // a call sequence would start from the whole call frame size instead.
+  if (MBB.getCallFrameSize() != 0)
+    report_fatal_error("MCS-51 frame index in a block that starts inside a "
+                       "call sequence");
   Offset += SPAdj;
   bool UsesDirectWordTransfer = false;
   if (Offset < -256 || Offset > 255)
