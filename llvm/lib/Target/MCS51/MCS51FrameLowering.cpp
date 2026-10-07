@@ -388,22 +388,26 @@ void MCS51FrameLowering::emitEpilogue(MachineFunction &MF,
   bool PreserveA = I != MBB.end() && I->getOpcode() == MCS51::RET_A &&
                    I->getNumOperands() && I->getOperand(0).isReg() &&
                    I->getOperand(0).getReg() == MCS51::A;
+  // The frame lies above the pushed callee-saved registers, so it is
+  // released before they are popped.
+  auto Release = I;
+  while (Release != MBB.begin() &&
+         std::prev(Release)->getFlag(MachineInstr::FrameDestroy))
+    --Release;
   // The freestanding entry point returns to startup's halt loop. No caller
   // resumes with its stack, so releasing main's final frame is unnecessary.
   if (MF.getFunction().getName() != "main" ||
-      !MF.getTarget().getTargetCPU().equals_insensitive("cc2530")) {
-    // The frame lies above the pushed callee-saved registers, so it is
-    // released before they are popped.
-    auto Release = I;
-    while (Release != MBB.begin() &&
-           std::prev(Release)->getFlag(MachineInstr::FrameDestroy))
-      --Release;
+      !MF.getTarget().getTargetCPU().equals_insensitive("cc2530"))
     emitStackAdjustment(MBB, Release, TII, StackSize, /*Deallocate=*/true,
                         PreserveA);
-  }
   if (MF.getFunction().hasFnAttribute("interrupt")) {
+    // The prologue pushed the callee-saved registers before the interrupt
+    // save set, so the interrupt registers must be popped before the
+    // callee-saved restores that PEI placed directly ahead of the
+    // terminator. Popping at the terminator instead inverts the order
+    // and restores every saved slot from the wrong stack position.
     for (unsigned Address : getInterruptSaveAddresses(MF, true))
-      BuildMI(MBB, I, DebugLoc(), TII.get(MCS51::POP_DIRECT))
+      BuildMI(MBB, Release, DebugLoc(), TII.get(MCS51::POP_DIRECT))
           .addImm(Address)
           .addReg(MCS51::SP, RegState::ImplicitDefine)
           .setMIFlag(MachineInstr::FrameDestroy);
