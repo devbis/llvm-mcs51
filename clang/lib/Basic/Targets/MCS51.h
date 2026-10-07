@@ -47,6 +47,27 @@ public:
                     "f32:8-f64:8-n8:16");
   }
 
+  // Must agree with the pN entries of the data layout above: DATA, IDATA,
+  // PDATA, BIT and SFR pointers are 8 bits, generic pointers 32 bits (address,
+  // memory-space tag and a zero padding byte), all others 16 bits.
+  uint64_t getPointerWidthV(LangAS AS) const override {
+    if (!isTargetAddressSpace(AS))
+      return PointerWidth;
+    switch (toTargetAddressSpace(AS)) {
+    case 1: // __data
+    case 2: // __idata
+    case 3: // __pdata
+    case 6: // __bit
+    case 7: // __sfr
+      return 8;
+    case 8: // __generic
+      return 32;
+    default:
+      return PointerWidth;
+    }
+  }
+  uint64_t getPointerAlignV(LangAS) const override { return PointerAlign; }
+
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 
