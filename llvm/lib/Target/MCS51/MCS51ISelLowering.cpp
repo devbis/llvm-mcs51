@@ -234,12 +234,18 @@ static void emitDptrAddress(MachineBasicBlock &MBB,
                             const TargetInstrInfo &TII,
                             const TargetRegisterInfo &TRI,
                             MCS51MachineFunctionInfo &FuncInfo, Register Base,
-                            uint16_t Offset) {
+                            uint16_t Offset,
+                            const MachineInstr *Expanding) {
   // Find the nearest instruction that set DPTR and count the increments
   // after it. Scanning continues into the only predecessor of the first block
   // of an IR block whose single IR predecessor is that block.
+  // At may lie past pseudos that are not expanded yet (the address of a word
+  // add is built in front of its memory user). Their later expansion can
+  // insert DPTR loads or increments that this scan cannot count, so such a
+  // pseudo leaves the DPTR value unknown.
   int64_t Increments = 0;
   const MachineInstr *Def = nullptr;
+  bool Unknown = false;
   MachineBasicBlock *Block = &MBB;
   auto It = At;
   for (unsigned Hops = 0; Hops != 4; ++Hops) {
@@ -251,13 +257,17 @@ static void emitDptrAddress(MachineBasicBlock &MBB,
         ++Increments;
         continue;
       }
+      if (&*It != Expanding && It->usesCustomInsertionHook()) {
+        Unknown = true;
+        break;
+      }
       if (It->isCall() || It->modifiesRegister(MCS51::DPTR, &TRI) ||
           It->isInlineAsm()) {
         Def = &*It;
         break;
       }
     }
-    if (Def)
+    if (Def || Unknown)
       break;
     const BasicBlock *IRBlock = Block->getBasicBlock();
     if (Block->pred_size() != 1 || !IRBlock)
@@ -2143,7 +2153,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
   auto SetDptr = [&](Register Base, uint16_t Offset) {
     emitDptrAddress(*MBB, MII, DL, TII, *STI.getRegisterInfo(),
                     *MBB->getParent()->getInfo<MCS51MachineFunctionInfo>(),
-                    Base, Offset);
+                    Base, Offset, &MI);
   };
   auto getAccumulatorCopy = [&](Register Reg) -> MachineInstr * {
     if (!Reg.isVirtual())
@@ -3076,7 +3086,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         if (HasImm) {
           emitDptrAddress(*MBB, At, DL, TII, *STI.getRegisterInfo(),
                           *MBB->getParent()->getInfo<MCS51MachineFunctionInfo>(),
-                          LHS, Imm);
+                          LHS, Imm, &MI);
         } else {
           Half(MCS51::DPL, MCS51::sub_lo, false, RHS, MCS51::sub_lo);
           Half(MCS51::DPH, MCS51::sub_hi, true, RHS, MCS51::sub_hi);
