@@ -149,6 +149,10 @@ bool DwarfExpression::addMachineReg(const TargetRegisterInfo &TRI,
   unsigned CurPos = 0;
   // The size of the register in bits.
   const TargetRegisterClass *RC = TRI.getMinimalPhysRegClass(MachineReg);
+  // A register outside every class (e.g. a dedicated stack pointer with no
+  // DWARF number) cannot be described by sub-register pieces.
+  if (!RC)
+    return false;
   unsigned RegSize = TRI.getRegSizeInBits(*RC);
   // Keep track of the bits in the register we already emitted, so we
   // can avoid emitting redundant aliasing subregs. Because this is
