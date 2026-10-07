@@ -1,5 +1,6 @@
 #include "MCS51MCTargetDesc.h"
 #include "MCS51FixupKinds.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -28,9 +29,26 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     report_fatal_error("unsupported MCS-51 machine operand encoding");
   }
 
+  // Byte index of operand OpNo within the instruction encoding, derived from
+  // the TableGen field layout rather than a per-opcode list.
+  unsigned getOperandByteOffset(const MCInst &MI, unsigned OpNo,
+                                const MCSubtargetInfo &STI) const {
+    MCInst Probe = MI;
+    SmallVector<MCFixup, 4> Scratch;
+    Probe.getOperand(OpNo) = MCOperand::createImm(0);
+    uint64_t Zero = getBinaryCodeForInstr(Probe, Scratch, STI);
+    Probe.getOperand(OpNo) = MCOperand::createImm(0xff);
+    uint64_t Ones = getBinaryCodeForInstr(Probe, Scratch, STI);
+    uint64_t Diff = Zero ^ Ones;
+    unsigned Shift = Diff ? llvm::countr_zero(Diff) : 64;
+    if (Shift % 8 != 0 || Diff != (uint64_t(0xff) << Shift))
+      report_fatal_error("MCS-51 8-bit operand is not byte aligned");
+    return Shift / 8;
+  }
+
   uint32_t getImm8OpValue(const MCInst &MI, unsigned OpNo,
                           SmallVectorImpl<MCFixup> &Fixups,
-                          const MCSubtargetInfo &) const {
+                          const MCSubtargetInfo &STI) const {
     const MCOperand &Op = MI.getOperand(OpNo);
     if (Op.isImm())
       return static_cast<uint8_t>(Op.getImm());
@@ -38,12 +56,9 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     if (Op.isExpr() && Op.getExpr()->evaluateAsAbsolute(Value))
       return static_cast<uint8_t>(Value);
     if (Op.isExpr()) {
-      // This operand method is shared by byte fields at different positions.
-      // MCS51DirectImmInst has its immediate in byte 2; every other use is
-      // the second byte of a two-byte instruction.
-      unsigned Offset = MI.getOpcode() == MCS51::MOV_DIRECT_IMM && OpNo == 1
-                            ? 2
-                            : 1;
+      // Shared by byte fields at different positions, e.g. the destination
+      // of MOV direct,direct is byte 2 while its source is byte 1.
+      unsigned Offset = getOperandByteOffset(MI, OpNo, STI);
       Fixups.push_back(
           MCFixup::create(Offset, Op.getExpr(), MCS51::fixup_8));
       return 0;
