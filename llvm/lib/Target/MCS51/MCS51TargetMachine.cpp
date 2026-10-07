@@ -43,12 +43,17 @@ using namespace llvm;
 
 // True when MI writes the SP SFR (0x81) through a direct-address form.
 static bool writesSPDirect(const MachineInstr &MI) {
+  // Every direct destination in these instruction forms is operand 0. For
+  // MOV_DIRECT_DIRECT this is the destination, not the source; for DJNZ and
+  // XCH the direct operand is read and written by the instruction.
   switch (MI.getOpcode()) {
   case MCS51::MOV_DIRECT_A:
   case MCS51::MOV_DIRECT_DIRECT:
   case MCS51::MOV_DIRECT_IM:
   case MCS51::MOV_DIRECT_IMM:
   case MCS51::MOV_DIRECT_RN:
+  case MCS51::MOV_DIRECT_R0_IND:
+  case MCS51::MOV_DIRECT_R1_IND:
   case MCS51::ANL_DIRECT_A:
   case MCS51::ANL_DIRECT_IMM:
   case MCS51::ORL_DIRECT_A:
@@ -58,10 +63,10 @@ static bool writesSPDirect(const MachineInstr &MI) {
   case MCS51::INC_DIRECT:
   case MCS51::DEC_DIRECT:
   case MCS51::POP_DIRECT:
-    for (const MachineOperand &MO : MI.operands())
-      if (MO.isImm())
-        return MO.getImm() == 0x81;
-    return false;
+  case MCS51::DJNZ_DIRECT:
+  case MCS51::XCH_A_DIRECT:
+    return MI.getNumOperands() != 0 && MI.getOperand(0).isImm() &&
+           MI.getOperand(0).getImm() == 0x81;
   default:
     return false;
   }
