@@ -1332,9 +1332,11 @@ SDValue MCS51TargetLowering::LowerFormalArguments(
     }
     if (!VA.isRegLoc())
       report_fatal_error("unsupported MCS-51 argument location");
-    const TargetRegisterClass *RC = VA.getLocVT() == MVT::i16
-                                        ? &MCS51::MCS51GPR16RegClass
-                                        : &MCS51::MCS51GPR8RegClass;
+    const TargetRegisterClass *RC =
+        VA.getLocVT() == MVT::i16 ? &MCS51::MCS51GPR16RegClass
+        : MCS51::MCS51Imag8RegClass.contains(VA.getLocReg())
+            ? &MCS51::MCS51Imag8RegClass
+            : &MCS51::MCS51GPR8RegClass;
     Register LiveIn = MF.addLiveIn(VA.getLocReg(),
                                    RC);
     SDValue Value = DAG.getCopyFromReg(Chain, DL, LiveIn, VA.getLocVT());

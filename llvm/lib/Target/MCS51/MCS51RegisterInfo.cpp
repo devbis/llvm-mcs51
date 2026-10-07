@@ -32,6 +32,21 @@ static cl::opt<CSRSet> CSRMode(
 
 bool llvm::mcs51UseCallRegMask() { return CSRMode != CSRSet::Default; }
 
+// Experimental: pass further words in IP4-IP7 and further bytes in IM16-IM23
+// instead of on the hardware stack. Like -mcs51-csr it changes the C ABI, and
+// it requires those registers to be caller-saved.
+static cl::opt<bool> WideArgs(
+    "mcs51-wide-args", cl::Hidden, cl::init(false),
+    cl::desc("pass arguments 5-8 (words) and 5-12 (bytes) in caller-saved "
+             "imaginary registers; requires -mcs51-csr=r or none"));
+
+bool llvm::mcs51WideArgs() {
+  if (WideArgs && CSRMode == CSRSet::Default)
+    report_fatal_error("-mcs51-wide-args requires -mcs51-csr=r or none: "
+                       "IM8-IM23 are callee-saved by default");
+  return WideArgs;
+}
+
 const MCPhysReg *
 MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
   if (CSRMode == CSRSet::R)

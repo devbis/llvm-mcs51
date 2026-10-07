@@ -6,6 +6,13 @@ def CC_MCS51 : CallingConv<[
   // Words travel in imaginary pairs, low word of a wider value first.
   CCIfType<[i16], CCAssignToReg<[IP0, IP1, IP2, IP3]>>,
   CCIfType<[i8], CCAssignToReg<[R7, R6, R5, R4]>>,
+  // Experimental -mcs51-wide-args: continue in caller-saved imaginary
+  // registers before using the hardware stack.
+  CCIf<"llvm::mcs51WideArgs()",
+       CCIfType<[i16], CCAssignToReg<[IP4, IP5, IP6, IP7]>>>,
+  CCIf<"llvm::mcs51WideArgs()",
+       CCIfType<[i8], CCAssignToReg<[IM16, IM17, IM18, IM19,
+                                     IM20, IM21, IM22, IM23]>>>,
   CCIfType<[i8], CCAssignToStack<1, 1>>,
   CCIfType<[i16], CCAssignToStack<2, 1>>
 ]>;
