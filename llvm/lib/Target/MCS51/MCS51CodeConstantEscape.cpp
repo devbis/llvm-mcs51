@@ -34,6 +34,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/Local.h"
 
@@ -51,14 +52,14 @@ public:
 
   bool runOnModule(Module &M) override {
     SmallVector<ConstantExpr *, 8> ConstantCasts;
-    SmallVector<AddrSpaceCastInst *, 8> InstructionCasts;
+    SmallVector<WeakTrackingVH, 8> InstructionCasts;
     collectConstantCasts(M, ConstantCasts);
     for (Function &F : M)
       for (Instruction &I : instructions(F))
         if (auto *Cast = dyn_cast<AddrSpaceCastInst>(&I))
           if (needsDataCopy(Cast->getSrcAddressSpace(),
                             Cast->getDestAddressSpace(), &F, M))
-            InstructionCasts.push_back(Cast);
+            InstructionCasts.emplace_back(Cast);
 
     if (ConstantCasts.empty() && InstructionCasts.empty())
       return false;
@@ -66,8 +67,9 @@ public:
     bool Changed = false;
     for (ConstantExpr *Cast : ConstantCasts)
       Changed |= rewriteCodeLoads(Cast, Cast->getOperand(0));
-    for (AddrSpaceCastInst *Cast : InstructionCasts)
-      Changed |= rewriteCodeLoads(Cast, Cast->getPointerOperand());
+    for (WeakTrackingVH &CastHandle : InstructionCasts)
+      if (auto *Cast = dyn_cast_or_null<AddrSpaceCastInst>(CastHandle))
+        Changed |= rewriteCodeLoads(Cast, Cast->getPointerOperand());
 
     const DataLayout &DL = M.getDataLayout();
     for (ConstantExpr *Cast : ConstantCasts) {
@@ -92,7 +94,10 @@ public:
       Changed = true;
     }
 
-    for (AddrSpaceCastInst *Cast : InstructionCasts) {
+    for (WeakTrackingVH &CastHandle : InstructionCasts) {
+      auto *Cast = dyn_cast_or_null<AddrSpaceCastInst>(CastHandle);
+      if (!Cast)
+        continue;
       if (Cast->use_empty()) {
         Cast->eraseFromParent();
         continue;
@@ -183,7 +188,7 @@ private:
       return false;
 
     DenseMap<Value *, Value *> CodeAddresses;
-    SmallVector<Value *, 8> OldPointers;
+    SmallVector<WeakTrackingVH, 8> OldPointers;
     for (LoadInst *Load : Loads) {
       Value *Pointer = Load->getPointerOperand();
       Value *CodePointer =
@@ -196,10 +201,11 @@ private:
       CodeLoad->setDebugLoc(Load->getDebugLoc());
       Load->replaceAllUsesWith(CodeLoad);
       Load->eraseFromParent();
-      OldPointers.push_back(Pointer);
+      OldPointers.emplace_back(Pointer);
     }
-    for (Value *Pointer : OldPointers)
-      RecursivelyDeleteTriviallyDeadInstructions(Pointer);
+    for (WeakTrackingVH &PointerHandle : OldPointers)
+      if (Value *Pointer = PointerHandle)
+        RecursivelyDeleteTriviallyDeadInstructions(Pointer);
     return true;
   }
 
