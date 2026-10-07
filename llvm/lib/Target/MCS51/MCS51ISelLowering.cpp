@@ -2475,7 +2475,17 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     Register Target = MI.getOperand(0).getReg();
     BuildMI(*MBB, MI, DL, TII.get(TargetOpcode::COPY), MCS51::DPTR)
         .addReg(Target);
-    BuildMI(*MBB, MI, DL, TII.get(MCS51::ICALL));
+    auto Call = BuildMI(*MBB, MI, DL, TII.get(MCS51::ICALL));
+    // Preserve the argument-register uses and result-register defs attached
+    // by LowerCall; dropping them lets the argument copies be deleted.
+    for (const MachineOperand &MO : llvm::drop_begin(MI.operands())) {
+      if (MO.isRegMask())
+        Call.addRegMask(MO.getRegMask());
+      else if (MO.isReg() && MO.isImplicit() &&
+               !MI.getDesc().hasImplicitUseOfPhysReg(MO.getReg()) &&
+               !MI.getDesc().hasImplicitDefOfPhysReg(MO.getReg()))
+        Call.add(MO);
+    }
     MI.eraseFromParent();
     return MBB;
   }
