@@ -2416,27 +2416,45 @@ public:
   MCS51CallFramePropagation() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
-    DenseMap<const MachineBasicBlock *, int64_t> Entry;
+    // Per block entry: the call frame size and the argument bytes pushed so
+    // far. Arguments are pushed one byte at a time, so a block that custom
+    // inserters create between two pushes starts with only part of the frame.
+    DenseMap<const MachineBasicBlock *, std::pair<int64_t, int>> Entry;
     SmallVector<MachineBasicBlock *, 16> Work;
-    Entry[&MF.front()] = 0;
+    const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+    auto *FuncInfo = MF.getInfo<MCS51MachineFunctionInfo>();
+    Entry[&MF.front()] = {0, 0};
     Work.push_back(&MF.front());
     while (!Work.empty()) {
       MachineBasicBlock *MBB = Work.pop_back_val();
-      int64_t Size = Entry[MBB];
+      auto [Size, Pushed] = Entry[MBB];
       for (const MachineInstr &MI : *MBB) {
-        if (MI.getOpcode() == MCS51::ADJCALLSTACKDOWN)
+        if (MI.getOpcode() == MCS51::ADJCALLSTACKDOWN) {
           Size = MI.getOperand(0).getImm();
-        else if (MI.getOpcode() == MCS51::ADJCALLSTACKUP)
+          Pushed = 0;
+        } else if (MI.getOpcode() == MCS51::ADJCALLSTACKUP) {
           Size = 0;
+          Pushed = 0;
+        } else if (Size && Pushed >= 0) {
+          Pushed -= TII.getSPAdjust(MI);
+        }
       }
-      for (MachineBasicBlock *Succ : MBB->successors())
-        if (Entry.try_emplace(Succ, Size).second)
+      for (MachineBasicBlock *Succ : MBB->successors()) {
+        auto [It, Inserted] = Entry.try_emplace(Succ, Size, Pushed);
+        if (Inserted)
           Work.push_back(Succ);
+        else if (It->second.second != Pushed && It->second.second >= 0) {
+          It->second.second = -1;
+          Work.push_back(Succ);
+        }
+      }
     }
     bool Changed = false;
     for (MachineBasicBlock &MBB : MF) {
       auto It = Entry.find(&MBB);
-      unsigned Size = It == Entry.end() ? 0 : It->second;
+      unsigned Size = It == Entry.end() ? 0 : It->second.first;
+      if (Size)
+        FuncInfo->setArgBytesAtEntry(&MBB, It->second.second);
       if (MBB.getCallFrameSize() != Size) {
         MBB.setCallFrameSize(Size);
         Changed = true;
