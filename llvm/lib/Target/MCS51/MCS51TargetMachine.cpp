@@ -41,6 +41,32 @@
 
 using namespace llvm;
 
+// True when MI writes the SP SFR (0x81) through a direct-address form.
+static bool writesSPDirect(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case MCS51::MOV_DIRECT_A:
+  case MCS51::MOV_DIRECT_DIRECT:
+  case MCS51::MOV_DIRECT_IM:
+  case MCS51::MOV_DIRECT_IMM:
+  case MCS51::MOV_DIRECT_RN:
+  case MCS51::ANL_DIRECT_A:
+  case MCS51::ANL_DIRECT_IMM:
+  case MCS51::ORL_DIRECT_A:
+  case MCS51::ORL_DIRECT_IMM:
+  case MCS51::XRL_DIRECT_A:
+  case MCS51::XRL_DIRECT_IMM:
+  case MCS51::INC_DIRECT:
+  case MCS51::DEC_DIRECT:
+  case MCS51::POP_DIRECT:
+    for (const MachineOperand &MO : MI.operands())
+      if (MO.isImm())
+        return MO.getImm() == 0x81;
+    return false;
+  default:
+    return false;
+  }
+}
+
 namespace {
 class MCS51RemoveOptNone final : public FunctionPass {
 public:
@@ -1555,10 +1581,10 @@ public:
           continue;
         }
 
-        if (I->isCall() || I->getOpcode() == MCS51::PUSH_DIRECT ||
-            I->getOpcode() == MCS51::PUSH_PSW ||
-            I->getOpcode() == MCS51::POP_DIRECT ||
-            I->getOpcode() == MCS51::POP_PSW) {
+        // Any SP movement (pushes of direct, imaginary or PSW bytes, argument
+        // pops, INC/DEC SP) changes the base the cached offsets refer to.
+        if (I->isCall() || TII->getSPAdjust(*I) != 0 ||
+            I->modifiesRegister(MCS51::SP, TRI) || writesSPDirect(*I)) {
           R0StackOffset.reset();
           R1StackOffset.reset();
         } else {
