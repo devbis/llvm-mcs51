@@ -8,11 +8,15 @@
 
 #include "MCS51.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/ReplaceConstant.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -34,7 +38,8 @@ public:
   MCS51GenericPointerLowering() : FunctionPass(ID) {}
 
   bool runOnFunction(Function &F) override {
-    bool Changed = false;
+    bool Changed = expandNestedGenericCasts(F);
+    Changed |= rejectUnsupportedGenericCasts(F);
     SmallVector<MemCpyInst *, 4> DynamicCopies;
     SmallVector<MemMoveInst *, 4> DynamicMoves;
     for (Instruction &I : instructions(F)) {
@@ -91,6 +96,8 @@ public:
       Changed = true;
     }
 
+    // Folding in the rewrites above can wrap constant casts again.
+    Changed |= expandNestedGenericCasts(F);
     for (Instruction &I : instructions(F)) {
       for (Use &Operand : I.operands()) {
         auto *Cast = dyn_cast<AddrSpaceCastOperator>(Operand.get());
@@ -145,6 +152,39 @@ public:
 
   StringRef getPassName() const override {
     return "MCS-51 generic pointer lowering";
+  }
+
+  // Static initializers cannot hold the tagged 32-bit value as one data
+  // relocation, so store each converted address as its own 1- or 2-byte
+  // relocated field followed by the constant tag bytes.
+  bool doInitialization(Module &M) override {
+    bool Changed = false;
+    const DataLayout &DL = M.getDataLayout();
+    for (GlobalVariable &GV : make_early_inc_range(M.globals())) {
+      if (!GV.hasInitializer())
+        continue;
+      Constant *Init = GV.getInitializer();
+      Constant *NewInit = encodeGenericInitializer(M, Init);
+      if (NewInit == Init)
+        continue;
+      if (DL.getTypeAllocSize(NewInit->getType()) !=
+          DL.getTypeAllocSize(Init->getType())) {
+        M.getContext().emitError("cannot encode generic pointers in the "
+                                 "initializer of '" + GV.getName() + "'");
+        continue;
+      }
+      auto *NewGV = new GlobalVariable(
+          M, NewInit->getType(), GV.isConstant(), GV.getLinkage(), NewInit,
+          "", &GV, GV.getThreadLocalMode(), GV.getAddressSpace(),
+          GV.isExternallyInitialized());
+      NewGV->copyAttributesFrom(&GV);
+      NewGV->setAlignment(DL.getPreferredAlign(&GV));
+      NewGV->takeName(&GV);
+      GV.replaceAllUsesWith(NewGV);
+      GV.eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
   }
 
 private:
@@ -215,6 +255,172 @@ private:
     while (Pointer && Seen.insert(Pointer).second) {
       if (isa<AllocaInst>(Pointer))
         return true;
+      if (auto *GEP = dyn_cast<GEPOperator>(Pointer)) {
+        Pointer = GEP->getPointerOperand();
+        continue;
+      }
+      if (auto *Cast = dyn_cast<BitCastOperator>(Pointer)) {
+        Pointer = Cast->getOperand(0);
+        continue;
+      }
+      if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Pointer)) {
+        Pointer = Cast->getPointerOperand();
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  // The lowering below rewrites generic casts that are instructions or direct
+  // constant operands. Turn constant expressions that contain such a cast
+  // (for example a constant GEP on a converted address) into instructions so
+  // the cast becomes a direct operand.
+  static bool expandNestedGenericCasts(Function &F) {
+    SmallSetVector<Constant *, 8> Casts;
+    SmallPtrSet<const Constant *, 16> Visited;
+    SmallVector<const ConstantExpr *, 16> Work;
+    for (Instruction &I : instructions(F))
+      for (Value *Op : I.operands())
+        if (auto *CE = dyn_cast<ConstantExpr>(Op))
+          for (Value *Inner : CE->operands())
+            if (auto *InnerCE = dyn_cast<ConstantExpr>(Inner))
+              if (Visited.insert(InnerCE).second)
+                Work.push_back(InnerCE);
+    while (!Work.empty()) {
+      const ConstantExpr *CE = Work.pop_back_val();
+      if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(CE))
+        if (Cast->getSrcAddressSpace() == MCS51::Generic ||
+            Cast->getDestAddressSpace() == MCS51::Generic)
+          Casts.insert(const_cast<ConstantExpr *>(CE));
+      for (Value *Inner : CE->operands())
+        if (auto *InnerCE = dyn_cast<ConstantExpr>(Inner))
+          if (Visited.insert(InnerCE).second)
+            Work.push_back(InnerCE);
+    }
+    if (Casts.empty())
+      return false;
+    return convertUsersOfConstantsToInstructions(
+        Casts.getArrayRef(), &F, /*RemoveDeadConstants=*/false);
+  }
+
+  // If C is a constant generic pointer formed by converting an address of
+  // another space (possibly with a constant offset applied in the generic
+  // space), return that address and its space.
+  static Constant *getGenericSourceAddress(const DataLayout &DL, Constant *C,
+                                           unsigned &SrcAS) {
+    auto *CE = dyn_cast<ConstantExpr>(C);
+    if (!CE)
+      return nullptr;
+    if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(CE)) {
+      if (Cast->getDestAddressSpace() != MCS51::Generic ||
+          Cast->getSrcAddressSpace() == MCS51::Generic)
+        return nullptr;
+      SrcAS = Cast->getSrcAddressSpace();
+      return CE->getOperand(0);
+    }
+    auto *GEP = dyn_cast<GEPOperator>(CE);
+    if (!GEP || GEP->getPointerAddressSpace() != MCS51::Generic)
+      return nullptr;
+    APInt Offset(DL.getIndexSizeInBits(MCS51::Generic), 0);
+    if (!GEP->accumulateConstantOffset(DL, Offset))
+      return nullptr;
+    Constant *Base = getGenericSourceAddress(
+        DL, cast<Constant>(GEP->getPointerOperand()), SrcAS);
+    if (!Base)
+      return nullptr;
+    LLVMContext &Ctx = C->getContext();
+    Type *IndexTy = IntegerType::get(Ctx, DL.getIndexSizeInBits(SrcAS));
+    return ConstantExpr::getGetElementPtr(
+        Type::getInt8Ty(Ctx), Base,
+        ConstantInt::get(IndexTy, Offset.getSExtValue()));
+  }
+
+  static Constant *encodeGenericInitializer(Module &M, Constant *C) {
+    const DataLayout &DL = M.getDataLayout();
+    LLVMContext &Ctx = M.getContext();
+    Type *I8 = Type::getInt8Ty(Ctx);
+    unsigned SrcAS;
+    if (Constant *Address = getGenericSourceAddress(DL, C, SrcAS)) {
+      if (!isIndirectlyAddressable(SrcAS)) {
+        Ctx.emitError("conversion of a BIT or SFR address to a generic "
+                      "pointer in a static initializer");
+        return Constant::getNullValue(C->getType());
+      }
+      SmallVector<Constant *, 4> Fields{Address};
+      if (DL.getPointerSizeInBits(SrcAS) == 8)
+        Fields.push_back(ConstantInt::get(I8, 0));
+      // Constant addresses fold, so only a literal zero address is null here;
+      // it keeps the all-zero generic null encoding.
+      bool IsNull = Address->isNullValue();
+      Fields.push_back(
+          ConstantInt::get(I8, IsNull ? 0 : getGenericTag(SrcAS, Address)));
+      Fields.push_back(ConstantInt::get(I8, 0));
+      return ConstantStruct::getAnon(Ctx, Fields, /*Packed=*/true);
+    }
+    if (!isa<ConstantAggregate>(C))
+      return C;
+    SmallVector<Constant *, 8> Elements;
+    bool Changed = false;
+    for (Value *Op : C->operands()) {
+      Constant *Element = cast<Constant>(Op);
+      Constant *NewElement = encodeGenericInitializer(M, Element);
+      Changed |= NewElement != Element;
+      Elements.push_back(NewElement);
+    }
+    if (!Changed)
+      return C;
+    return ConstantStruct::getAnon(Ctx, Elements, /*Packed=*/true);
+  }
+
+  static bool isIndirectlyAddressable(unsigned AddressSpace) {
+    return AddressSpace != MCS51::Bit && AddressSpace != MCS51::SFR;
+  }
+
+  // BIT and SFR objects have no indirectly addressable location, so they have
+  // no generic pointer representation. Diagnose such conversions and replace
+  // them with poison so code generation can continue to report other errors.
+  static bool rejectUnsupportedGenericCasts(Function &F) {
+    auto IsUnsupported = [](const Value *V) {
+      auto *Cast = dyn_cast<AddrSpaceCastOperator>(V);
+      return Cast && Cast->getDestAddressSpace() == MCS51::Generic &&
+             !isIndirectlyAddressable(Cast->getSrcAddressSpace());
+    };
+    bool Changed = false;
+    for (Instruction &I : make_early_inc_range(instructions(F))) {
+      if (IsUnsupported(&I)) {
+        F.getContext().diagnose(DiagnosticInfoUnsupported(
+            F, "conversion of a BIT or SFR address to a generic pointer",
+            I.getDebugLoc()));
+        I.replaceAllUsesWith(PoisonValue::get(I.getType()));
+        I.eraseFromParent();
+        Changed = true;
+        continue;
+      }
+      for (Use &U : I.operands()) {
+        if (!isa<ConstantExpr>(U.get()) || !IsUnsupported(U.get()))
+          continue;
+        F.getContext().diagnose(DiagnosticInfoUnsupported(
+            F, "conversion of a BIT or SFR address to a generic pointer",
+            I.getDebugLoc()));
+        U.set(PoisonValue::get(U->getType()));
+        Changed = true;
+      }
+    }
+    return Changed;
+  }
+
+  // Whether Pointer is the address of (or into) a global or stack object, so
+  // it cannot be the null pointer of its address space.
+  static bool isObjectAddress(Value *Pointer) {
+    SmallPtrSet<Value *, 8> Seen;
+    while (Pointer && Seen.insert(Pointer).second) {
+      if (isa<AllocaInst>(Pointer))
+        return true;
+      if (auto *GO = dyn_cast<GlobalObject>(Pointer))
+        return !GO->hasExternalWeakLinkage();
+      if (auto *Arg = dyn_cast<Argument>(Pointer))
+        return Arg->hasNonNullAttr(/*AllowUndefOrPoison=*/false);
       if (auto *GEP = dyn_cast<GEPOperator>(Pointer)) {
         Pointer = GEP->getPointerOperand();
         continue;
@@ -700,7 +906,17 @@ private:
       Value *Bits = B.CreateZExt(Address, I32, "gptr.cast.bits");
       uint8_t Tag = getGenericTag(SrcAS, Pointer);
       if (Tag) {
-        Value *TagBits = B.CreateShl(B.getInt32(Tag), 16, "gptr.cast.tag");
+        Value *TagBits = B.getInt32(uint32_t(Tag) << 16);
+        // The null pointer of every address space is address 0 and the
+        // generic null pointer is all-zero, so a null source keeps a zero tag,
+        // as constant folding of the conversion already does. Object
+        // addresses are never null and need no check.
+        if (!isObjectAddress(Pointer)) {
+          Value *IsNull =
+              B.CreateICmpEQ(Address, B.getInt16(0), "gptr.cast.isnull");
+          TagBits = B.CreateSelect(IsNull, B.getInt32(0), TagBits,
+                                   "gptr.cast.tag");
+        }
         Bits = B.CreateOr(Bits, TagBits, "gptr.cast.encoded");
       }
       Result = B.CreateIntToPtr(Bits, DestTy, "gptr.cast");
