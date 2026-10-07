@@ -7,6 +7,12 @@ defm : RemapAllTargetPseudoPointerOperands<MCS51PTR>;
 
 def MCS51InstrInfo : InstrInfo;
 
+// Linker relaxation is opt-in: when enabled, MOV DPTR,#imm16 fixups are
+// emitted with R_8051_RELAX markers and references into the section keep
+// their symbols so the linker can shrink the code safely.
+def FeatureRelax : SubtargetFeature<"relax", "EnableLinkerRelax", "true",
+                                    "Enable linker relaxation">;
+
 // CC2530 uses the classic MCS-51 instruction core. Keep it as an explicit
 // CPU choice so drivers and future device-specific scheduling/feature data
 // have a stable target name.
