@@ -30,6 +30,7 @@ public:
                             Register VReg, unsigned SubReg,
                             MachineInstr::MIFlag Flags) const override;
   bool expandPostRAPseudo(MachineInstr &MI) const override;
+  int getSPAdjust(const MachineInstr &MI) const override;
   bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
                      SmallVectorImpl<MachineOperand> &Cond,
