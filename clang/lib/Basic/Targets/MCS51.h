@@ -24,6 +24,7 @@ public:
     TLSSupported = false;
     PointerWidth = 16;
     PointerAlign = 8;
+    ShortAlign = 8;
     IntWidth = 16;
     IntAlign = 8;
     LongWidth = 32;
