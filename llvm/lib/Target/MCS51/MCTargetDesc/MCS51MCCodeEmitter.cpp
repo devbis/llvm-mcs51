@@ -98,7 +98,7 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
 
   uint32_t getImm16BEOpValue(const MCInst &MI, unsigned OpNo,
                              SmallVectorImpl<MCFixup> &Fixups,
-                             const MCSubtargetInfo &) const {
+                             const MCSubtargetInfo &STI) const {
     const MCOperand &Op = MI.getOperand(OpNo);
     if (Op.isImm()) {
       uint16_t Value = static_cast<uint16_t>(Op.getImm());
@@ -110,11 +110,14 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
       return static_cast<uint16_t>((Absolute << 8) | (Absolute >> 8));
     }
     if (Op.isExpr()) {
-      unsigned Kind = MI.getOpcode() == MCS51::MOV_DPTR_IMM
-                          ? MCS51::fixup_dptr16
-                          : MCS51::fixup_16_be;
-      Fixups.push_back(
-          MCFixup::create(1, Op.getExpr(), Kind));
+      bool IsDPTRLoad = MI.getOpcode() == MCS51::MOV_DPTR_IMM;
+      MCFixup Fixup = MCFixup::create(
+          1, Op.getExpr(), IsDPTRLoad ? MCS51::fixup_dptr16 : MCS51::fixup_16_be);
+      // With +relax the linker may shrink a MOV DPTR,#sym+1 that follows
+      // MOV DPTR,#sym to INC DPTR.
+      if (IsDPTRLoad && STI.hasFeature(MCS51::FeatureRelax))
+        Fixup.setLinkerRelaxable();
+      Fixups.push_back(Fixup);
       return 0;
     }
     report_fatal_error("unsupported MCS-51 big-endian address operand");

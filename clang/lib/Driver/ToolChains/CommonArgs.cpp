@@ -865,6 +865,10 @@ void tools::getTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   switch (Triple.getArch()) {
   default:
     break;
+  case llvm::Triple::mcs51:
+    if (Args.hasFlag(options::OPT_mrelax, options::OPT_mno_relax, true))
+      Features.push_back("+relax");
+    break;
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
   case llvm::Triple::mips64:
