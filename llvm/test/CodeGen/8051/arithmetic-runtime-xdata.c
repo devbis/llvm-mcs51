@@ -41,6 +41,7 @@ void main(void) {
 // CHECK-NEXT: xrl a, r0
 // CHECK: mov dptr, #result
 // CHECK-NEXT: movx @dptr, a
+// CHECK-NEXT: pop 2
 // CHECK-NEXT: ret
 
 // Linking knows the final XDATA layout. Adjacent global addresses reuse DPTR
@@ -49,4 +50,4 @@ void main(void) {
 // LINK-COUNT-3: inc dptr
 // LINK-NOT: mov dptr, #1
 // LINKSYM: Name: main
-// LINKSYM: Size: 39
+// LINKSYM: Size: 43

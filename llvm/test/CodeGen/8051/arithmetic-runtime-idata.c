@@ -33,6 +33,7 @@ void main(void) {
 // CHECK-NEXT: xrl a, r2
 // CHECK-NEXT: inc r0
 // CHECK-NEXT: mov @r0, a
+// CHECK-NEXT: pop 2
 // CHECK-NEXT: ret
 
 // The R0 increments rely on these same-section offsets.
