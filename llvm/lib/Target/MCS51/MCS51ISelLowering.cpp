@@ -4414,9 +4414,10 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
         .addImm(0xF0)
         .addReg(RHS);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::DIV_AB));
+    // The remainder must be read through B's modeled use, or DIV AB looks
+    // dead and is deleted.
     if (MI.getOpcode() == MCS51::UREM8rr)
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
-          .addImm(0xF0);
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_B), MCS51::A);
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
         .addReg(MCS51::A);
     MI.eraseFromParent();
