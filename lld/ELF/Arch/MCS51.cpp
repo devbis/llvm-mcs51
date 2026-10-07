@@ -112,6 +112,8 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   switch (type) {
   case R_8051_NONE:
     return R_NONE;
+  case R_8051_RELAX:
+    return R_RELAX_HINT;
   case R_8051_8:
   case R_8051_LO8:
   case R_8051_HI8:
@@ -130,6 +132,8 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
 }
 
 bool MCS51::relaxOnce(int Pass) const {
+  if (!ctx.arg.relax)
+    return false;
   SmallVector<InputSection *, 0> Storage;
   bool Changed = false;
   for (OutputSection *OSec : ctx.outputSections) {
@@ -138,10 +142,9 @@ bool MCS51::relaxOnce(int Pass) const {
     for (InputSection *Sec : getInputSections(*OSec, Storage)) {
       MutableArrayRef<Relocation> Relocs = Sec->relocs();
       if (Pass == 0) {
-        bool HasDPTRReloc = llvm::any_of(Relocs, [](const Relocation &R) {
-          return R.type == R_8051_DPTR16;
-        });
-        if (!HasDPTRReloc)
+        bool HasRelaxable = llvm::any_of(
+            Relocs, [](const Relocation &R) { return R.type == R_8051_RELAX; });
+        if (!HasRelaxable)
           continue;
         Sec->relaxAux = make<RelaxAux>();
         Sec->relaxAux->relocDeltas =
@@ -210,7 +213,14 @@ bool MCS51::relaxOnce(int Pass) const {
                   OpcodeOffset - (PreviousRelocOffset + 2));
               Safe = preservesDPTR(Between);
             }
-            if (Safe && CanTrackDPTR && IsDataAddress && !PreviousIsFunction &&
+            // Only an assembler that kept every reference spanning this
+            // instruction symbolic marks it relaxable; deleting bytes under
+            // an assembler-resolved branch would retarget that branch.
+            bool Relaxable = I + 1 < Relocs.size() &&
+                             Relocs[I + 1].type == R_8051_RELAX &&
+                             Relocs[I + 1].offset == R.offset;
+            if (Safe && Relaxable && CanTrackDPTR && IsDataAddress &&
+                !PreviousIsFunction &&
                 Target == static_cast<uint16_t>(PreviousTarget + 1)) {
               Remove = 2;
             }
@@ -286,6 +296,8 @@ void MCS51::finalizeRelax(int Passes) const {
         New[Dst++] = 0xa3; // INC DPTR replaces MOV DPTR,#symbol.
         Src = R.offset + 2;
         R.type = R_8051_NONE;
+        if (I + 1 < Relocs.size() && Relocs[I + 1].type == R_8051_RELAX)
+          Relocs[I + 1].type = R_8051_NONE;
       }
       std::memcpy(New + Dst, Old.data() + Src, Old.size() - Src);
       Sec->content_ = New;
@@ -305,6 +317,7 @@ void MCS51::finalizeRelax(int Passes) const {
 void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   switch (rel.type) {
   case R_8051_NONE:
+  case R_8051_RELAX:
     break;
   case R_8051_8:
     checkUInt(ctx, loc, val, 8, rel);
