@@ -1,6 +1,7 @@
 #include "MCS51RegisterInfo.h"
 #include "MCS51.h"
 #include "MCS51InstrInfo.h"
+#include "MCS51MachineFunctionInfo.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -58,13 +59,34 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
                        .getFixed();
   Offset += MI->getOperand(FIOperandNum + 1).getImm();
   // Stack arguments pushed for a call in progress move SP up, which puts the
-  // frame further below it. PEI reports that growth as a negative SPAdj,
-  // counted push by push (MCS51InstrInfo::getSPAdjust). A block entered inside
-  // a call sequence would start from the whole call frame size instead.
-  if (MBB.getCallFrameSize() != 0)
-    report_fatal_error("MCS-51 frame index in a block that starts inside a "
-                       "call sequence");
-  Offset += SPAdj;
+  // frame further below it. PEI counts those pushes while it sees the call
+  // sequence setup pseudo in the same block. If a CFG split put this block
+  // inside the sequence, PEI starts from the full logical call frame size,
+  // even though only some argument bytes may have been pushed on entry. Use
+  // the exact per-block state recorded by MCS51CallFramePropagation and walk
+  // this block's remaining call-sequence instructions to recover the actual
+  // SP adjustment at this frame index.
+  int64_t FrameSPAdj = SPAdj;
+  const auto *CallState =
+      MF.getInfo<MCS51MachineFunctionInfo>()->getCallFrameStateAtEntry(&MBB);
+  if (MBB.getCallFrameSize() != 0 && (!CallState || !CallState->Active))
+    report_fatal_error("missing MCS-51 call frame state for basic block");
+  if (CallState && CallState->Active) {
+    FrameSPAdj = CallState->SPAdj;
+    bool InCallSequence = true;
+    for (auto It = MBB.begin(); It != MI; ++It) {
+      if (It->getOpcode() == MCS51::ADJCALLSTACKDOWN) {
+        InCallSequence = true;
+        FrameSPAdj = 0;
+      } else if (It->getOpcode() == MCS51::ADJCALLSTACKUP) {
+        InCallSequence = false;
+        FrameSPAdj = 0;
+      } else if (InCallSequence) {
+        FrameSPAdj += TII.getSPAdjust(*It);
+      }
+    }
+  }
+  Offset += FrameSPAdj;
   bool UsesDirectWordTransfer = false;
   if (Offset < -256 || Offset > 255)
     report_fatal_error("MCS-51 stack frame exceeds 256-byte displacement");
