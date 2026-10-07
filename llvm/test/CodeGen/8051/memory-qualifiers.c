@@ -137,9 +137,10 @@ int main(void) {
 // CHECK-LABEL: set_ea:
 // CHECK: setb -81
 
+// short has 1-byte alignment, so pdata_word directly follows pdata_value.
 // LINK: Name: pdata_value
 // LINK-NEXT: Value: 0x0
 // LINK: Name: pdata_zero
-// LINK-NEXT: Value: 0x8
+// LINK-NEXT: Value: 0x7
 // LINK: Name: pdata_word
-// LINK-NEXT: Value: 0x2
+// LINK-NEXT: Value: 0x1
