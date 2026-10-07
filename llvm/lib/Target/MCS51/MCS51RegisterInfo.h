@@ -28,6 +28,8 @@ public:
   /// Stack arguments are pushed one by one inside the call sequence. Only the
   /// forward walk accumulates MCS51InstrInfo::getSPAdjust per instruction.
   bool eliminateFrameIndicesBackwards() const override { return false; }
+  bool eliminateStaticFrameIndex(MachineBasicBlock::iterator MI,
+                                 unsigned FIOperandNum) const;
   Register getFrameRegister(const MachineFunction &MF) const override;
   const TargetRegisterClass *getPointerRegClass(unsigned Kind = 0) const override;
 };

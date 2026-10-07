@@ -10,8 +10,106 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include "llvm/ADT/Twine.h"
+#include "MCS51.h"
+#include "MCS51MachineFunctionInfo.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+
+static cl::opt<bool> MCS51StaticFrames(
+    "mcs51-static-frames", cl::Hidden, cl::init(false),
+    cl::desc("move eligible fixed-size frame objects of non-reentrant "
+             "functions into a static PDATA frame (experimental)"));
+
+bool MCS51FrameLowering::isStaticFrameAccess(unsigned Opcode) {
+  switch (Opcode) {
+  case MCS51::SPILL_LOAD8:
+  case MCS51::SPILL_STORE8:
+  case MCS51::SPILL_LOAD_IM:
+  case MCS51::SPILL_STORE_IM:
+  case MCS51::SPILL_LOAD_INDIRECT8:
+  case MCS51::SPILL_STORE_INDIRECT8:
+  case MCS51::SPILL_LOAD16:
+  case MCS51::SPILL_STORE16:
+  case MCS51::SPILL_LOAD_A8:
+  case MCS51::SPILL_STORE_A8:
+  case MCS51::LOAD_FRAME8:
+  case MCS51::STORE_FRAME8:
+  case MCS51::LOAD_FRAME16:
+  case MCS51::STORE_FRAME16:
+    return true;
+  default:
+    // Address materialisation (FRAMEADDR*) and indexed accesses produce an
+    // IDATA pointer to the object; such objects stay on the hardware stack.
+    return false;
+  }
+}
+
+// A static frame is valid only while the function cannot have two live
+// activations. The compiler rejects what it can see locally; whole-program
+// recursion, interrupt reachability and indirect calls are checked by the
+// link-time frame allocator, which fails closed.
+void MCS51FrameLowering::processFunctionBeforeFrameFinalized(
+    MachineFunction &MF, RegScavenger *) const {
+  if (!MCS51StaticFrames)
+    return;
+  const Function &F = MF.getFunction();
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  if (F.hasFnAttribute("interrupt") || F.isVarArg() ||
+      F.hasFnAttribute(Attribute::Naked) ||
+      F.hasFnAttribute(Attribute::ReturnsTwice) ||
+      F.callsFunctionThatReturnsTwice() || MFI.hasVarSizedObjects() ||
+      F.getName() == "main")
+    return;
+  for (const BasicBlock &BB : F)
+    for (const Instruction &I : BB)
+      if (const auto *CB = dyn_cast<CallBase>(&I))
+        if (CB->getCalledFunction() == &F)
+          return;
+
+  int Begin = 0, End = MFI.getObjectIndexEnd();
+  if (End <= Begin)
+    return;
+  SmallVector<bool, 32> Eligible(End, true);
+  for (const MachineBasicBlock &MBB : MF)
+    for (const MachineInstr &MI : MBB)
+      for (const MachineOperand &MO : MI.operands())
+        if (MO.isFI() && MO.getIndex() >= 0 &&
+            (MI.isDebugInstr() || !isStaticFrameAccess(MI.getOpcode())))
+          Eligible[MO.getIndex()] = false;
+
+  auto *FI = MF.getInfo<MCS51MachineFunctionInfo>();
+  unsigned Size = 0;
+  SmallVector<std::pair<int, unsigned>, 16> Moved;
+  for (int I = Begin; I < End; ++I) {
+    if (!Eligible[I] || MFI.isDeadObjectIndex(I) ||
+        MFI.isVariableSizedObjectIndex(I) || MFI.getObjectSize(I) <= 0 ||
+        MFI.getObjectSize(I) > 255 - Size)
+      continue;
+    Moved.push_back({I, Size});
+    Size += MFI.getObjectSize(I);
+  }
+  if (Moved.empty())
+    return;
+  Module &M = *const_cast<Module *>(F.getParent());
+  auto *Ty = ArrayType::get(Type::getInt8Ty(M.getContext()), Size);
+  auto *GV = new GlobalVariable(
+      M, Ty, false, GlobalValue::InternalLinkage, Constant::getNullValue(Ty),
+      "__sframe." + F.getName(), nullptr, GlobalValue::NotThreadLocal,
+      MCS51::PData);
+  GV->setSection((".mcs51.pdata.bss.sframe." + F.getName()).str());
+  GV->setAlignment(Align(1));
+  GV->setDSOLocal(true);
+  FI->setStaticFrame(GV);
+  for (auto [Index, Offset] : Moved) {
+    FI->setStaticFrameOffset(Index, Offset);
+    MFI.RemoveStackObject(Index);
+  }
+}
 
 MCS51FrameLowering::MCS51FrameLowering()
     : TargetFrameLowering(StackGrowsUp, Align(1), 1) {}
