@@ -106,3 +106,10 @@ Examples (bytes in memory order):
 | `(u8 __generic *)(const u8 __code *)0x8000`    | `00 80 80 00` |
 | `(u8 __generic *)(u8 __data *)0`               | `00 00 00 00` |
 | `(u8 __generic *)(u8 __data *)0x30 + 3`        | `33 00 40 00` |
+
+# Runtime simulator checks
+
+`verify-div64-runtime.sh` builds the MCS-51 runtime and a flat test image,
+then runs it in uCsim. It checks unsigned 64-bit quotient and remainder
+helpers and signed 64-bit remainder against fixed expected values. Set
+`MCS51_SIM` to the `s51` executable when it is not on `PATH`.
