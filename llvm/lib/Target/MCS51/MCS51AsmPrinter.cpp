@@ -38,23 +38,7 @@ static bool isMCS51IndirectCallOpcode(unsigned Opcode) {
 
 static bool isAutoBankFunction(const Function &F, StringRef CPU,
                                bool FunctionSections) {
-  if (F.hasSection() && isMCS51AutoBankSection(F.getSection()))
-    return true;
-  // Runtime helpers and startup support must stay in common flash so calls
-  // from any bank can reach them directly without another bank-call thunk.
-  if (F.getName().starts_with("__mcs51_"))
-    return false;
-  if (!CPU.equals_insensitive("cc2530") || !FunctionSections ||
-      F.getName() == "main" || F.hasFnAttribute("interrupt"))
-    return false;
-  if (!F.hasSection())
-    return true;
-  StringRef Section = F.getSection();
-  return Section.starts_with(".text.") && Section != ".text.main" &&
-         !Section.starts_with(".text.main.") &&
-         !Section.starts_with(".text.startup") &&
-         !Section.starts_with(".text.bankthunks.") &&
-         !Section.starts_with(".text.autobankthunks.");
+  return isMCS51AutoBankFunction(F, CPU, FunctionSections);
 }
 
 class MCS51AsmPrinter final : public AsmPrinter {
