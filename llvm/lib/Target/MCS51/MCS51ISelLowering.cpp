@@ -2155,6 +2155,17 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                     *MBB->getParent()->getInfo<MCS51MachineFunctionInfo>(),
                     Base, Offset, &MI);
   };
+  // Before register allocation A can also be redefined through a virtual
+  // register whose class may be assigned A, e.g. MCS51AReg.
+  auto clobbersAccumulator = [&](const MachineInstr &I) -> bool {
+    if (I.modifiesRegister(MCS51::A, STI.getRegisterInfo()))
+      return true;
+    for (const MachineOperand &MO : I.operands())
+      if (MO.isReg() && MO.isDef() && MO.getReg().isVirtual() &&
+          MRI.getRegClass(MO.getReg())->contains(MCS51::A))
+        return true;
+    return false;
+  };
   auto getAccumulatorCopy = [&](Register Reg) -> MachineInstr * {
     if (!Reg.isVirtual())
       return nullptr;
@@ -2180,7 +2191,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
     if (!Def)
       return false;
     for (auto I = std::next(Def->getIterator()); I != MII; ++I)
-      if (I->modifiesRegister(MCS51::A, STI.getRegisterInfo()))
+      if (clobbersAccumulator(*I))
         return false;
     return true;
   };
@@ -4367,7 +4378,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                                                     I != MII;
              ++I)
           LHSAlreadyInA =
-              !I->modifiesRegister(MCS51::A, STI.getRegisterInfo());
+              !clobbersAccumulator(*I);
       }
     }
     if (LHSAlreadyInA)
@@ -4446,7 +4457,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                                                   I != MII;
            ++I)
         LHSAlreadyInA =
-            !I->modifiesRegister(MCS51::A, STI.getRegisterInfo());
+            !clobbersAccumulator(*I);
     }
   }
 
@@ -4513,7 +4524,7 @@ MachineBasicBlock *MCS51TargetLowering::EmitInstrWithCustomInserter(
                    LHSAlreadyInA && I != MII; ++I)
                 if (&*I != Load && &*I != Copy)
                   LHSAlreadyInA =
-                      !I->modifiesRegister(MCS51::A, STI.getRegisterInfo());
+                      !clobbersAccumulator(*I);
             }
             if (LHSAlreadyInA && LHSCopy &&
                 MRI.hasOneNonDBGUse(LHS))
