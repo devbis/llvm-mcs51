@@ -2393,14 +2393,9 @@ public:
           MI->eraseFromParent();
         }
         Changed = true;
-        // Continue after the group; the next candidate search starts at I,
-        // which was erased, so restart from the block's current position.
-        I = MBB.begin();
-        for (auto K = MBB.begin(); K != MBB.end(); ++K) {
-          I = K;
-          if (&*K == &*J)
-            break;
-        }
+        // I was erased with the group; resume after J, the instruction that
+        // ended the scan (J may be the block end, which must not be
+        // dereferenced).
         if (J == MBB.end())
           break;
         I = J;
