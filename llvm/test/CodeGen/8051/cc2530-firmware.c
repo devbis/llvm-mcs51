@@ -44,7 +44,7 @@ int main(void) {
 // DIS: mov 129, #127
 // DIS: mov dptr, #0
 // DIS-NEXT: mov r6, #0
-// DIS-NEXT: mov r7, #32
+// DIS-NEXT: mov r7, #31
 // DIS-NEXT: clr a
 // DIS-NEXT: movx @dptr, a
 // DIS-NEXT: inc dptr
@@ -54,6 +54,9 @@ int main(void) {
 // DIS-NEXT: mov a, r6
 // DIS-NEXT: orl a, r7
 // DIS-NEXT: jnz
+// DIS-NEXT: mov r0, #255
+// DIS-NEXT: mov @r0, #0
+// DIS-NEXT: djnz r0,
 // DIS: lcall
 // DIS: movc a, @a+dptr
 // DIS-LABEL: <main>:

@@ -13,10 +13,11 @@ __mcs51_start:
   /* Keep the hardware stack above register banks and bit-addressable RAM. */
   mov sp, #127
 
-  /* Clear the full 8 KiB XDATA SRAM, including all zero-initialized globals. */
+  /* Clear XDATA SRAM 0x0000-0x1EFF. 0x1F00-0x1FFF aliases IRAM, which holds
+     this loop's own R6/R7 counters, so it is cleared separately below. */
   mov dptr, #0
   mov r6, #0
-  mov r7, #32
+  mov r7, #31
 .Lclear_xdata:
   clr a
   movx @dptr, a
@@ -28,6 +29,12 @@ __mcs51_start:
   mov a, r6
   orl a, r7
   jnz .Lclear_xdata
+
+  /* Clear IRAM 0x01-0xFF (XDATA alias 0x1F01-0x1FFF); R0 itself ends at 0. */
+  mov r0, #0xff
+.Lclear_iram:
+  mov @r0, #0
+  djnz r0, .Lclear_iram
 
   /* Bit-address-space globals use bit addresses 0 through 127. Their backing
      bytes are in the just-cleared 0x20-0x2f internal DATA window. */
