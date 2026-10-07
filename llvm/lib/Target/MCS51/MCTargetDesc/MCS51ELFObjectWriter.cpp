@@ -1,7 +1,11 @@
 #include "MCS51MCTargetDesc.h"
 #include "MCS51FixupKinds.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCValue.h"
 
 using namespace llvm;
 
@@ -12,15 +16,32 @@ public:
       : MCELFObjectTargetWriter(false, OSABI, ELF::EM_8051,
                                 /*HasRelocationAddend=*/true) {}
 
+  // The linker moves symbols, not section offsets, when it shrinks a
+  // linker-relaxable section, so references into one must name the symbol.
+  bool needsRelocateWithSymbol(const MCValue &V, unsigned) const override {
+    const MCSymbol *Sym = V.getAddSym();
+    return Sym && Sym->isInSection() && Sym->getSection().isLinkerRelaxable();
+  }
+
 protected:
-  unsigned getRelocType(const MCFixup &Fixup, const MCValue &,
+  unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
+    if (mc::isRelocation(Fixup.getKind()))
+      return Fixup.getKind();
+    if (Target.getSubSym()) {
+      reportError(Fixup.getLoc(),
+                  "MCS-51 cannot relocate a symbol difference; label "
+                  "differences across linker-relaxable code require "
+                  "-mno-relax");
+      return ELF::R_8051_NONE;
+    }
     if (IsPCRel) {
       if (Fixup.getKind() == MCS51::fixup_11)
         return ELF::R_8051_11;
       if (Fixup.getKind() == MCS51::fixup_pcrel8)
         return ELF::R_8051_PCREL8;
-      llvm_unreachable("unsupported PC-relative MCS-51 relocation");
+      reportError(Fixup.getLoc(), "unsupported PC-relative MCS-51 relocation");
+      return ELF::R_8051_NONE;
     }
     switch (Fixup.getKind()) {
     case MCS51::fixup_8:
@@ -38,7 +59,8 @@ protected:
     case MCS51::fixup_hi8:
       return ELF::R_8051_HI8;
     default:
-      llvm_unreachable("unsupported MCS-51 relocation");
+      reportError(Fixup.getLoc(), "unsupported MCS-51 relocation");
+      return ELF::R_8051_NONE;
     }
   }
 };
