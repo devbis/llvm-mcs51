@@ -213,9 +213,13 @@ public:
       CurDAG->RemoveDeadNode(N);
       return;
     }
+    // The address of a DATA, IDATA or PDATA object is a single byte. BIT and
+    // SFR objects have no indirectly addressable location and stay rejected.
     if (N->getOpcode() == ISD::GlobalAddress &&
         N->getValueType(0) == MVT::i8 &&
         (cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
+             MCS51::Data ||
+         cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
              MCS51::PData ||
          cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
              MCS51::IData)) {
