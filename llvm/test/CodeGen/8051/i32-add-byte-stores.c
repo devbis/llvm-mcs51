@@ -22,10 +22,10 @@ void main(void) {
 // The increment propagates through all four bytes. Truncated byte extracts
 // use the byte results directly, so the stores share one incrementing DPTR.
 // CHECK-LABEL: main:
-// CHECK: mov dptr, #counter
+// CHECK: mov dptr, #xdata16(counter)
 // CHECK-NOT: mov @r1, a
 // CHECK-NOT: mov a, @r1
-// CHECK: mov dptr, #bytes
+// CHECK: mov dptr, #xdata16(bytes)
 // CHECK: movx @dptr, a
 // CHECK: add a, #1
 // CHECK-COUNT-3: addc a, #0

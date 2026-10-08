@@ -14,7 +14,7 @@ declare void @sink_generic(ptr addrspace(8))
 @code_writable = addrspace(5) global [2 x i8] c"\09\0a", align 1
 
 ; CHECK-LABEL: direct_code_read:
-; CHECK: mov 50, #lo8(table)
+; CHECK: mov 50, #clo8(table)
 ; CHECK: movc a, @a+dptr
 define i8 @direct_code_read(i16 %i) {
   %p = getelementptr i8, ptr addrspace(5) @table, i16 %i
@@ -23,8 +23,8 @@ define i8 @direct_code_read(i16 %i) {
 }
 
 ; CHECK-LABEL: escaped_constant:
-; CHECK: mov 48, #lo8(table.xdata+2)
-; CHECK-NEXT: mov 49, #hi8(table.xdata+2)
+; CHECK: mov 48, #xlo8(table.xdata+2)
+; CHECK-NEXT: mov 49, #xhi8(table.xdata+2)
 ; CHECK-NEXT: lcall __mcs51_bankcall_sink
 define void @escaped_constant() {
   call void @sink(ptr addrspacecast (ptr addrspace(5) getelementptr (i8, ptr addrspace(5) @table, i16 2) to ptr))
@@ -32,8 +32,8 @@ define void @escaped_constant() {
 }
 
 ; CHECK-LABEL: escaped_variable_index:
-; CHECK: mov 50, #lo8(table.xdata)
-; CHECK-NEXT: mov 51, #hi8(table.xdata)
+; CHECK: mov 50, #xlo8(table.xdata)
+; CHECK-NEXT: mov 51, #xhi8(table.xdata)
 ; CHECK: lcall __mcs51_bankcall_sink
 define void @escaped_variable_index(i16 %i) {
   %p = getelementptr i8, ptr addrspace(5) @table, i16 %i
@@ -59,7 +59,7 @@ define i8 @read_through_instruction_cast(i16 %i) {
 
 ; Element reads through the converted address stay in CODE.
 ; CHECK-LABEL: read_through_cast:
-; CHECK: mov 50, #lo8(table)
+; CHECK: mov 50, #clo8(table)
 ; CHECK: movc a, @a+dptr
 ; CHECK-NEXT: add a, #4
 ; CHECK-NOT: movx
@@ -88,8 +88,8 @@ join:
 }
 
 ; CHECK-LABEL: generic_pointer:
-; CHECK: mov 48, #lo8(generic_only)
-; CHECK-NEXT: mov 49, #hi8(generic_only)
+; CHECK: mov 48, #clo8(generic_only)
+; CHECK-NEXT: mov 49, #chi8(generic_only)
 ; CHECK-NEXT: mov 50, #128
 ; CHECK: lcall __mcs51_bankcall_sink_generic
 define void @generic_pointer() {
@@ -113,17 +113,17 @@ define i8 @read_code_writable(i16 %i) {
   ret i8 %v
 }
 
-; CHECK: .section .rodata.table,"a",@progbits
-; CHECK: .section .rodata.generic_only,"a",@progbits
-; CHECK: .section .rodata.names,"a",@progbits
+; CHECK: .section .mcs51.code.rodata.table,"a",@progbits
+; CHECK: .section .mcs51.code.rodata.generic_only,"a",@progbits
+; CHECK: .section .mcs51.code.rodata.names,"a",@progbits
 ; CHECK-LABEL: names:
 ; CHECK-NEXT: .short key.xdata+1
-; CHECK: .section .data.xdata_constant,"aw",@progbits
-; CHECK: .section .rodata.code_writable,"a",@progbits
-; CHECK: .section .data.key.xdata,"aw",@progbits
+; CHECK: .section .mcs51.xdata.init.xdata_constant,"aw",@progbits
+; CHECK: .section .mcs51.code.rodata.code_writable,"a",@progbits
+; CHECK: .section .mcs51.xdata.init.key.xdata,"aw",@progbits
 ; CHECK: key.xdata:
 ; CHECK-NEXT: .ascii "abc"
-; CHECK: .section .data.table.xdata,"aw",@progbits
+; CHECK: .section .mcs51.xdata.init.table.xdata,"aw",@progbits
 ; CHECK: table.xdata:
 ; CHECK-NEXT: .ascii "\001\002\003\004"
 ; CHECK-NOT: generic_only.xdata

@@ -9,7 +9,7 @@
 
 ; Code still addresses the rewritten globals with their original layout.
 ; CHECK-LABEL: load_second:
-; CHECK: mov dptr, #gt+4
+; CHECK: mov dptr, #xdata16(gt+4)
 define ptr addrspace(8) @load_second() {
   %e = getelementptr [7 x ptr addrspace(8)], ptr addrspace(4) @gt, i16 0, i16 1
   %v = load ptr addrspace(8), ptr addrspace(4) %e
@@ -66,7 +66,7 @@ define ptr addrspace(8) @load_second() {
 ; CHECK-NEXT:  .size s, 6
 @s = addrspace(4) global { i8, ptr addrspace(8), i8 } { i8 7, ptr addrspace(8) addrspacecast (ptr addrspace(1) getelementptr (i8, ptr addrspace(1) @d, i8 2) to ptr addrspace(8)), i8 9 }, align 1
 
-; RELOC:      Section ({{.*}}) .rela.data {
+; RELOC:      Section ({{.*}}) .rela.mcs51.xdata.init {
 ; RELOC-NEXT:   0x0 R_8051_8 d 0x0
 ; RELOC-NEXT:   0x4 R_8051_8 i 0x1
 ; RELOC-NEXT:   0x8 R_8051_8 p 0x2

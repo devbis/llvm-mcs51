@@ -1,4 +1,5 @@
 #include "MCS51InstrInfo.h"
+#include "MCS51.h"
 #include "MCS51Subtarget.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -335,10 +336,21 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     if (Src.isGlobal() && !isa<Function>(Src.getGlobal()) &&
         Dst != MCS51::DPTR) {
       // The bytes of a variable's address are loaded directly into the pair.
-      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_SYMLO),
+      unsigned AddressSpace = Src.getGlobal()->getAddressSpace();
+      unsigned LoOpcode = MCS51::MOV_IM_SYMLO;
+      unsigned HiOpcode = MCS51::MOV_IM_SYMHI;
+      if (AddressSpace == MCS51::Code) {
+        LoOpcode = MCS51::MOV_IM_SYMLO_CODE;
+        HiOpcode = MCS51::MOV_IM_SYMHI_CODE;
+      } else if (AddressSpace == MCS51::Default ||
+                 AddressSpace == MCS51::XData) {
+        LoOpcode = MCS51::MOV_IM_SYMLO_XDATA;
+        HiOpcode = MCS51::MOV_IM_SYMHI_XDATA;
+      }
+      BuildMI(MBB, MI, DL, get(LoOpcode),
               RI.getSubReg(Dst, MCS51::sub_lo))
           .addGlobalAddress(Src.getGlobal(), Src.getOffset());
-      BuildMI(MBB, MI, DL, get(MCS51::MOV_IM_SYMHI),
+      BuildMI(MBB, MI, DL, get(HiOpcode),
               RI.getSubReg(Dst, MCS51::sub_hi))
           .addGlobalAddress(Src.getGlobal(), Src.getOffset());
       MI.eraseFromParent();
@@ -346,8 +358,17 @@ bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     }
     if (!Src.isImm()) {
       // A symbol address needs the 16-bit relocation that only MOV DPTR has.
+      unsigned Opcode = MCS51::MOV_DPTR_IMM;
+      if (Src.isGlobal() && !isa<Function>(Src.getGlobal())) {
+        unsigned AddressSpace = Src.getGlobal()->getAddressSpace();
+        if (AddressSpace == MCS51::Code)
+          Opcode = MCS51::MOV_DPTR_CODE_IMM;
+        else if (AddressSpace == MCS51::Default ||
+                 AddressSpace == MCS51::XData)
+          Opcode = MCS51::MOV_DPTR_XDATA_IMM;
+      }
       MachineInstrBuilder Load =
-          BuildMI(MBB, MI, DL, get(MCS51::MOV_DPTR_IMM), MCS51::DPTR);
+          BuildMI(MBB, MI, DL, get(Opcode), MCS51::DPTR);
       Load.add(Src);
       if (Dst != MCS51::DPTR)
         copyPhysReg(MBB, MI, DL, Dst, MCS51::DPTR, false, false, false);

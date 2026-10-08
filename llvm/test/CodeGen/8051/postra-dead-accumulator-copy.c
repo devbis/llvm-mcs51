@@ -18,7 +18,7 @@ void main(void) {
 // The byte results are consumed directly, and the four output bytes share a
 // single incrementing DPTR.
 // CHECK-LABEL: main:
-// CHECK: mov dptr, #result
+// CHECK: mov dptr, #xdata16(result)
 // CHECK: movx @dptr, a
 // CHECK: add a, #1
 // CHECK-COUNT-3: addc a, #0

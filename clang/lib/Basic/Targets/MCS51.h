@@ -72,6 +72,8 @@ public:
                         MacroBuilder &Builder) const override;
 
   std::optional<LangAS> getConstantAddressSpace() const override {
+    // Keep string literals in CODE. This hook is used for literals, while
+    // ordinary unqualified global variables use the default XDATA space.
     return getLangASFromTargetAS(5);
   }
 
