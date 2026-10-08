@@ -11,7 +11,7 @@ unsigned char read_bytes(void) {
 
 // Consecutive volatile XDATA reads can share the address in DPTR.
 // CHECK-LABEL: read_bytes:
-// CHECK: mov dptr, #bytes
+// CHECK: mov dptr, #xdata16(bytes)
 // CHECK-NEXT: movx a, @dptr
 // CHECK: inc dptr
 // CHECK: movx a, @dptr

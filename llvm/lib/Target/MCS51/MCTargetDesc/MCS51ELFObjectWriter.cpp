@@ -54,6 +54,18 @@ protected:
       return ELF::R_8051_16_BE;
     case MCS51::fixup_dptr16:
       return ELF::R_8051_DPTR16;
+    case MCS51::fixup_dptr16_xdata:
+      return ELF::R_8051_DPTR16_XDATA;
+    case MCS51::fixup_dptr16_code:
+      return ELF::R_8051_DPTR16_CODE;
+    case MCS51::fixup_lo8_xdata:
+      return ELF::R_8051_LO8_XDATA;
+    case MCS51::fixup_hi8_xdata:
+      return ELF::R_8051_HI8_XDATA;
+    case MCS51::fixup_lo8_code:
+      return ELF::R_8051_LO8_CODE;
+    case MCS51::fixup_hi8_code:
+      return ELF::R_8051_HI8_CODE;
     case MCS51::fixup_lo8:
       return ELF::R_8051_LO8;
     case MCS51::fixup_hi8:

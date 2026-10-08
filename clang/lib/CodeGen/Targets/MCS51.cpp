@@ -113,11 +113,9 @@ public:
     if (D && D->getType().getAddressSpace() != LangAS::Default)
       return D->getType().getAddressSpace();
 
-    if (D && D->getType().isConstQualified())
-      return getLangASFromTargetAS(5);
-
-    // The default MCS-51 data model places unqualified globals in XDATA.
-    // Explicit address-space-qualified variables keep their declared space.
+    // The default MCS-51 data model places unqualified globals in XDATA,
+    // regardless of const qualification. Explicitly qualified variables keep
+    // their declared space.
     return getLangASFromTargetAS(4);
   }
 

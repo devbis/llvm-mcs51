@@ -292,31 +292,31 @@ entry:
 ; CHECK: ret
 
 ; CHECK-LABEL: read_xdata_symbol:
-; CHECK: mov dptr, #xdata_byte
+; CHECK: mov dptr, #xdata16(xdata_byte)
 ; CHECK: movx a, @dptr
 ; CHECK: ret
 
 ; CHECK-LABEL: write_xdata_symbol:
-; CHECK: mov dptr, #xdata_byte
+; CHECK: mov dptr, #xdata16(xdata_byte)
 ; CHECK: movx @dptr, a
 ; CHECK: ret
 
 ; CHECK-LABEL: read_xdata_symbol_word:
-; CHECK: mov dptr, #xdata_word
+; CHECK: mov dptr, #xdata16(xdata_word)
 ; CHECK: movx a, @dptr
 ; CHECK: inc dptr
 ; CHECK: movx a, @dptr
 ; CHECK: ret
 
 ; CHECK-LABEL: write_xdata_symbol_word:
-; CHECK: mov dptr, #xdata_word
+; CHECK: mov dptr, #xdata16(xdata_word)
 ; CHECK: movx @dptr, a
 ; CHECK: inc dptr
 ; CHECK: movx @dptr, a
 ; CHECK: ret
 
 ; CHECK-LABEL: write_xdata_symbol_word_constant:
-; CHECK: mov dptr, #xdata_word
+; CHECK: mov dptr, #xdata16(xdata_word)
 ; CHECK-NEXT: mov a, #52
 ; CHECK-NEXT: movx @dptr, a
 ; CHECK-NEXT: inc dptr
@@ -351,7 +351,7 @@ entry:
 ; RELOC: R_8051_8 data_word 0x1
 ; RELOC: R_8051_8 sfr_word 0x0
 ; RELOC: R_8051_8 sfr_word 0x1
-; RELOC: R_8051_DPTR16 xdata_byte 0x0
-; RELOC: R_8051_DPTR16 xdata_byte 0x0
-; RELOC: R_8051_DPTR16 xdata_word 0x0
-; RELOC: R_8051_DPTR16 xdata_word 0x0
+; RELOC: R_8051_DPTR16_XDATA xdata_byte 0x0
+; RELOC: R_8051_DPTR16_XDATA xdata_byte 0x0
+; RELOC: R_8051_DPTR16_XDATA xdata_word 0x0
+; RELOC: R_8051_DPTR16_XDATA xdata_word 0x0

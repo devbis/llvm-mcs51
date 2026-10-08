@@ -23,7 +23,7 @@ void main(void) { result = choose_result(selector); }
 // The selected byte is carried in R0. Dead accumulator materializations of
 // the same constants must not survive on the three return edges.
 // CHECK-LABEL: main:
-// CHECK: mov dptr, #selector
+// CHECK: mov dptr, #xdata16(selector)
 // CHECK: subb a, #10
 // CHECK: mov r{{[0-7]}}, #2
 // CHECK-NOT: mov a, #2
@@ -32,6 +32,6 @@ void main(void) { result = choose_result(selector); }
 // CHECK: subb a, #4
 // CHECK: mov r{{[0-7]}}, #1
 // CHECK-NOT: mov a, #1
-// CHECK: mov dptr, #result
+// CHECK: mov dptr, #xdata16(result)
 // CHECK: mov a, r{{[0-7]}}
 // CHECK: movx @dptr, a

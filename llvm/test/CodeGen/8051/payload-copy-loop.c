@@ -26,10 +26,10 @@ void main(void) { result = copy_payload(); }
 // The XDATA cursors live in pairs of direct bytes for the whole loop: they
 // are loaded from symbols once and only stepped inside it, with no frame slots.
 // CHECK-LABEL: main:
-// CHECK: mov 48, #lo8(output)
-// CHECK: mov 49, #hi8(output)
-// CHECK: mov 50, #lo8(packet+2)
-// CHECK: mov 51, #hi8(packet+2)
+// CHECK: mov 48, #xlo8(output)
+// CHECK: mov 49, #xhi8(output)
+// CHECK: mov 50, #xlo8(packet+2)
+// CHECK: mov 51, #xhi8(packet+2)
 // CHECK-NOT: @r1
 // CHECK: mov 130, 50
 // CHECK: mov 131, 51

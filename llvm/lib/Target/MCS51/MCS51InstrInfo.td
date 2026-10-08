@@ -1548,6 +1548,40 @@ def MOV_DPTR_IMM : Instruction {
   let Inst{7-0} = 0x90;
   let Inst{23-8} = imm;
 }
+
+// These codegen-only aliases have the MOV DPTR,#imm encoding, but preserve
+// the bus used by the following absolute memory access in ELF relocations.
+let isCodeGenOnly = 1 in {
+  def MOV_DPTR_XDATA_IMM : Instruction {
+    let Namespace = "MCS51";
+    let OutOperandList = (outs MCS51PTR:$dst);
+    let InOperandList = (ins MCS51Imm16BE:$imm);
+    let AsmString = "mov dptr, #$imm";
+    let Size = 3;
+    let hasSideEffects = 0;
+    bits<1> dst;
+    let dst = 0;
+    bits<16> imm;
+    bits<24> Inst;
+    let Inst{7-0} = 0x90;
+    let Inst{23-8} = imm;
+  }
+  def MOV_DPTR_CODE_IMM : Instruction {
+    let Namespace = "MCS51";
+    let OutOperandList = (outs MCS51PTR:$dst);
+    let InOperandList = (ins MCS51Imm16BE:$imm);
+    let AsmString = "mov dptr, #$imm";
+    let Size = 3;
+    let hasSideEffects = 0;
+    bits<1> dst;
+    let dst = 0;
+    bits<16> imm;
+    bits<24> Inst;
+    let Inst{7-0} = 0x90;
+    let Inst{23-8} = imm;
+  }
+}
+
 // A 16-bit constant in DPTR or a register pair. Expanded after allocation.
 def LDI16 : Instruction {
   let Namespace = "MCS51";
@@ -2810,6 +2844,23 @@ def MOV_IM_SYMHI : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51SymHi8:$sym),
   let Inst{15-8} = dst;
   let Inst{23-16} = sym;
 }
+class MCS51AddressByteMove<Operand SymTy, string Asm>
+    : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins SymTy:$sym), Asm, 3> {
+  bits<8> dst; bits<8> sym; bits<24> Inst;
+  let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
+  let Inst{7-0} = 0x75;
+  let Inst{15-8} = dst;
+  let Inst{23-16} = sym;
+}
+def MOV_IM_SYMLO_XDATA : MCS51AddressByteMove<MCS51SymLo8,
+                                               "mov $dst, #xlo8($sym)">;
+def MOV_IM_SYMHI_XDATA : MCS51AddressByteMove<MCS51SymHi8,
+                                               "mov $dst, #xhi8($sym)">;
+def MOV_IM_SYMLO_CODE : MCS51AddressByteMove<MCS51SymLo8,
+                                             "mov $dst, #clo8($sym)">;
+def MOV_IM_SYMHI_CODE : MCS51AddressByteMove<MCS51SymHi8,
+                                             "mov $dst, #chi8($sym)">;
 def MOV_IM_IMM : MCS51ImagMove<(outs MCS51Imag8:$dst), (ins MCS51Imm8:$imm),
                                "mov $dst, #$imm", 3> {
   bits<8> dst; bits<8> imm; bits<24> Inst;

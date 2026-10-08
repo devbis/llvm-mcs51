@@ -135,13 +135,13 @@ define void @pass_generic_objects() {
 
 ; Generic pointer elements are 4 bytes apart and stored/loaded whole.
 ; CHECK-LABEL: store_generic:
-; CHECK: mov dptr, #tab+10
+; CHECK: mov dptr, #xdata16(tab+10)
 ; CHECK: mov a, 51
-; CHECK: mov dptr, #tab+8
+; CHECK: mov dptr, #xdata16(tab+8)
 ; CHECK: mov a, 48
 ; CHECK: mov a, 49
 ; CHECK-LABEL: load_generic:
-; CHECK: mov dptr, #tab+4
+; CHECK: mov dptr, #xdata16(tab+4)
 ; CHECK: mov 48, a
 ; CHECK: mov 49, a
 ; CHECK: mov 50, a
@@ -152,8 +152,8 @@ define void @pass_generic_objects() {
 ; CHECK: mov r0, #i
 ; CHECK: mov 50, #64
 ; CHECK: lcall take_g
-; CHECK: mov 48, #lo8(c)
-; CHECK-NEXT: mov 49, #hi8(c)
+; CHECK: mov 48, #clo8(c)
+; CHECK-NEXT: mov 49, #chi8(c)
 ; CHECK-NEXT: mov 50, #128
 ; CHECK-NEXT: mov 51, #0
 ; CHECK-NEXT: lcall take_g

@@ -1,6 +1,8 @@
 // RUN: clang -target mcs51 -O2 -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s
 // RUN: clang -target mcs51 -O0 -mllvm -verify-machineinstrs -S %s -o - | FileCheck %s --check-prefix=O0
-// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin %s -Wl,--no-gc-sections -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
+// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
+// RUN:   -Wl,--no-check-sections -Wl,--no-gc-sections %s -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 
 typedef struct {

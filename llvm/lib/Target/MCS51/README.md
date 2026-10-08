@@ -55,6 +55,35 @@ every pointer to exactly that many bytes. All pointers have byte alignment.
 Because DATA, IDATA and PDATA pointers are one byte wide, Clang rejects
 objects larger than 255 bytes in those spaces.
 
+# Global storage and initialized XDATA
+
+An unqualified global, including a `const` global, uses the default XDATA
+address space. `const` prevents C writes through the object's type; it does
+not move the object to CODE. Use `__code` (or `CODE`) to select CODE. String
+literals retain their historical CODE backing; when a literal is converted to
+an XDATA pointer, Clang emits an initialized XDATA copy, while direct constant
+reads use CODE. Clang emits default-space initialized globals in
+`.mcs51.xdata.init[.<name>]` and zero-initialized globals in
+`.mcs51.xdata.bss[.<name>]`. Explicit CODE objects use
+`.mcs51.code.rodata[.<name>]`. These section names retain the bus identity
+through section splitting and link-time optimization.
+
+The CC2530 linker script and the CA51F253L3 profile place initialized XDATA
+sections at XDATA run addresses with CODE load images. Their reset startup
+copies the load range to XDATA before calling `main`; the XDATA BSS range uses
+the existing clear path. LLD rejects initialized XDATA sections unless they
+are part of the startup-managed `.data` output range and the startup boundary
+symbols are defined.
+
+Compiler-generated global-address relocations carry CODE or XDATA identity.
+The assembly spelling `#xlo8(symbol)`, `#xhi8(symbol)`, `#clo8(symbol)`,
+`#chi8(symbol)`, `#xdata16(symbol)`, and `#code16(symbol)` preserves this
+metadata when generated assembly is assembled separately. LLD checks the
+relocation's space against the target input section, even when CODE and XDATA
+have the same numeric address, and reports both sections on a mismatch.
+Generic hand-written `lo8`, `hi8`, and `mov dptr, #symbol` expressions remain
+untyped; use the tagged forms when the address space is known.
+
 A generic pointer is four bytes in memory order: address low, address high,
 tag, and a zero padding byte. As an `i32` this is
 `address | tag << 16`. The tag selects the access instruction in the runtime

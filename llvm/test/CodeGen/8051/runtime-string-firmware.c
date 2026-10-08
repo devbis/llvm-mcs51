@@ -1,4 +1,6 @@
-// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin %s -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O2 -ffreestanding -fno-builtin \
+// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
+// RUN:   -Wl,--no-check-sections %s -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s --check-prefix=LINK
 // RUN: llvm-objdump -d %t.elf | FileCheck %s --check-prefix=DIS
 

@@ -24,7 +24,7 @@ int main(void) { return background(); }
 // CHECK: push 130
 // CHECK: push 131
 // CHECK-NOT: push 0
-// CHECK: mov dptr, #ticks
+// CHECK: mov dptr, #xdata16(ticks)
 // CHECK: reti
 // CHECK: .section .mcs51.vector.6
 // CHECK: ljmp dma

@@ -7,9 +7,12 @@ MEMORY {
 }
 
 SECTIONS {
-  .text 0 : { KEEP(*(.text.0start)) *(.text .text.*) *(.rodata .rodata.*) } > CODE
-  .data 0 : { *(.data .data.*) } > XRAM AT> CODE
-  .bss (NOLOAD) : { *(.bss .bss.*) *(COMMON) } > XRAM
+  .text 0 :
+  { KEEP(*(.text.0start)) *(.text .text.*) *(.rodata .rodata.*)
+    *(.mcs51.code.rodata .mcs51.code.rodata.*) } > CODE
+  .data 0 : { *(.data .data.*) *(.mcs51.xdata.init .mcs51.xdata.init.*) } > XRAM AT> CODE
+  .bss (NOLOAD) :
+  { *(.bss .bss.*) *(.mcs51.xdata.bss .mcs51.xdata.bss.*) *(COMMON) } > XRAM
   .mcs51_pdata 0 : { *(.mcs51.pdata) } > XRAM AT> CODE
   .mcs51_pdata_bss (NOLOAD) : { *(.mcs51.pdata.bss) } > XRAM
   .mcs51_data1 0x48 : { *(.mcs51.data1) } > XRAM AT> CODE
