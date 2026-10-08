@@ -11,8 +11,8 @@ extern void debug_end(void);
 static __xdata u8 tx[73];
 
 // The fifth and later byte arguments are stack-passed. Under register pressure,
-// the callee-save list can interleave R5 (added to complete the R2..R7 helper
-// group) after the IM registers. Restore helpers must still follow the actual
+// the callee-save list can interleave R4/R5 (added to complete the R2..R7
+// helper group) after the IM registers. Restore helpers must follow the actual
 // order in which the grouped save helpers pushed their values.
 void mixed_groups(u8 seq, u8 flags, u8 status, u8 cmd, u8 type, u8 len,
                   const __xdata u8 *payload) {

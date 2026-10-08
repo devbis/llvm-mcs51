@@ -61,6 +61,36 @@ static void getCSRHelperCounts(const TargetRegisterInfo *TRI,
   }
 }
 
+struct CSRSaveAction {
+  int Group;
+  MCRegister Reg;
+};
+
+// Return the stack operations emitted by spillCalleeSavedRegisters, in order.
+// A grouped helper saves its whole register prefix at the first occurrence of
+// any member. The CSI list need not keep a group contiguous: the target's
+// assignCalleeSavedSpillSlots can append registers added to round up a prefix.
+static SmallVector<CSRSaveAction, 16>
+getCSRSaveActions(const TargetRegisterInfo *TRI,
+                  ArrayRef<CalleeSavedInfo> CSI,
+                  const unsigned (&Counts)[NumCSRGroups]) {
+  SmallVector<CSRSaveAction, 16> Actions;
+  bool Called[NumCSRGroups] = {};
+  for (const CalleeSavedInfo &CS : CSI) {
+    unsigned Index;
+    int Group = getCSRGroup(TRI, CS.getReg(), Index);
+    if (Group >= 0 && Counts[Group]) {
+      if (Called[Group])
+        continue;
+      Called[Group] = true;
+      Actions.push_back({Group, MCRegister()});
+      continue;
+    }
+    Actions.push_back({-1, CS.getReg()});
+  }
+  return Actions;
+}
+
 bool MCS51FrameLowering::assignCalleeSavedSpillSlots(
     MachineFunction &MF, const TargetRegisterInfo *TRI,
     std::vector<CalleeSavedInfo> &CSI) const {
@@ -105,17 +135,14 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   unsigned Counts[NumCSRGroups];
   getCSRHelperCounts(TRI, CSI, Counts);
-  bool Called[NumCSRGroups] = {};
-  for (const CalleeSavedInfo &CS : CSI) {
-    Register Reg = CS.getReg();
-    unsigned Direct = TRI->getEncodingValue(Reg);
-    MBB.addLiveIn(Reg);
-    unsigned Index;
-    int Group = getCSRGroup(TRI, Reg, Index);
-    if (Group >= 0 && Counts[Group]) {
-      if (Called[Group])
-        continue;
-      Called[Group] = true;
+  for (const CalleeSavedInfo &CS : CSI)
+    MBB.addLiveIn(CS.getReg());
+
+  SmallVector<CSRSaveAction, 16> Actions =
+      getCSRSaveActions(TRI, CSI, Counts);
+  for (const CSRSaveAction &Action : Actions) {
+    if (Action.Group >= 0) {
+      int Group = Action.Group;
       auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::CSR_SAVE))
                      .addImm(Group)
                      .addImm(Counts[Group]);
@@ -124,6 +151,9 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
       MIB.setMIFlag(MachineInstr::FrameSetup);
       continue;
     }
+
+    Register Reg = Action.Reg;
+    unsigned Direct = TRI->getEncodingValue(Reg);
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::PUSH_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::Implicit)
@@ -140,16 +170,11 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
   const TargetInstrInfo &TII = *MBB.getParent()->getSubtarget().getInstrInfo();
   unsigned Counts[NumCSRGroups];
   getCSRHelperCounts(TRI, CSI, Counts);
-  bool Called[NumCSRGroups] = {};
-  for (CalleeSavedInfo &CS : llvm::reverse(CSI)) {
-    Register Reg = CS.getReg();
-    unsigned Direct = TRI->getEncodingValue(Reg);
-    unsigned Index;
-    int Group = getCSRGroup(TRI, Reg, Index);
-    if (Group >= 0 && Counts[Group]) {
-      if (Called[Group])
-        continue;
-      Called[Group] = true;
+  SmallVector<CSRSaveAction, 16> Actions =
+      getCSRSaveActions(TRI, CSI, Counts);
+  for (const CSRSaveAction &Action : llvm::reverse(Actions)) {
+    if (Action.Group >= 0) {
+      int Group = Action.Group;
       auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::CSR_RESTORE))
                      .addImm(Group)
                      .addImm(Counts[Group]);
@@ -158,6 +183,8 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
       MIB.setMIFlag(MachineInstr::FrameDestroy);
       continue;
     }
+    Register Reg = Action.Reg;
+    unsigned Direct = TRI->getEncodingValue(Reg);
     BuildMI(MBB, MI, DebugLoc(), TII.get(MCS51::POP_DIRECT))
         .addImm(Direct)
         .addReg(Reg, RegState::ImplicitDefine)
