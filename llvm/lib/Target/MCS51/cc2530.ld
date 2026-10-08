@@ -57,6 +57,7 @@ SECTIONS
     *(.mcs51.common .mcs51.common.*)
     *(.text .text.*)
     *(.rodata .rodata.*)
+    *(.mcs51.code.rodata .mcs51.code.rodata.*)
   } > CODE
 
   /* PDATA uses an 8-bit offset in the XDATA page selected by MPAGE. Startup
@@ -114,10 +115,16 @@ SECTIONS
   {
     __mcs51_data_start = .;
     *(.data .data.*)
+    *(.mcs51.xdata.init .mcs51.xdata.init.*)
     __mcs51_data_end = .;
   } > XRAM AT> CODE
   __mcs51_data_load = LOADADDR(.data);
-  .bss (NOLOAD) : { *(.bss .bss.*) *(COMMON) } > XRAM
+  .bss (NOLOAD) :
+  {
+    *(.bss .bss.*)
+    *(.mcs51.xdata.bss .mcs51.xdata.bss.*)
+    *(COMMON)
+  } > XRAM
 
   /* Address-space 1 and 2 globals occupy the CPU DATA alias of XRAM. */
   .mcs51_data1 __cc2530_static_data_start :

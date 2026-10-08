@@ -3736,7 +3736,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     bool IsCode = MI.getOpcode() == MCS51::LOADCODE16 ||
                   MI.getOpcode() == MCS51::LOADCODEABS16;
     if (MI.getOpcode() == MCS51::LOADCODEABS16)
-      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+      BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_CODE_IMM), MCS51::DPTR)
           .add(MI.getOperand(1));
     else if (MI.getOperand(1).getReg() != MCS51::DPTR)
       SetDptr(MI.getOperand(1).getReg(), 0);
@@ -3791,7 +3791,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   }
   if (MI.getOpcode() == MCS51::LOADXABS8) {
     Register Dst = MI.getOperand(0).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_XDATA_IMM), MCS51::DPTR)
         .add(MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), Dst)
@@ -3802,7 +3802,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   if (MI.getOpcode() == MCS51::LOADXABS16) {
     Register Dst = MI.getOperand(0).getReg();
     MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_XDATA_IMM), MCS51::DPTR)
         .add(MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVX_ADPTR));
     Register Lo = saveAToImag(*MBB, MII, DL, TII, MRI);
@@ -3833,7 +3833,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     Register Src = MI.getOperand(1).getReg();
     MachineInstr *Def = nullptr;
     bool SrcAlreadyInA = valueRemainsInAccumulator(Src, Def);
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_XDATA_IMM), MCS51::DPTR)
         .add(MI.getOperand(0));
     if (SrcAlreadyInA)
       Def->eraseFromParent();
@@ -3847,7 +3847,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::STOREXABS8_IMM) {
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_XDATA_IMM), MCS51::DPTR)
         .add(MI.getOperand(0));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
         .add(MI.getOperand(1));
@@ -3857,7 +3857,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREXABS16_IMM) {
     uint16_t Value = static_cast<uint16_t>(MI.getOperand(1).getImm());
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_XDATA_IMM), MCS51::DPTR)
         .add(MI.getOperand(0));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_IMM), MCS51::A)
         .addImm(Value & 0xff);
@@ -3871,7 +3871,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   }
   if (MI.getOpcode() == MCS51::STOREXABS16) {
     Register Src = MI.getOperand(1).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_XDATA_IMM), MCS51::DPTR)
         .add(MI.getOperand(0));
     BuildMI(*MBB, MII, DL, TII.get(TargetOpcode::COPY), MCS51::A)
         .addReg(Src, RegState{}, MCS51::sub_lo);
@@ -3913,7 +3913,7 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   }
   if (MI.getOpcode() == MCS51::LOADCODEABS8) {
     Register Dst = MI.getOperand(0).getReg();
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_IMM), MCS51::DPTR)
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_DPTR_CODE_IMM), MCS51::DPTR)
         .add(MI.getOperand(1));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOVC_ADPTR));

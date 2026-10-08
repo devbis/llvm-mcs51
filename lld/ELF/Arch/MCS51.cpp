@@ -34,6 +34,51 @@ static unsigned getMCS51CodeBank(const OutputSection *section) {
   return bank;
 }
 
+enum class MCS51AddressSpace { Unknown, Code, XData };
+
+static MCS51AddressSpace getMCS51AddressSpace(StringRef name) {
+  if (name.starts_with(".mcs51.code.") || name == ".rodata" ||
+      name.starts_with(".rodata.") || name.starts_with(".bank"))
+    return MCS51AddressSpace::Code;
+  if (name.starts_with(".mcs51.xdata.") || name == ".data" ||
+      name.starts_with(".data.") || name == ".bss" ||
+      name.starts_with(".bss."))
+    return MCS51AddressSpace::XData;
+  return MCS51AddressSpace::Unknown;
+}
+
+static StringRef getMCS51AddressSpaceName(MCS51AddressSpace space) {
+  switch (space) {
+  case MCS51AddressSpace::Code:
+    return "CODE";
+  case MCS51AddressSpace::XData:
+    return "XDATA";
+  case MCS51AddressSpace::Unknown:
+    return "unknown";
+  }
+  llvm_unreachable("invalid MCS51 address space");
+}
+
+static bool isMCS51XDataInitSection(StringRef name) {
+  return name == ".mcs51.xdata.init" ||
+         name.starts_with(".mcs51.xdata.init.");
+}
+
+static MCS51AddressSpace getMCS51AccessSpace(RelType type) {
+  switch (type) {
+  case R_8051_DPTR16_XDATA:
+  case R_8051_LO8_XDATA:
+  case R_8051_HI8_XDATA:
+    return MCS51AddressSpace::XData;
+  case R_8051_DPTR16_CODE:
+  case R_8051_LO8_CODE:
+  case R_8051_HI8_CODE:
+    return MCS51AddressSpace::Code;
+  default:
+    return MCS51AddressSpace::Unknown;
+  }
+}
+
 // A call or function pointer to a declaration is emitted against a weak
 // external bank-call trampoline because the callee's bank is unknown at
 // compile time. If the callee was placed in common flash, return it so the
@@ -117,9 +162,15 @@ RelExpr MCS51::getRelExpr(RelType type, const Symbol &, const uint8_t *) const {
   case R_8051_8:
   case R_8051_LO8:
   case R_8051_HI8:
+  case R_8051_LO8_XDATA:
+  case R_8051_HI8_XDATA:
+  case R_8051_LO8_CODE:
+  case R_8051_HI8_CODE:
   case R_8051_16:
   case R_8051_16_BE:
   case R_8051_DPTR16:
+  case R_8051_DPTR16_XDATA:
+  case R_8051_DPTR16_CODE:
     return R_ABS;
   case R_8051_PCREL8:
     return R_PC;
@@ -179,7 +230,8 @@ bool MCS51::relaxOnce(int Pass) const {
       ArrayRef<SymbolAnchor> Anchors = ArrayRef(Aux.anchors);
       for (auto [I, R] : llvm::enumerate(Relocs)) {
         uint32_t Remove = 0;
-        if (R.type == R_8051_DPTR16) {
+        if (R.type == R_8051_DPTR16 || R.type == R_8051_DPTR16_XDATA ||
+            R.type == R_8051_DPTR16_CODE) {
           if (R.offset == 0 || R.offset >= Sec->content().size() ||
               Sec->content().size() - R.offset < 2) {
             Err(ctx) << Sec->getLocation(R.offset)
@@ -327,7 +379,13 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     *loc = static_cast<uint8_t>(val);
     break;
   case R_8051_HI8:
+  case R_8051_HI8_XDATA:
+  case R_8051_HI8_CODE:
     *loc = static_cast<uint8_t>(val >> 8);
+    break;
+  case R_8051_LO8_XDATA:
+  case R_8051_LO8_CODE:
+    *loc = static_cast<uint8_t>(val);
     break;
   case R_8051_16:
     checkUInt(ctx, loc, val, 16, rel);
@@ -335,6 +393,8 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     break;
   case R_8051_16_BE:
   case R_8051_DPTR16:
+  case R_8051_DPTR16_XDATA:
+  case R_8051_DPTR16_CODE:
     checkUInt(ctx, loc, val, 16, rel);
     loc[0] = static_cast<uint8_t>(val >> 8);
     loc[1] = static_cast<uint8_t>(val);
@@ -355,11 +415,54 @@ void MCS51::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
 }
 
 void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
+  if (isMCS51XDataInitSection(sec.name)) {
+    auto hasDefinition = [&](StringRef name) {
+      return dyn_cast_or_null<Defined>(ctx.symtab->find(name)) != nullptr;
+    };
+    if (sec.getOutputSection()->name != ".data" ||
+        !hasDefinition("__mcs51_data_start") ||
+        !hasDefinition("__mcs51_data_end") ||
+        !hasDefinition("__mcs51_data_load"))
+      Err(ctx) << sec.getLocation(0)
+               << "initialized MCS-51 XDATA section '" << sec.name
+               << "' has no startup copy path; define __mcs51_data_start, "
+                  "__mcs51_data_end, and __mcs51_data_load in the linker "
+                  "script and copy the CODE load image to XDATA before main";
+  }
   uint64_t secAddr = sec.getOutputSection()->addr + sec.outSecOff;
   for (const Relocation &rel : sec.relocs()) {
     uint8_t *loc = buf + rel.offset;
     uint64_t place = secAddr + rel.offset;
     uint64_t val = sec.getRelocTargetVA(ctx, rel, place);
+    MCS51AddressSpace sourceSpace = getMCS51AccessSpace(rel.type);
+    if (rel.sym && sourceSpace != MCS51AddressSpace::Unknown) {
+      auto *target = dyn_cast<Defined>(rel.sym);
+      auto *targetSec = target
+                            ? dyn_cast_or_null<InputSection>(target->section)
+                            : nullptr;
+      MCS51AddressSpace targetSpace =
+          targetSec ? getMCS51AddressSpace(targetSec->name)
+                    : MCS51AddressSpace::Unknown;
+      if (sourceSpace != targetSpace) {
+        StringRef targetName = rel.sym->getName();
+        if (targetName.empty() && targetSec && rel.addend >= 0) {
+          uint64_t targetOffset = rel.addend;
+          if (auto *sectionSymbol = dyn_cast<Defined>(rel.sym))
+            targetOffset += sectionSymbol->value;
+          if (Defined *enclosing = targetSec->getEnclosingSymbol(targetOffset))
+            targetName = enclosing->getName();
+        }
+        if (targetName.empty())
+          targetName = "<section symbol>";
+        Err(ctx) << sec.getLocation(rel.offset)
+                 << "MCS-51 " << getMCS51AddressSpaceName(sourceSpace)
+                 << " access from section '" << sec.name << "' targets symbol '"
+                 << targetName << "' in section '"
+                 << (targetSec ? targetSec->name : StringRef("<absolute>"))
+                 << "' (" << getMCS51AddressSpaceName(targetSpace)
+                 << "); CODE and XDATA are separate address spaces";
+      }
+    }
     bool isBankThunk = sec.name.starts_with(".text.bankthunks.");
     bool isAutoBankThunk = sec.name.starts_with(".text.autobankthunks.");
     if (rel.sym && !isBankThunk && !isAutoBankThunk)

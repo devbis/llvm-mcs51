@@ -21,25 +21,25 @@ unsigned char signed_less_than_constant(void) {
 // Each loaded word goes straight into a pair of direct bytes before the next
 // XDATA load reuses DPTR, and the arithmetic then runs over those bytes.
 // CHECK-LABEL: add_words:
-// CHECK: mov dptr, #lhs+2
+// CHECK: mov dptr, #xdata16(lhs+2)
 // CHECK: mov 48, a
 // CHECK: mov 49, a
-// CHECK: mov dptr, #lhs
+// CHECK: mov dptr, #xdata16(lhs)
 // CHECK: mov 50, a
 // CHECK: mov 51, a
-// CHECK: mov dptr, #rhs+2
+// CHECK: mov dptr, #xdata16(rhs+2)
 // CHECK: mov 52, a
 // CHECK: mov 53, a
-// CHECK: mov dptr, #rhs
+// CHECK: mov dptr, #xdata16(rhs)
 // CHECK: mov 54, a
 // CHECK: mov 55, a
 // CHECK: add a, 50
 // CHECK-COUNT-3: addc a, {{[0-9]+}}
 // CHECK-LABEL: subtract_words:
-// CHECK: mov dptr, #lhs+2
-// CHECK: mov dptr, #lhs
-// CHECK: mov dptr, #rhs+2
-// CHECK: mov dptr, #rhs
+// CHECK: mov dptr, #xdata16(lhs+2)
+// CHECK: mov dptr, #xdata16(lhs)
+// CHECK: mov dptr, #xdata16(rhs+2)
+// CHECK: mov dptr, #xdata16(rhs)
 // CHECK: subb a, 54
 // CHECK-COUNT-3: subb a, {{[0-9]+}}
 // CHECK-LABEL: equals_all_ones:

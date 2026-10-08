@@ -386,7 +386,11 @@ static bool supportsMCS51(uint64_t Type) {
   return Type == ELF::R_8051_8 || Type == ELF::R_8051_16 ||
          Type == ELF::R_8051_16_BE || Type == ELF::R_8051_DPTR16 ||
          Type == ELF::R_8051_PCREL8 || Type == ELF::R_8051_LO8 ||
-         Type == ELF::R_8051_HI8;
+         Type == ELF::R_8051_HI8 ||
+         Type == ELF::R_8051_DPTR16_XDATA ||
+         Type == ELF::R_8051_DPTR16_CODE ||
+         Type == ELF::R_8051_LO8_XDATA || Type == ELF::R_8051_HI8_XDATA ||
+         Type == ELF::R_8051_LO8_CODE || Type == ELF::R_8051_HI8_CODE;
 }
 
 static uint64_t resolveMCS51(uint64_t Type, uint64_t Offset, uint64_t S,
@@ -395,12 +399,18 @@ static uint64_t resolveMCS51(uint64_t Type, uint64_t Offset, uint64_t S,
   switch (Type) {
   case ELF::R_8051_8:
   case ELF::R_8051_LO8:
+  case ELF::R_8051_LO8_XDATA:
+  case ELF::R_8051_LO8_CODE:
     return (S + Addend) & 0xff;
   case ELF::R_8051_HI8:
+  case ELF::R_8051_HI8_XDATA:
+  case ELF::R_8051_HI8_CODE:
     return ((S + Addend) >> 8) & 0xff;
   case ELF::R_8051_16:
   case ELF::R_8051_16_BE:
   case ELF::R_8051_DPTR16:
+  case ELF::R_8051_DPTR16_XDATA:
+  case ELF::R_8051_DPTR16_CODE:
     return (S + Addend) & 0xffff;
   case ELF::R_8051_PCREL8:
     return (S + Addend - Offset) & 0xff;
