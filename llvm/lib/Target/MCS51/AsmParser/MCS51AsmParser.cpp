@@ -28,6 +28,8 @@ class MCS51Operand final : public MCParsedAsmOperand {
 public:
   // 1 for lo8(expr), 2 for hi8(expr): a byte of a symbol's address.
   unsigned SymByte = 0;
+  // 1 for xdata16(expr), 2 for code16(expr): address-space metadata for DPTR.
+  unsigned AddressSpaceTag = 0;
   MCS51Operand(SMLoc Loc, StringRef Token)
       : Loc(Loc), Token(Token), Reg() {}
   MCS51Operand(SMLoc Loc, MCRegister Reg) : Loc(Loc), Reg(Reg) {}
@@ -123,6 +125,7 @@ class MCS51AsmParser final : public MCTargetAsmParser {
         Parser.Lex();
         const MCExpr *Expr = nullptr;
         unsigned SymByte = 0;
+        unsigned AddressSpaceTag = 0;
         if (Parser.getTok().is(AsmToken::Identifier) &&
             (Parser.getTok().getString().equals_insensitive("lo8") ||
              Parser.getTok().getString().equals_insensitive("hi8"))) {
@@ -137,11 +140,45 @@ class MCS51AsmParser final : public MCTargetAsmParser {
               return Parser.Error(Parser.getTok().getLoc(), "expected ')'");
             Parser.Lex();
           }
+        } else if (Parser.getTok().is(AsmToken::Identifier) &&
+                   (Parser.getTok().getString().equals_insensitive("xlo8") ||
+                    Parser.getTok().getString().equals_insensitive("xhi8") ||
+                    Parser.getTok().getString().equals_insensitive("clo8") ||
+                    Parser.getTok().getString().equals_insensitive("chi8"))) {
+          AsmToken Name = Parser.getTok();
+          if (getLexer().peekTok().is(AsmToken::LParen)) {
+            StringRef Modifier = Name.getString();
+            SymByte = Modifier.ends_with_insensitive("lo8") ? 1 : 2;
+            AddressSpaceTag = Modifier.starts_with_insensitive("x") ? 1 : 2;
+            Parser.Lex();
+            Parser.Lex();
+            if (Parser.parseExpression(Expr))
+              return true;
+            if (!Parser.getTok().is(AsmToken::RParen))
+              return Parser.Error(Parser.getTok().getLoc(), "expected ')'");
+            Parser.Lex();
+          }
+        } else if (Parser.getTok().is(AsmToken::Identifier) &&
+                   (Parser.getTok().getString().equals_insensitive("xdata16") ||
+                    Parser.getTok().getString().equals_insensitive("code16"))) {
+          AsmToken Name = Parser.getTok();
+          if (getLexer().peekTok().is(AsmToken::LParen)) {
+            AddressSpaceTag =
+                Name.getString().equals_insensitive("xdata16") ? 1 : 2;
+            Parser.Lex();
+            Parser.Lex();
+            if (Parser.parseExpression(Expr))
+              return true;
+            if (!Parser.getTok().is(AsmToken::RParen))
+              return Parser.Error(Parser.getTok().getLoc(), "expected ')'");
+            Parser.Lex();
+          }
         }
         if (!Expr && Parser.parseExpression(Expr))
           return true;
         auto Operand = std::make_unique<MCS51Operand>(ImmLoc, Expr);
         Operand->SymByte = SymByte;
+        Operand->AddressSpaceTag = AddressSpaceTag;
         Operands.push_back(std::move(Operand));
         continue;
       }
@@ -209,8 +246,15 @@ class MCS51AsmParser final : public MCTargetAsmParser {
           Address > 71)
         return Parser.Error(IDLoc, "lo8/hi8 needs a direct address 48-71");
       auto &Byte = static_cast<MCS51Operand &>(*Operands[3]);
-      Inst.setOpcode(Byte.SymByte == 1 ? MCS51::MOV_IM_SYMLO
-                                       : MCS51::MOV_IM_SYMHI);
+      if (Byte.AddressSpaceTag == 1)
+        Inst.setOpcode(Byte.SymByte == 1 ? MCS51::MOV_IM_SYMLO_XDATA
+                                         : MCS51::MOV_IM_SYMHI_XDATA);
+      else if (Byte.AddressSpaceTag == 2)
+        Inst.setOpcode(Byte.SymByte == 1 ? MCS51::MOV_IM_SYMLO_CODE
+                                         : MCS51::MOV_IM_SYMHI_CODE);
+      else
+        Inst.setOpcode(Byte.SymByte == 1 ? MCS51::MOV_IM_SYMLO
+                                         : MCS51::MOV_IM_SYMHI);
       Inst.addOperand(MCOperand::createReg(MCS51::IM0 + (Address - 48)));
       Inst.addOperand(MCOperand::createExpr(Byte.getImm()));
       Out.emitInstruction(Inst, getSTI());
@@ -220,6 +264,13 @@ class MCS51AsmParser final : public MCTargetAsmParser {
                                        MatchingInlineAsm);
     if (Result != Match_Success)
       return Parser.Error(IDLoc, "invalid 8051 instruction");
+    if (Inst.getOpcode() == MCS51::MOV_DPTR_IMM && Operands.size() == 4) {
+      auto &Address = static_cast<MCS51Operand &>(*Operands[3]);
+      if (Address.AddressSpaceTag == 1)
+        Inst.setOpcode(MCS51::MOV_DPTR_XDATA_IMM);
+      else if (Address.AddressSpaceTag == 2)
+        Inst.setOpcode(MCS51::MOV_DPTR_CODE_IMM);
+    }
     Out.emitInstruction(Inst, getSTI());
     return false;
   }

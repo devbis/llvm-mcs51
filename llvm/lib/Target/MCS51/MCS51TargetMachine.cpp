@@ -5,6 +5,7 @@
 #include "MCS51.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/ELF.h"
@@ -40,6 +41,12 @@
 #include "llvm/Support/Casting.h"
 
 using namespace llvm;
+
+static bool isMCS51DptrImmediateLoad(unsigned Opcode) {
+  return Opcode == MCS51::MOV_DPTR_IMM ||
+         Opcode == MCS51::MOV_DPTR_XDATA_IMM ||
+         Opcode == MCS51::MOV_DPTR_CODE_IMM;
+}
 
 // True when MI writes the SP SFR (0x81) through a direct-address form.
 static bool writesSPDirect(const MachineInstr &MI) {
@@ -1347,7 +1354,7 @@ public:
         // Keep DPTR live across nearby accesses to consecutive bytes of the
         // same global. Re-loading a 16-bit XDATA address costs three bytes;
         // incrementing DPTR costs one and leaves A and the flags untouched.
-        if (I->getOpcode() == MCS51::MOV_DPTR_IMM &&
+        if (isMCS51DptrImmediateLoad(I->getOpcode()) &&
             I->getNumOperands() > 1 && I->getOperand(1).isGlobal()) {
           const MachineOperand &Address = I->getOperand(1);
           const GlobalValue *Global = Address.getGlobal();
@@ -1833,7 +1840,7 @@ public:
                Next = Next->getNextNode()) {
             if (Next->readsRegister(MCS51::DPTR, TRI))
               break;
-            if (Next->getOpcode() == MCS51::MOV_DPTR_IMM) {
+            if (isMCS51DptrImmediateLoad(Next->getOpcode())) {
               Overwritten = true;
               break;
             }
@@ -1862,7 +1869,7 @@ public:
       const GlobalValue *KnownGlobal = nullptr;
       int64_t KnownOffset = 0;
       for (auto I = MBB.begin(); I != MBB.end();) {
-        if (I->getOpcode() == MCS51::MOV_DPTR_IMM &&
+        if (isMCS51DptrImmediateLoad(I->getOpcode()) &&
             I->getNumOperands() > 1 && I->getOperand(1).isGlobal()) {
           const MachineOperand &Address = I->getOperand(1);
           const GlobalValue *Global = Address.getGlobal();
@@ -2657,17 +2664,36 @@ public:
         Flags |= ELF::SHF_WRITE;
       return getContext().getELFSection(Name, Type, Flags);
     }
-    // The section must match the instructions that access the object: CODE
-    // objects are read with MOVC from flash, and XDATA objects with MOVX from
-    // RAM initialized by startup, whatever their constness says.
-    if (GV && !GV->hasSection()) {
-      unsigned AddressSpace = GV->getAddressSpace();
-      if (AddressSpace == MCS51::Code && !Kind.isReadOnly())
-        Kind = SectionKind::getReadOnly();
-      else if ((AddressSpace == MCS51::XData ||
-                AddressSpace == MCS51::Default) &&
-               Kind.isReadOnly())
-        Kind = SectionKind::getData();
+    // Keep the selected bus in the input-section name. LLD uses this metadata
+    // to place XDATA load images in CODE and to reject MOVX/MOVC references to
+    // objects on the other bus. const affects access permissions, not storage.
+    if (GV && !GV->hasSection() &&
+        (GV->getAddressSpace() == MCS51::Code ||
+         GV->getAddressSpace() == MCS51::XData ||
+         GV->getAddressSpace() == MCS51::Default)) {
+      StringRef Prefix;
+      unsigned Type;
+      unsigned Flags = ELF::SHF_ALLOC;
+      if (GV->getAddressSpace() == MCS51::Code) {
+        if (!Kind.isReadOnly())
+          Kind = SectionKind::getReadOnly();
+        Prefix = Kind.isBSS() ? ".mcs51.code.bss" : ".mcs51.code.rodata";
+        Type = Kind.isBSS() ? ELF::SHT_NOBITS : ELF::SHT_PROGBITS;
+      } else if (Kind.isBSS()) {
+        Prefix = ".mcs51.xdata.bss";
+        Type = ELF::SHT_NOBITS;
+        Flags |= ELF::SHF_WRITE;
+      } else {
+        Prefix = ".mcs51.xdata.init";
+        Type = ELF::SHT_PROGBITS;
+        Flags |= ELF::SHF_WRITE;
+      }
+      SmallString<64> Name(Prefix);
+      if (TM.getDataSections()) {
+        Name.push_back('.');
+        Name.append(GV->getName());
+      }
+      return getContext().getELFSection(Name, Type, Flags);
     }
     return TargetLoweringObjectFileELF::SelectSectionForGlobal(GO, Kind, TM);
   }

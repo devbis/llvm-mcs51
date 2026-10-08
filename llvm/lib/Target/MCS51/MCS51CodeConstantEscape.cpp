@@ -6,11 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Clang places const-qualified objects without an explicit memory qualifier in
-// CODE (address space 5) and reads them with MOVC. Their address can still be
-// converted to the default/XDATA pointer type, for example when a constant
-// table or string literal is passed to memcpy. A default pointer is read with
-// MOVX, so a CODE address would read unrelated XDATA.
+// Explicit CODE (address space 5) objects are read with MOVC. Their address
+// can still be converted to the default/XDATA pointer type, for example when
+// a constant table is passed to memcpy. A default pointer is read with MOVX,
+// so a CODE address would read unrelated XDATA.
 //
 // This pass gives every such conversion an initialized copy of the constant
 // object in the default (XDATA) pointer space and rewrites the conversion to

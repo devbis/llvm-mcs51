@@ -64,6 +64,18 @@ public:
       return {"fixup_16_be", 0, 16, 0};
     if (Kind == MCS51::fixup_dptr16)
       return {"fixup_dptr16", 0, 16, 0};
+    if (Kind == MCS51::fixup_dptr16_xdata)
+      return {"fixup_dptr16_xdata", 0, 16, 0};
+    if (Kind == MCS51::fixup_dptr16_code)
+      return {"fixup_dptr16_code", 0, 16, 0};
+    if (Kind == MCS51::fixup_lo8_xdata)
+      return {"fixup_lo8_xdata", 0, 8, 0};
+    if (Kind == MCS51::fixup_hi8_xdata)
+      return {"fixup_hi8_xdata", 0, 8, 0};
+    if (Kind == MCS51::fixup_lo8_code)
+      return {"fixup_lo8_code", 0, 8, 0};
+    if (Kind == MCS51::fixup_hi8_code)
+      return {"fixup_hi8_code", 0, 8, 0};
     if (Kind == MCS51::fixup_pcrel8)
       return {"fixup_pcrel8", 0, 8, 0};
     if (Kind == MCS51::fixup_11)
@@ -115,8 +127,15 @@ public:
       Data[0] |= static_cast<uint8_t>(Value >> 8);
       return;
     }
+    if (Fixup.getKind() == MCS51::fixup_hi8_xdata ||
+        Fixup.getKind() == MCS51::fixup_hi8_code) {
+      Data[0] |= static_cast<uint8_t>(Value >> 8);
+      return;
+    }
     if (Fixup.getKind() == MCS51::fixup_16_be ||
-        Fixup.getKind() == MCS51::fixup_dptr16) {
+        Fixup.getKind() == MCS51::fixup_dptr16 ||
+        Fixup.getKind() == MCS51::fixup_dptr16_xdata ||
+        Fixup.getKind() == MCS51::fixup_dptr16_code) {
       Data[0] |= static_cast<uint8_t>(Value >> 8);
       Data[1] |= static_cast<uint8_t>(Value);
       return;

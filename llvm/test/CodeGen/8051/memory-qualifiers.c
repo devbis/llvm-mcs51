@@ -89,16 +89,16 @@ int main(void) {
 // CHECK-LABEL: write_idata:
 // CHECK: mov @r0, a
 // CHECK-LABEL: read_xdata:
-// CHECK: mov dptr, #xdata_value
+// CHECK: mov dptr, #xdata16(xdata_value)
 // CHECK: movx a, @dptr
 // CHECK-LABEL: write_xdata:
-// CHECK: mov dptr, #xdata_value
+// CHECK: mov dptr, #xdata16(xdata_value)
 // CHECK: movx @dptr, a
 // CHECK-LABEL: read_code:
-// CHECK: mov dptr, #code_value
+// CHECK: mov dptr, #code16(code_value)
 // CHECK: movc a, @a+dptr
 // CHECK-LABEL: read_code_word:
-// CHECK: mov dptr, #code_word
+// CHECK: mov dptr, #code16(code_word)
 // CHECK: movc a, @a+dptr
 // CHECK: inc dptr
 // CHECK: movc a, @a+dptr

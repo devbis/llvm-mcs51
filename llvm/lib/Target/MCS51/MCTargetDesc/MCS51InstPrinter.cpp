@@ -46,6 +46,41 @@ void MCS51InstPrinter::printPCRelImm(const MCInst *MI, unsigned OpNo,
 void MCS51InstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                  StringRef Annot, const MCSubtargetInfo &,
                                  raw_ostream &OS) {
+  StringRef AddressByteModifier;
+  switch (MI->getOpcode()) {
+  case MCS51::MOV_IM_SYMLO_XDATA:
+    AddressByteModifier = "xlo8";
+    break;
+  case MCS51::MOV_IM_SYMHI_XDATA:
+    AddressByteModifier = "xhi8";
+    break;
+  case MCS51::MOV_IM_SYMLO_CODE:
+    AddressByteModifier = "clo8";
+    break;
+  case MCS51::MOV_IM_SYMHI_CODE:
+    AddressByteModifier = "chi8";
+    break;
+  default:
+    break;
+  }
+  if (!AddressByteModifier.empty()) {
+    OS << "mov ";
+    printOperand(MI, 0, OS);
+    OS << ", #" << AddressByteModifier << '(';
+    printOperand(MI, 1, OS);
+    OS << ')';
+    printAnnotation(OS, Annot);
+    return;
+  }
+  if (MI->getOpcode() == MCS51::MOV_DPTR_XDATA_IMM ||
+      MI->getOpcode() == MCS51::MOV_DPTR_CODE_IMM) {
+    OS << "mov dptr, #"
+       << (MI->getOpcode() == MCS51::MOV_DPTR_XDATA_IMM ? "xdata16(" : "code16(");
+    printOperand(MI, 1, OS);
+    OS << ')';
+    printAnnotation(OS, Annot);
+    return;
+  }
   if (!printAliasInstr(MI, Address, OS))
     printInstruction(MI, Address, OS);
   printAnnotation(OS, Annot);

@@ -15,3 +15,10 @@ ELF_RELOC(R_8051_HI8, 8)
 // MOV DPTR,#imm16. The assembler emits it only when every reference that may
 // span the instruction is left as a symbol-relative relocation.
 ELF_RELOC(R_8051_RELAX, 9)
+// Address-space-tagged forms used for absolute MOVX and MOVC accesses.
+ELF_RELOC(R_8051_DPTR16_XDATA, 10)
+ELF_RELOC(R_8051_DPTR16_CODE, 11)
+ELF_RELOC(R_8051_LO8_XDATA, 12)
+ELF_RELOC(R_8051_HI8_XDATA, 13)
+ELF_RELOC(R_8051_LO8_CODE, 14)
+ELF_RELOC(R_8051_HI8_CODE, 15)

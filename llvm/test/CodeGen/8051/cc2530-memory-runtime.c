@@ -1,4 +1,6 @@
-// RUN: clang -target mcs51 -mcpu=cc2530 -O0 -fno-builtin %s -o %t.elf
+// RUN: clang -target mcs51 -mcpu=cc2530 -O0 -fno-builtin \
+// RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
+// RUN:   -Wl,--no-check-sections %s -o %t.elf
 // RUN: llvm-readobj --symbols %t.elf | FileCheck %s
 
 typedef unsigned short size_t;

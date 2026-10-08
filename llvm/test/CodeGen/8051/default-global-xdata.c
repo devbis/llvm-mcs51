@@ -13,19 +13,19 @@ void set_global_flag(void) { global_flag = 0x42; }
 // IR: @global_counter = {{.*}}addrspace(4) global i16 0
 
 // ASM-LABEL: read_counter:
-// ASM: mov dptr, #global_counter
+// ASM: mov dptr, #xdata16(global_counter)
 // ASM: movx a, @dptr
 // ASM: ret
 
 // ASM-LABEL: write_counter:
-// ASM: mov dptr, #global_counter
+// ASM: mov dptr, #xdata16(global_counter)
 // ASM: movx @dptr, a
 // ASM: inc dptr
 // ASM: movx @dptr, a
 // ASM: ret
 
 // ASM-LABEL: set_global_flag:
-// ASM: mov dptr, #global_flag
+// ASM: mov dptr, #xdata16(global_flag)
 // ASM-NEXT: mov a, #66
 // ASM-NEXT: movx @dptr, a
 // ASM-NEXT: ret

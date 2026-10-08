@@ -77,8 +77,17 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
     if (Op.isExpr() && Op.getExpr()->evaluateAsAbsolute(Value))
       return static_cast<uint8_t>(High ? Value >> 8 : Value);
     if (Op.isExpr()) {
+      bool IsCode = MI.getOpcode() == MCS51::MOV_IM_SYMLO_CODE ||
+                    MI.getOpcode() == MCS51::MOV_IM_SYMHI_CODE;
+      bool IsXData = MI.getOpcode() == MCS51::MOV_IM_SYMLO_XDATA ||
+                     MI.getOpcode() == MCS51::MOV_IM_SYMHI_XDATA;
+      MCFixupKind Kind = High ? MCS51::fixup_hi8 : MCS51::fixup_lo8;
+      if (IsCode)
+        Kind = High ? MCS51::fixup_hi8_code : MCS51::fixup_lo8_code;
+      else if (IsXData)
+        Kind = High ? MCS51::fixup_hi8_xdata : MCS51::fixup_lo8_xdata;
       Fixups.push_back(MCFixup::create(
-          2, Op.getExpr(), High ? MCS51::fixup_hi8 : MCS51::fixup_lo8));
+          2, Op.getExpr(), Kind));
       return 0;
     }
     report_fatal_error("unsupported MCS-51 symbol byte operand");
@@ -125,9 +134,17 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
       return static_cast<uint16_t>((Absolute << 8) | (Absolute >> 8));
     }
     if (Op.isExpr()) {
-      bool IsDPTRLoad = MI.getOpcode() == MCS51::MOV_DPTR_IMM;
+      bool IsXDataDPTRLoad = MI.getOpcode() == MCS51::MOV_DPTR_XDATA_IMM;
+      bool IsCodeDPTRLoad = MI.getOpcode() == MCS51::MOV_DPTR_CODE_IMM;
+      bool IsDPTRLoad = MI.getOpcode() == MCS51::MOV_DPTR_IMM ||
+                        IsXDataDPTRLoad || IsCodeDPTRLoad;
       MCFixup Fixup = MCFixup::create(
-          1, Op.getExpr(), IsDPTRLoad ? MCS51::fixup_dptr16 : MCS51::fixup_16_be);
+          1, Op.getExpr(),
+          IsXDataDPTRLoad
+              ? MCS51::fixup_dptr16_xdata
+              : IsCodeDPTRLoad
+                    ? MCS51::fixup_dptr16_code
+                    : IsDPTRLoad ? MCS51::fixup_dptr16 : MCS51::fixup_16_be);
       // With +relax the linker may shrink a MOV DPTR,#sym+1 that follows
       // MOV DPTR,#sym to INC DPTR.
       if (IsDPTRLoad && STI.hasFeature(MCS51::FeatureRelax))
