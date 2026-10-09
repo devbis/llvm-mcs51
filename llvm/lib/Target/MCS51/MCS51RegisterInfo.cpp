@@ -7,6 +7,8 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
+#include "llvm/IR/GlobalVariable.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -16,13 +18,51 @@ using namespace llvm;
 
 MCS51RegisterInfo::MCS51RegisterInfo() : MCS51GenRegisterInfo(MCS51::PC) {}
 
+// Experimental: narrow the callee-saved set. This changes the C ABI, so every
+// object that calls or is called by another (including the runtime library)
+// must be built with the same value.
+namespace {
+enum class CSRSet { Default, R, None };
+}
+static cl::opt<CSRSet> CSRMode(
+    "mcs51-csr", cl::Hidden, cl::init(CSRSet::Default),
+    cl::desc("MCS51 callee-saved register set"),
+    cl::values(clEnumValN(CSRSet::Default, "default", "R2-R7 and IM8-IM23"),
+               clEnumValN(CSRSet::R, "r", "R2-R7"),
+               clEnumValN(CSRSet::None, "none", "no callee-saved registers")));
+
+bool llvm::mcs51UseCallRegMask() { return CSRMode != CSRSet::Default; }
+
+// Experimental: pass further words in IP4-IP7 and further bytes in IM16-IM23
+// instead of on the hardware stack. Like -mcs51-csr it changes the C ABI, and
+// it requires those registers to be caller-saved.
+static cl::opt<bool> WideArgs(
+    "mcs51-wide-args", cl::Hidden, cl::init(false),
+    cl::desc("pass arguments 5-8 (words) and 5-12 (bytes) in caller-saved "
+             "imaginary registers; requires -mcs51-csr=r or none"));
+
+bool llvm::mcs51WideArgs() {
+  if (WideArgs && CSRMode == CSRSet::Default)
+    report_fatal_error("-mcs51-wide-args requires -mcs51-csr=r or none: "
+                       "IM8-IM23 are callee-saved by default");
+  return WideArgs;
+}
+
 const MCPhysReg *
 MCS51RegisterInfo::getCalleeSavedRegs(const MachineFunction *) const {
+  if (CSRMode == CSRSet::R)
+    return CSR_MCS51_R_SaveList;
+  if (CSRMode == CSRSet::None)
+    return CSR_MCS51_None_SaveList;
   return CSR_MCS51_SaveList;
 }
 
 const uint32_t *MCS51RegisterInfo::getCallPreservedMask(
     const MachineFunction &, CallingConv::ID) const {
+  if (CSRMode == CSRSet::R)
+    return CSR_MCS51_R_RegMask;
+  if (CSRMode == CSRSet::None)
+    return CSR_MCS51_None_RegMask;
   return CSR_MCS51_RegMask;
 }
 
@@ -53,6 +93,8 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   const DebugLoc &DL = MI->getDebugLoc();
   int FI = MI->getOperand(FIOperandNum).getIndex();
+  if (eliminateStaticFrameIndex(MI, FIOperandNum))
+    return true;
   Register FrameReg;
   int64_t Offset = MF.getSubtarget().getFrameLowering()
                        ->getFrameIndexReference(MF, FI, FrameReg)
@@ -393,6 +435,143 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
     MF.getRegInfo().clearKillFlags(MCS51::A);
     MF.getRegInfo().clearKillFlags(MCS51::C);
   }
+  MI->eraseFromParent();
+  return true;
+}
+
+// Objects moved to the function's static PDATA frame are reached with
+// MOV R1,#frame+k and MOVX through A. A is saved around the access when the
+// pseudo promises to preserve it; C, DPTR and SP are never touched.
+bool MCS51RegisterInfo::eliminateStaticFrameIndex(
+    MachineBasicBlock::iterator MI, unsigned FIOperandNum) const {
+  MachineBasicBlock &MBB = *MI->getParent();
+  MachineFunction &MF = *MBB.getParent();
+  auto *FuncInfo = MF.getInfo<MCS51MachineFunctionInfo>();
+  int FI = MI->getOperand(FIOperandNum).getIndex();
+  const unsigned *Base = FuncInfo->getStaticFrameOffset(FI);
+  if (!Base)
+    return false;
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const DebugLoc &DL = MI->getDebugLoc();
+  unsigned Opc = MI->getOpcode();
+  int64_t Offset = *Base + MI->getOperand(FIOperandNum + 1).getImm();
+  auto I = MI;
+  auto PairLo = [&](Register Pair) { return getSubReg(Pair, MCS51::sub_lo); };
+  auto PairHi = [&](Register Pair) { return getSubReg(Pair, MCS51::sub_hi); };
+  auto ByteUndef = [&](Register Byte) {
+    for (auto It = I; It != MBB.begin();) {
+      --It;
+      if (It->isDebugInstr())
+        continue;
+      if (It->modifiesRegister(Byte, this))
+        return RegState{};
+      if (It->killsRegister(Byte, this))
+        return RegState::Undef;
+    }
+    for (const MachineBasicBlock::RegisterMaskPair &LI : MBB.liveins())
+      if (regsOverlap(LI.PhysReg, Byte))
+        return RegState{};
+    return RegState::Undef;
+  };
+  auto IsLiveAfter = [&](MCRegister Reg) {
+    for (auto It = std::next(MI); It != MBB.end(); ++It) {
+      if (It->isDebugInstr())
+        continue;
+      if (It->readsRegister(Reg, this))
+        return true;
+      if (It->modifiesRegister(Reg, this))
+        return false;
+    }
+    for (const MachineBasicBlock *Succ : MBB.successors())
+      if (Succ->isLiveIn(Reg))
+        return true;
+    return false;
+  };
+  auto Address = [&](int64_t Extra) {
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_IMM))
+        .addReg(MCS51::R1, RegState::Define)
+        .addGlobalAddress(FuncInfo->getStaticFrame(), Offset + Extra);
+  };
+  auto IncR1 = [&]() {
+    BuildMI(MBB, I, DL, TII.get(MCS51::INC_RN), MCS51::R1).addReg(MCS51::R1);
+  };
+  auto LoadA = [&]() {
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOVX_A_IND_RI)).addReg(MCS51::R1);
+  };
+  auto StoreA = [&]() {
+    BuildMI(MBB, I, DL, TII.get(MCS51::MOVX_IND_RI_A)).addReg(MCS51::R1);
+  };
+  auto AToByte = [&](Register Dst) {
+    if (Dst == MCS51::A)
+      return;
+    if (MCS51::MCS51Imag8RegClass.contains(Dst))
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_IM_A), Dst).addReg(MCS51::A);
+    else if (Dst == MCS51::DPL || Dst == MCS51::DPH)
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_DIRECT_A))
+          .addImm(Dst == MCS51::DPL ? 0x82 : 0x83);
+    else
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_RN_A), Dst);
+  };
+  auto ByteToA = [&](Register Src, RegState Flags) {
+    if (Src == MCS51::A)
+      return;
+    if (MCS51::MCS51Imag8RegClass.contains(Src))
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_IM), MCS51::A)
+          .addReg(Src, Flags);
+    else if (Src == MCS51::DPL || Src == MCS51::DPH)
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_DIRECT), MCS51::A)
+          .addImm(Src == MCS51::DPL ? 0x82 : 0x83);
+    else
+      BuildMI(MBB, I, DL, TII.get(MCS51::MOV_A_RN)).addReg(Src, Flags);
+  };
+  bool ClobbersA = Opc == MCS51::LOAD_FRAME8 || Opc == MCS51::STORE_FRAME8 ||
+                   Opc == MCS51::LOAD_FRAME16 || Opc == MCS51::STORE_FRAME16;
+  bool IsLoad = Opc == MCS51::SPILL_LOAD8 || Opc == MCS51::SPILL_LOAD_IM ||
+                Opc == MCS51::SPILL_LOAD_INDIRECT8 ||
+                Opc == MCS51::SPILL_LOAD16 || Opc == MCS51::SPILL_LOAD_A8 ||
+                Opc == MCS51::LOAD_FRAME8 || Opc == MCS51::LOAD_FRAME16;
+  Register Value = IsLoad ? MI->getOperand(0).getReg()
+                          : MI->getOperand(FIOperandNum + 2).getReg();
+  bool DefinesA = IsLoad && Value == MCS51::A;
+  bool StoresA = !IsLoad && Value == MCS51::A;
+  bool SaveA = !ClobbersA && !DefinesA && !StoresA && IsLiveAfter(MCS51::A);
+  if (SaveA)
+    BuildMI(MBB, I, DL, TII.get(MCS51::PUSH_DIRECT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::Implicit);
+  bool Word = Opc == MCS51::SPILL_LOAD16 || Opc == MCS51::SPILL_STORE16 ||
+              Opc == MCS51::LOAD_FRAME16 || Opc == MCS51::STORE_FRAME16;
+  if (Word) {
+    Register Lo = Value == MCS51::DPTR ? Register(MCS51::DPL) : Register(PairLo(Value));
+    Register Hi = Value == MCS51::DPTR ? Register(MCS51::DPH) : Register(PairHi(Value));
+    Address(0);
+    if (IsLoad) {
+      LoadA();
+      AToByte(Lo);
+      IncR1();
+      LoadA();
+      AToByte(Hi);
+    } else {
+      ByteToA(Lo, Value == MCS51::DPTR ? RegState{} : ByteUndef(Lo));
+      StoreA();
+      IncR1();
+      ByteToA(Hi, Value == MCS51::DPTR ? RegState{} : ByteUndef(Hi));
+      StoreA();
+    }
+  } else if (IsLoad) {
+    Address(0);
+    LoadA();
+    AToByte(Value);
+  } else {
+    ByteToA(Value, RegState{});
+    Address(0);
+    StoreA();
+  }
+  if (SaveA)
+    BuildMI(MBB, I, DL, TII.get(MCS51::POP_DIRECT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::ImplicitDefine);
+  MF.getRegInfo().clearKillFlags(MCS51::A);
   MI->eraseFromParent();
   return true;
 }

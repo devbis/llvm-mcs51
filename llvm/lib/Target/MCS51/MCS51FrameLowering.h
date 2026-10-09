@@ -19,6 +19,9 @@ public:
                                   MachineBasicBlock::iterator MI,
                                   MutableArrayRef<CalleeSavedInfo> CSI,
                                   const TargetRegisterInfo *TRI) const override;
+  void processFunctionBeforeFrameFinalized(
+      MachineFunction &MF, RegScavenger *RS = nullptr) const override;
+  static bool isStaticFrameAccess(unsigned Opcode);
   void emitPrologue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   void emitEpilogue(MachineFunction &MF, MachineBasicBlock &MBB) const override;
   StackOffset getFrameIndexReference(const MachineFunction &MF, int FI,
