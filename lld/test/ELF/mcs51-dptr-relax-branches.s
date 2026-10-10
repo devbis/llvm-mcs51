@@ -50,9 +50,9 @@ b:      .byte   0
 # RELAX:      2: 90 01 00 mov dptr, #256
 # RELAX:      6: a3 inc dptr
 # RELAX:      8: 60 f8 jz 2
-# RELAX-NEXT: a: 02 00 0e ljmp 14
-# RELAX:      e: 22 ret
-# TAB-RELAX:  0080 0e00
+# RELAX-NEXT: a: 01 0d ajmp 13
+# RELAX:      d: 22 ret
+# TAB-RELAX:  0080 0d00
 
 # NORELAX:      0: 80 08 sjmp 10
 # NORELAX:      6: 90 01 01 mov dptr, #257
