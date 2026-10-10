@@ -2599,7 +2599,9 @@ public:
   MCS51IARCallClobbers() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
-    if (!usesMCS51IARABI(MF.getFunction()))
+    bool ModuleUsesIARABI =
+        MF.getFunction().getParent()->getGlobalVariable("?XSP") != nullptr;
+    if (!usesMCS51IARABI(MF.getFunction()) && !ModuleUsesIARABI)
       return false;
 
     bool Changed = false;
@@ -2607,14 +2609,15 @@ public:
       for (MachineInstr &MI : MBB) {
         if (!MI.isCall())
           continue;
-        bool CallsClangABI = false;
+        bool CallsIARABI =
+            usesMCS51IARABI(MF.getFunction()) || ModuleUsesIARABI;
         for (const MachineOperand &MO : MI.operands())
           if (MO.isGlobal())
-            if (const auto *Callee = dyn_cast<Function>(MO.getGlobal()))
-              CallsClangABI |=
-                  Callee->getFnAttribute("mcs51-abi").getValueAsString() ==
-                  "clang";
-        if (CallsClangABI)
+            if (const auto *Callee = dyn_cast<Function>(MO.getGlobal())) {
+              if (Callee->hasFnAttribute("mcs51-abi"))
+                CallsIARABI = usesMCS51IARABI(*Callee);
+            }
+        if (!CallsIARABI)
           continue;
         for (unsigned I = MI.getNumOperands(); I != 0;) {
           --I;

@@ -21,5 +21,6 @@ SECTIONS {
   .mcs51_data2_bss 0x80 (NOLOAD) : { *(.mcs51.data2.bss) } > XRAM
   .mcs51_bit 0 : { *(.mcs51.bit) } > XRAM AT> CODE
   .mcs51_bit_bss (NOLOAD) : { *(.mcs51.bit.bss) } > XRAM
-  .simresult 0x100 (NOLOAD) : { *(.mcs51.simresult) } > XRAM
+  .mcs51.xdata.simresult 0x100 (NOLOAD) :
+  { *(.mcs51.xdata.simresult) } > XRAM
 }

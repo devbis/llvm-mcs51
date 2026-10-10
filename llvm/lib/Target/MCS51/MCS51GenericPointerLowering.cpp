@@ -1011,11 +1011,9 @@ private:
     Cast.eraseFromParent();
   }
 
-  static SmallVector<Value *, 4> getPointerParts(IRBuilder<> &B,
-                                                 Value *Pointer,
-                                                 uint16_t ByteOffset = 0) {
+  static Value *getPointerBits(IRBuilder<> &B, Value *Pointer,
+                               uint16_t ByteOffset = 0) {
     LLVMContext &C = B.getContext();
-    Type *I8 = Type::getInt8Ty(C);
     Type *I32 = Type::getInt32Ty(C);
     Value *Bits = B.CreatePtrToInt(Pointer, I32, "gptr.bits");
     if (ByteOffset) {
@@ -1026,6 +1024,15 @@ private:
       Value *Tag = B.CreateAnd(Bits, B.getInt32(0xffff0000), "gptr.byte.tag");
       Bits = B.CreateOr(Tag, B.CreateZExt(Address, I32), "gptr.byte.bits");
     }
+    return Bits;
+  }
+
+  static SmallVector<Value *, 4> getPointerParts(IRBuilder<> &B,
+                                                 Value *Pointer,
+                                                 uint16_t ByteOffset = 0) {
+    LLVMContext &C = B.getContext();
+    Type *I8 = Type::getInt8Ty(C);
+    Value *Bits = getPointerBits(B, Pointer, ByteOffset);
     SmallVector<Value *, 4> Parts;
     for (unsigned Offset : {0u, 8u, 16u, 24u}) {
       Value *Part = Bits;
@@ -1034,6 +1041,22 @@ private:
       Parts.push_back(B.CreateTrunc(Part, I8, "gptr.part"));
     }
     return Parts;
+  }
+
+  static SmallVector<Value *, 4>
+  getRuntimePointerArgs(IRBuilder<> &B, Value *Pointer,
+                        uint16_t ByteOffset = 0) {
+    if (usesIARGenericPointerABI(*B.GetInsertBlock()->getParent())) {
+      LLVMContext &C = B.getContext();
+      Type *I16 = Type::getInt16Ty(C);
+      Value *Bits = getPointerBits(B, Pointer, ByteOffset);
+      Value *Address = B.CreateTrunc(Bits, I16, "gptr.iar.address");
+      Value *TagAndPadding = B.CreateTrunc(
+          B.CreateLShr(Bits, 16, "gptr.iar.tag.shift"), I16,
+          "gptr.iar.tag.padding");
+      return {Address, TagAndPadding};
+    }
+    return getPointerParts(B, Pointer, ByteOffset);
   }
 
   static uint64_t getAggregateSize(const DataLayout &DL, Type *Ty) {
@@ -1080,7 +1103,7 @@ private:
     std::string Name =
         (Twine("__mcs51_gptrget") + getSuffix(AccessTy)).str();
     SmallVector<Value *, 4> Args =
-        getPointerParts(B, Pointer, static_cast<uint16_t>(Offset));
+        getRuntimePointerArgs(B, Pointer, static_cast<uint16_t>(Offset));
     Type *CallTy = AccessTy->isIntegerTy(8) ? Type::getInt16Ty(C) : AccessTy;
     CallInst *Call = createCall(B, M, Name, CallTy, Args);
     if (IsVolatile)
@@ -1095,6 +1118,29 @@ private:
     else if (Ty->isIntegerTy(1))
       Result = B.CreateTrunc(Result, Ty, "gptr.aggregate.bool");
     return Result;
+  }
+
+  static void lowerIARGenericByteStore(IRBuilder<> &B, Module &M,
+                                       Value *Pointer, Value *Stored,
+                                       uint64_t Offset, bool IsVolatile) {
+    LLVMContext &C = M.getContext();
+    Type *I8Ty = Type::getInt8Ty(C);
+    Type *I16Ty = Type::getInt16Ty(C);
+    Value *Bits = getPointerBits(B, Pointer, static_cast<uint16_t>(Offset));
+    Value *Address = B.CreateTrunc(Bits, I16Ty, "gptr.iar.address");
+    Value *Tag = B.CreateTrunc(
+        B.CreateLShr(Bits, 16, "gptr.iar.tag.shift"), I8Ty,
+        "gptr.iar.tag");
+    Value *TagWord = B.CreateShl(B.CreateZExt(Tag, I16Ty), 8,
+                                 "gptr.iar.tag.word");
+    Value *ValueByte = B.CreateTrunc(Stored, I8Ty, "gptr.iar.value.byte");
+    Value *Packed = B.CreateOr(
+        TagWord, B.CreateZExt(ValueByte, I16Ty), "gptr.iar.tagged.value");
+    Value *Args[] = {Address, Packed};
+    CallInst *Call = createCall(B, M, "__mcs51_gptrput8",
+                                Type::getVoidTy(C), Args);
+    if (IsVolatile)
+      Call->setConvergent();
   }
 
   static void lowerGenericScalarStoreValue(IRBuilder<> &B, Module &M,
@@ -1129,8 +1175,20 @@ private:
                                "gptr.aggregate.float.bits");
     }
 
-    SmallVector<Value *, 12> Args =
-        getPointerParts(B, Pointer, static_cast<uint16_t>(Offset));
+    bool IsIARABI =
+        usesIARGenericPointerABI(*B.GetInsertBlock()->getParent());
+    if (IsIARABI) {
+      unsigned NumBytes = DL.getTypeStoreSize(StorageTy).getFixedValue();
+      for (unsigned I = 0; I < NumBytes; ++I) {
+        Value *Part = Stored;
+        if (I)
+          Part = B.CreateLShr(Stored, I * 8, "gptr.iar.value.shift");
+        lowerIARGenericByteStore(B, M, Pointer, Part, Offset + I, IsVolatile);
+      }
+      return;
+    }
+    SmallVector<Value *, 12> Args;
+    Args = getPointerParts(B, Pointer, static_cast<uint16_t>(Offset));
     unsigned NumBytes = DL.getTypeStoreSize(StorageTy).getFixedValue();
     Type *I8Ty = Type::getInt8Ty(C);
     for (unsigned I = 0; I < NumBytes; ++I) {
@@ -1381,7 +1439,8 @@ private:
     Module &M = *LI.getModule();
     LLVMContext &C = M.getContext();
     Type *MemTy = getMemoryType(LI.getType(), C);
-    SmallVector<Value *, 4> Args = getPointerParts(B, LI.getPointerOperand());
+    SmallVector<Value *, 4> Args =
+        getRuntimePointerArgs(B, LI.getPointerOperand());
     std::string Name =
         (Twine("__mcs51_gptrget") + getSuffix(LI.getType())).str();
     Type *CallTy = MemTy;
@@ -1426,7 +1485,21 @@ private:
     else if (ValueTy->isFloatTy())
       Stored = B.CreateBitCast(Stored, Type::getInt32Ty(C), "gptr.float.bits");
 
-    SmallVector<Value *, 12> Args = getPointerParts(B, SI.getPointerOperand());
+    bool IsIARABI = usesIARGenericPointerABI(*SI.getFunction());
+    if (IsIARABI) {
+      unsigned NumBytes = MemTy->getPrimitiveSizeInBits().getFixedValue() / 8;
+      for (unsigned I = 0; I < NumBytes; ++I) {
+        Value *Part = Stored;
+        if (I)
+          Part = B.CreateLShr(Stored, I * 8, "gptr.iar.value.shift");
+        lowerIARGenericByteStore(B, M, SI.getPointerOperand(), Part, I,
+                                 SI.isVolatile());
+      }
+      SI.eraseFromParent();
+      return;
+    }
+    SmallVector<Value *, 12> Args;
+    Args = getPointerParts(B, SI.getPointerOperand());
     unsigned NumBytes = MemTy->getPrimitiveSizeInBits().getFixedValue() / 8;
     for (unsigned I = 0; I < NumBytes; ++I) {
       Value *Part = Stored;
