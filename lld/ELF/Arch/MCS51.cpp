@@ -620,10 +620,11 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
               getCommonTargetOfExternalBankThunk(ctx, *rel.sym))
         val = direct->getVA(ctx, rel.addend);
     unsigned targetBank = 0;
+    Defined *target = nullptr;
     if (rel.sym) {
       // The assembler rewrites references to local functions against their
       // STT_SECTION symbol, so the callee bank cannot depend on isFunc().
-      auto *target = dyn_cast<Defined>(rel.sym);
+      target = dyn_cast<Defined>(rel.sym);
       auto *targetInput =
           target ? dyn_cast_or_null<InputSection>(target->section) : nullptr;
       if (targetInput && (targetInput->flags & SHF_EXECINSTR))
@@ -685,7 +686,8 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
         // Some declarations in another translation unit do not carry a
         // section attribute. Resolve those calls and function pointers here,
         // after bank placement has made the target bank known.
-        auto *thunk = findMCS51BankCallThunk(ctx, *target);
+        auto *thunk =
+            target ? findMCS51BankCallThunk(ctx, *target) : nullptr;
         if (thunk)
           val = thunk->getVA(ctx, rel.addend);
         else
