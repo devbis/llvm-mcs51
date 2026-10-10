@@ -381,14 +381,17 @@ bool MCS51::relaxOnce(int Pass) const {
               targetInput ? getMCS51CodeBank(targetInput->getOutputSection())
                           : 0;
           unsigned callerBank = getMCS51CodeBank(Sec->getOutputSection());
-          uint64_t transferVA = Sec->getVA() + R.offset - Delta;
+          // R.offset points to the high byte after the opcode. The shortened
+          // instruction is two bytes long, so its next PC is one byte past
+          // that relocation field (opcode + 2), not two bytes past it.
+          uint64_t opcodeVA = Sec->getVA() + R.offset - 1 - Delta;
           uint64_t destinationVA =
-              Sec->getRelocTargetVA(ctx, R, transferVA);
+              Sec->getRelocTargetVA(ctx, R, opcodeVA);
           uint64_t targetOffset;
           if (getMCS51SectionTargetOffset(R, Sec, targetOffset))
             destinationVA -= getMCS51RemovedBefore(
                 Relocs, Aux.relocDeltas.get(), targetOffset);
-          uint64_t nextPC = transferVA + 2;
+          uint64_t nextPC = opcodeVA + 2;
           if (targetInput && targetBank == callerBank &&
               (destinationVA & ~uint64_t(0x7ff)) ==
                   (nextPC & ~uint64_t(0x7ff)))
