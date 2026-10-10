@@ -7,6 +7,9 @@ The default ABI is unchanged when `-mabi=iar` is absent. The current slice
 passes byte arguments in the first available `R1`-`R5` register, word arguments
 in `R3:R2` and `R5:R4`, returns bytes in `R1`, and returns words in
 `R3:R2`/`R5:R4`. It also preserves the IAR virtual registers and `R6`/`R7`.
+The 8051 IAR scalar ABI has no result convention wider than 32 bits. Generic
+64-bit accesses in IAR functions use two 32-bit runtime calls so they do not
+depend on an unsupported `i64` helper return.
 
 Scalar arguments that do not fit the IAR registers use the downward-growing
 XDATA stack through `?XSP`; callers reserve and release the outgoing area, and

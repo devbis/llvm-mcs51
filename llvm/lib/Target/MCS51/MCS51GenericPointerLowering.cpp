@@ -1153,6 +1153,18 @@ private:
     LLVMContext &C = M.getContext();
     const DataLayout &DL = M.getDataLayout();
     Type *AccessTy = getGenericAccessType(Ty, DL, C);
+    if (AccessTy->isIntegerTy(64) &&
+        usesMCS51IARABI(*B.GetInsertBlock()->getParent())) {
+      Type *I32Ty = Type::getInt32Ty(C);
+      Value *Low = lowerGenericScalarLoadValue(B, M, Pointer, I32Ty, Offset,
+                                               IsVolatile);
+      Value *High = lowerGenericScalarLoadValue(B, M, Pointer, I32Ty,
+                                                Offset + 4, IsVolatile);
+      Value *WideLow = B.CreateZExt(Low, AccessTy, "gptr.i64.low");
+      Value *WideHigh = B.CreateZExt(High, AccessTy, "gptr.i64.high");
+      Value *ShiftedHigh = B.CreateShl(WideHigh, 32, "gptr.i64.high.shift");
+      return B.CreateOr(WideLow, ShiftedHigh, "gptr.i64");
+    }
     std::string Name =
         (Twine("__mcs51_gptrget") + getSuffix(AccessTy)).str();
     SmallVector<Value *, 4> Args =
@@ -1180,6 +1192,18 @@ private:
     LLVMContext &C = M.getContext();
     const DataLayout &DL = M.getDataLayout();
     Type *AccessTy = getGenericAccessType(Ty, DL, C);
+    if (AccessTy->isIntegerTy(64) &&
+        usesMCS51IARABI(*B.GetInsertBlock()->getParent())) {
+      Type *I32Ty = Type::getInt32Ty(C);
+      Value *Low = B.CreateTrunc(ValueToStore, I32Ty, "gptr.i64.low");
+      Value *HighShift = B.CreateLShr(ValueToStore, 32, "gptr.i64.high.shift");
+      Value *High = B.CreateTrunc(HighShift, I32Ty, "gptr.i64.high");
+      lowerGenericScalarStoreValue(B, M, Pointer, Low, I32Ty, Offset,
+                                   IsVolatile);
+      lowerGenericScalarStoreValue(B, M, Pointer, High, I32Ty, Offset + 4,
+                                   IsVolatile);
+      return;
+    }
     Value *Stored = ValueToStore;
     Type *StorageTy = AccessTy;
     if (Ty->isPointerTy())
@@ -1377,13 +1401,13 @@ private:
     return Call;
   }
 
-  static bool needsChunkedIntegerAccess(Type *Ty) {
+  static bool needsChunkedIntegerAccess(Type *Ty, bool IsIARABI) {
     auto *IT = dyn_cast<IntegerType>(Ty);
     if (!IT)
       return false;
     unsigned Bits = IT->getBitWidth();
-    return Bits % 8 == 0 && Bits < 64 && Bits != 8 && Bits != 16 &&
-           Bits != 32;
+    return Bits % 8 == 0 && (Bits < 64 || (IsIARABI && Bits == 64)) &&
+           Bits != 8 && Bits != 16 && Bits != 32;
   }
 
   static Value *lowerChunkedIntegerLoad(IRBuilder<> &B, Module &M,
@@ -1429,7 +1453,8 @@ private:
       lowerAggregateLoad(LI);
       return;
     }
-    if (needsChunkedIntegerAccess(LI.getType())) {
+    if (needsChunkedIntegerAccess(LI.getType(),
+                                  usesMCS51IARABI(*LI.getFunction()))) {
       IRBuilder<> B(&LI);
       Value *Result = lowerChunkedIntegerLoad(
           B, *LI.getModule(), LI.getPointerOperand(),
@@ -1468,7 +1493,9 @@ private:
       lowerAggregateStore(SI);
       return;
     }
-    if (needsChunkedIntegerAccess(SI.getValueOperand()->getType())) {
+    if (needsChunkedIntegerAccess(
+            SI.getValueOperand()->getType(),
+            usesMCS51IARABI(*SI.getFunction()))) {
       IRBuilder<> B(&SI);
       lowerChunkedIntegerStore(
           B, *SI.getModule(), SI.getPointerOperand(), SI.getValueOperand(),
