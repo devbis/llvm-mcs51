@@ -198,6 +198,14 @@ public:
   }
 
 private:
+  // The IAR runtime remains IAR-ABI even when LTO changes a private function
+  // in an IAR module to the local Clang ABI. Generic i64 accesses must still
+  // avoid helpers with unsupported IAR i64 returns in those functions.
+  static bool usesIARGenericPointerABI(const Function &F) {
+    return usesMCS51IARABI(F) ||
+           F.getParent()->getGlobalVariable("?XSP") != nullptr;
+  }
+
   static void lowerGenericGEP(GetElementPtrInst &GEP) {
     IRBuilder<> B(&GEP);
     Module &M = *GEP.getModule();
@@ -1058,7 +1066,7 @@ private:
     const DataLayout &DL = M.getDataLayout();
     Type *AccessTy = getGenericAccessType(Ty, DL, C);
     if (AccessTy->isIntegerTy(64) &&
-        usesMCS51IARABI(*B.GetInsertBlock()->getParent())) {
+        usesIARGenericPointerABI(*B.GetInsertBlock()->getParent())) {
       Type *I32Ty = Type::getInt32Ty(C);
       Value *Low = lowerGenericScalarLoadValue(B, M, Pointer, I32Ty, Offset,
                                                IsVolatile);
@@ -1097,7 +1105,7 @@ private:
     const DataLayout &DL = M.getDataLayout();
     Type *AccessTy = getGenericAccessType(Ty, DL, C);
     if (AccessTy->isIntegerTy(64) &&
-        usesMCS51IARABI(*B.GetInsertBlock()->getParent())) {
+        usesIARGenericPointerABI(*B.GetInsertBlock()->getParent())) {
       Type *I32Ty = Type::getInt32Ty(C);
       Value *Low = B.CreateTrunc(ValueToStore, I32Ty, "gptr.i64.low");
       Value *HighShift = B.CreateLShr(ValueToStore, 32, "gptr.i64.high.shift");
@@ -1357,8 +1365,8 @@ private:
       lowerAggregateLoad(LI);
       return;
     }
-    if (needsChunkedIntegerAccess(LI.getType(),
-                                  usesMCS51IARABI(*LI.getFunction()))) {
+    if (needsChunkedIntegerAccess(
+            LI.getType(), usesIARGenericPointerABI(*LI.getFunction()))) {
       IRBuilder<> B(&LI);
       Value *Result = lowerChunkedIntegerLoad(
           B, *LI.getModule(), LI.getPointerOperand(),
@@ -1397,9 +1405,8 @@ private:
       lowerAggregateStore(SI);
       return;
     }
-    if (needsChunkedIntegerAccess(
-            SI.getValueOperand()->getType(),
-            usesMCS51IARABI(*SI.getFunction()))) {
+    if (needsChunkedIntegerAccess(SI.getValueOperand()->getType(),
+                                  usesIARGenericPointerABI(*SI.getFunction()))) {
       IRBuilder<> B(&SI);
       lowerChunkedIntegerStore(
           B, *SI.getModule(), SI.getPointerOperand(), SI.getValueOperand(),
