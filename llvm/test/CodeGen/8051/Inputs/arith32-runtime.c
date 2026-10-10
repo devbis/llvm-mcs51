@@ -8,7 +8,7 @@ __asm__(".section .text.0start,\"ax\"\n"
         "  lcall main\n"
         "  sjmp .\n");
 
-__attribute__((section(".mcs51.simresult")))
+__attribute__((section(".mcs51.xdata.simresult")))
 volatile __xdata unsigned char Result;
 
 static __code const unsigned long Values[] = {

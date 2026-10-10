@@ -9,7 +9,7 @@ __xdata volatile unsigned char XDataValue;
 __pdata volatile unsigned char PDataValue;
 __data volatile unsigned char DataValue;
 __idata volatile unsigned char IDataValue;
-__attribute__((section(".mcs51.simresult")))
+__attribute__((section(".mcs51.xdata.simresult")))
 volatile __xdata unsigned char Result;
 
 int main(void) {

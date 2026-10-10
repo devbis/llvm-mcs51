@@ -10,7 +10,7 @@ struct DivisionResult {
   unsigned long long Observed;
   unsigned long long Expected;
 };
-__attribute__((section(".mcs51.simresult")))
+__attribute__((section(".mcs51.xdata.simresult")))
 volatile __xdata struct DivisionResult Result;
 static volatile __xdata unsigned long long InputNumerator;
 static volatile __xdata unsigned long long InputDenominator;
