@@ -147,7 +147,13 @@ class MCS51MCCodeEmitter final : public MCCodeEmitter {
                     : IsDPTRLoad ? MCS51::fixup_dptr16 : MCS51::fixup_16_be);
       // With +relax the linker may shrink a MOV DPTR,#sym+1 that follows
       // MOV DPTR,#sym to INC DPTR.
-      if (IsDPTRLoad && STI.hasFeature(MCS51::FeatureRelax))
+      // LLD may also shrink LCALL/LJMP to ACALL/AJMP. Keep their fragments
+      // linker-relaxable so local PC-relative branches spanning them remain
+      // relocations and can be adjusted after the instruction is shortened.
+      bool IsCodeTransfer = MI.getOpcode() == MCS51::LCALL ||
+                            MI.getOpcode() == MCS51::LJMP;
+      if ((IsDPTRLoad && STI.hasFeature(MCS51::FeatureRelax)) ||
+          IsCodeTransfer)
         Fixup.setLinkerRelaxable();
       Fixups.push_back(Fixup);
       return 0;
