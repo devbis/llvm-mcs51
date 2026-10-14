@@ -4,6 +4,7 @@
 #include "MCS51MachineFunctionInfo.h"
 #include "MCS51SelectionDAGInfo.h"
 #include "MCS51Subtarget.h"
+#include "llvm/ADT/StringRef.h"
 #include "MCTargetDesc/MCS51MCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -1434,9 +1435,26 @@ SDValue MCS51TargetLowering::LowerCall(
   bool IsVarArg = CLI.IsVarArg;
   CLI.IsTailCall = false;
 
+  // LLVM's memset intrinsic carries its fill value as i8, but the C runtime
+  // entry point has the standard signature memset(void *, int, size_t). The
+  // MCS-51 ABI assigns i8 and i16 arguments to different register sequences,
+  // so widen the intrinsic libcall's byte before assigning argument locations.
+  // Ordinary C calls already pass the int argument as i16 and are unchanged.
+  SmallVector<ISD::OutputArg, 8> Outs(CLI.Outs.begin(), CLI.Outs.end());
+  SmallVector<SDValue, 8> OutVals(CLI.OutVals.begin(), CLI.OutVals.end());
+  if (auto *ES = dyn_cast<ExternalSymbolSDNode>(CLI.Callee);
+      ES && StringRef(ES->getSymbol()) == "memset" && Outs.size() == 3 &&
+      OutVals.size() == 3 && OutVals[1].getValueType() == MVT::i8 &&
+      OutVals[2].getValueType() == MVT::i16) {
+    OutVals[1] = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i16, OutVals[1]);
+    Outs[1].VT = MVT::i16;
+    Outs[1].ArgVT = MVT::i16;
+    Outs[1].OrigTy = Type::getInt16Ty(*DAG.getContext());
+  }
+
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_MCS51);
+  CCInfo.AnalyzeCallOperands(Outs, CC_MCS51);
 
   SDValue Chain = CLI.Chain;
   SDValue InGlue;
@@ -1446,13 +1464,13 @@ SDValue MCS51TargetLowering::LowerCall(
   SmallVector<std::pair<int64_t, SDValue>, 4> StackArgs;
   for (unsigned I = 0; I < ArgLocs.size(); ++I) {
     const CCValAssign &VA = ArgLocs[I];
-    EVT VT = CLI.OutVals[I].getValueType();
+    EVT VT = OutVals[I].getValueType();
     if (EVT(VA.getLocVT()) != VT || (VT != MVT::i8 && VT != MVT::i16))
       report_fatal_error("unsupported MCS-51 call argument");
     if (VA.isRegLoc())
-      RegsToPass.emplace_back(VA.getLocReg(), CLI.OutVals[I]);
+      RegsToPass.emplace_back(VA.getLocReg(), OutVals[I]);
     else if (VA.isMemLoc())
-      StackArgs.emplace_back(VA.getLocMemOffset(), CLI.OutVals[I]);
+      StackArgs.emplace_back(VA.getLocMemOffset(), OutVals[I]);
     else
       report_fatal_error("unsupported MCS-51 call argument location");
   }
