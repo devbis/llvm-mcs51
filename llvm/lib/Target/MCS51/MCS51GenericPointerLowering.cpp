@@ -42,6 +42,7 @@ public:
     Changed |= rejectUnsupportedGenericCasts(F);
     SmallVector<MemCpyInst *, 4> DynamicCopies;
     SmallVector<MemMoveInst *, 4> DynamicMoves;
+    SmallVector<MemSetInst *, 4> XDataMemsets;
     for (Instruction &I : instructions(F)) {
       if (auto *Copy = dyn_cast<MemCpyInst>(&I)) {
         if (!isa<ConstantInt>(Copy->getLength()))
@@ -49,6 +50,11 @@ public:
       } else if (auto *Move = dyn_cast<MemMoveInst>(&I)) {
         if (!isa<ConstantInt>(Move->getLength()))
           DynamicMoves.push_back(Move);
+      } else if (auto *Set = dyn_cast<MemSetInst>(&I)) {
+        Value *Destination = getMemIntrinsicMemoryPointer(Set->getRawDest());
+        if (cast<PointerType>(Destination->getType())->getAddressSpace() ==
+            MCS51::XData)
+          XDataMemsets.push_back(Set);
       }
     }
     for (MemCpyInst *Copy : DynamicCopies) {
@@ -57,6 +63,10 @@ public:
     }
     for (MemMoveInst *Move : DynamicMoves) {
       lowerDynamicAddressSpaceMove(*Move);
+      Changed = true;
+    }
+    for (MemSetInst *Set : XDataMemsets) {
+      lowerXDataMemset(*Set);
       Changed = true;
     }
 
@@ -455,6 +465,54 @@ private:
       }
       return Pointer;
     }
+  }
+
+  static void lowerXDataMemset(MemSetInst &Set) {
+    Function &F = *Set.getFunction();
+    LLVMContext &C = F.getContext();
+    Type *I8Ty = Type::getInt8Ty(C);
+    Value *Destination = getMemIntrinsicMemoryPointer(Set.getRawDest());
+    Type *LengthTy = Set.getLength()->getType();
+
+    // SelectionDAG's generic memset expansion cannot issue stores through
+    // address space 4. Keep the pointer's XDATA address space and express the
+    // intrinsic as an ordinary byte loop before instruction selection.
+    BasicBlock *Preheader = Set.getParent();
+    BasicBlock *Continue =
+        Preheader->splitBasicBlock(Set.getIterator(), "mcs51.xdata.memset.cont");
+    Preheader->getTerminator()->eraseFromParent();
+    BasicBlock *Loop =
+        BasicBlock::Create(C, "mcs51.xdata.memset.loop", &F, Continue);
+    BasicBlock *Body =
+        BasicBlock::Create(C, "mcs51.xdata.memset.body", &F, Continue);
+
+    IRBuilder<> Entry(Preheader);
+    Entry.SetCurrentDebugLocation(Set.getDebugLoc());
+    Entry.CreateBr(Loop);
+
+    IRBuilder<> LoopBuilder(Loop);
+    LoopBuilder.SetCurrentDebugLocation(Set.getDebugLoc());
+    PHINode *Index =
+        LoopBuilder.CreatePHI(LengthTy, 2, "mcs51.xdata.memset.index");
+    Index->addIncoming(ConstantInt::get(LengthTy, 0), Preheader);
+    Value *More = LoopBuilder.CreateICmpULT(Index, Set.getLength(),
+                                            "mcs51.xdata.memset.more");
+    LoopBuilder.CreateCondBr(More, Body, Continue);
+
+    IRBuilder<> BodyBuilder(Body);
+    BodyBuilder.SetCurrentDebugLocation(Set.getDebugLoc());
+    Value *Address = BodyBuilder.CreateGEP(I8Ty, Destination, Index,
+                                           "mcs51.xdata.memset.address");
+    StoreInst *Store = BodyBuilder.CreateStore(Set.getValue(), Address);
+    Store->setAlignment(Align(1));
+    Store->setVolatile(Set.isVolatile());
+    Store->setAAMetadata(Set.getAAMetadata());
+    Value *Next = BodyBuilder.CreateAdd(
+        Index, ConstantInt::get(LengthTy, 1), "mcs51.xdata.memset.next");
+    BodyBuilder.CreateBr(Loop);
+    Index->addIncoming(Next, Body);
+
+    Set.eraseFromParent();
   }
 
   static void lowerDynamicAddressSpaceCopy(MemCpyInst &Copy) {
