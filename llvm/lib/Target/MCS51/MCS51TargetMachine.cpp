@@ -2016,10 +2016,15 @@ public:
       }
     }
 
-    SmallVector<MachineBasicBlock *, 16> Blocks;
-    for (MachineBasicBlock &MBB : MF)
-      Blocks.push_back(&MBB);
-    fullyRecomputeLiveIns(Blocks);
+    if (Changed) {
+      // Live-in dataflow flows against the usual machine-block layout order.
+      // Recomputing in forward order can require one full sweep per block for
+      // long unrolled paths, making this pass quadratic on large functions.
+      SmallVector<MachineBasicBlock *, 16> Blocks;
+      for (auto I = MF.rbegin(), E = MF.rend(); I != E; ++I)
+        Blocks.push_back(&*I);
+      fullyRecomputeLiveIns(Blocks);
+    }
     return Changed;
   }
 };
