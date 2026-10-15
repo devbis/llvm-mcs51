@@ -8,6 +8,8 @@
 
 namespace llvm {
 
+class GlobalVariable;
+
 class MCS51MachineFunctionInfo final : public MachineFunctionInfo {
 public:
   struct CallFrameStateAtEntry {
@@ -27,6 +29,10 @@ private:
   // DPTR-defining instructions emitted for an address: the word it was built
   // from and the offset it holds right after that instruction.
   DenseMap<const MachineInstr *, std::pair<Register, int64_t>> DptrAddresses;
+  // Frame objects moved out of the hardware stack into the function's static
+  // frame (a PDATA object), with their byte offset in that frame.
+  DenseMap<int, unsigned> StaticFrameOffsets;
+  GlobalVariable *StaticFrame = nullptr;
 
 public:
   MCS51MachineFunctionInfo(const Function &, const TargetSubtargetInfo *) {}
@@ -64,6 +70,16 @@ public:
     auto It = DptrAddresses.find(MI);
     return It == DptrAddresses.end() ? nullptr : &It->second;
   }
+  GlobalVariable *getStaticFrame() const { return StaticFrame; }
+  void setStaticFrame(GlobalVariable *GV) { StaticFrame = GV; }
+  const unsigned *getStaticFrameOffset(int FI) const {
+    auto It = StaticFrameOffsets.find(FI);
+    return It == StaticFrameOffsets.end() ? nullptr : &It->second;
+  }
+  void setStaticFrameOffset(int FI, unsigned Offset) {
+    StaticFrameOffsets[FI] = Offset;
+  }
+
   void setDptrAddress(const MachineInstr *MI, Register Base, int64_t Offset) {
     DptrAddresses[MI] = {Base, Offset};
   }

@@ -492,7 +492,9 @@ public:
               Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
               OutContext);
         Inst.addOperand(MCOperand::createExpr(Expr));
-      } else
+      } else if (MO.isRegMask())
+        continue;
+      else
         report_fatal_error("unsupported MCS-51 machine operand in AsmPrinter");
     }
     EmitToStreamer(*OutStreamer, Inst);

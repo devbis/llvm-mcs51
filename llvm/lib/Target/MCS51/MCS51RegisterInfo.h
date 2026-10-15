@@ -9,6 +9,11 @@
 
 namespace llvm {
 
+// True when -mcs51-csr narrows the callee-saved set; calls then carry the
+// matching call-preserved register mask.
+bool mcs51UseCallRegMask();
+bool mcs51WideArgs();
+
 class MCS51RegisterInfo final : public MCS51GenRegisterInfo {
 public:
   MCS51RegisterInfo();
@@ -23,6 +28,8 @@ public:
   /// Stack arguments are pushed one by one inside the call sequence. Only the
   /// forward walk accumulates MCS51InstrInfo::getSPAdjust per instruction.
   bool eliminateFrameIndicesBackwards() const override { return false; }
+  bool eliminateStaticFrameIndex(MachineBasicBlock::iterator MI,
+                                 unsigned FIOperandNum) const;
   Register getFrameRegister(const MachineFunction &MF) const override;
   const TargetRegisterClass *getPointerRegClass(unsigned Kind = 0) const override;
 };
