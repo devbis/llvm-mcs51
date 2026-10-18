@@ -3660,8 +3660,13 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
   if (MI.getOpcode() == MCS51::LOADBIT8) {
     Register Dst = MI.getOperand(0).getReg();
     // Materialize the addressed bit as the canonical byte value 0 or 1.
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT))
-        .add(MI.getOperand(1));
+    MachineInstrBuilder ReadBit =
+        BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT))
+            .add(MI.getOperand(1));
+    // Bit addresses 0xe0-0xe7 alias ACC, so MOV C, bit reads A there.
+    if (MI.getOperand(1).isImm() &&
+        (static_cast<uint8_t>(MI.getOperand(1).getImm()) & 0xf8) == 0xe0)
+      ReadBit.addReg(MCS51::A, RegState::Implicit);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::CLR_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::RLC_A));
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_RN_A), Dst);
@@ -3669,10 +3674,12 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     return MBB;
   }
   if (MI.getOpcode() == MCS51::STOREBIT8) {
-    // Bit-address space stores consume the low bit of the source byte.
+    // Bit-address stores consume the low bit via ACC.0.
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_A_RN))
         .addReg(MI.getOperand(1).getReg());
-    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT)).addImm(0xE0);
+    BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_C_BIT))
+        .addImm(0xE0)
+        .addReg(MCS51::A, RegState::Implicit);
     BuildMI(*MBB, MII, DL, TII.get(MCS51::MOV_BIT_C))
         .add(MI.getOperand(0));
     MI.eraseFromParent();
