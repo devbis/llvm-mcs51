@@ -124,6 +124,57 @@ static bool getIndexedFrameAddress(SDValue Ptr, int &FI, int64_t &Offset,
   return Index.getValueType() == MVT::i16;
 }
 
+static SDValue stripToggleValueCasts(SDValue Value) {
+  while (Value &&
+         (Value.getOpcode() == ISD::TRUNCATE ||
+          Value.getOpcode() == ISD::ZERO_EXTEND ||
+          Value.getOpcode() == ISD::SIGN_EXTEND ||
+          Value.getOpcode() == ISD::ANY_EXTEND)) {
+    if (!Value.hasOneUse())
+      return SDValue();
+    Value = Value.getOperand(0);
+  }
+  return Value;
+}
+
+static SDValue getBitToggleLoad(SDValue Value) {
+  Value = stripToggleValueCasts(Value);
+  if (!Value || !Value.hasOneUse())
+    return SDValue();
+
+  if (Value.getOpcode() == ISD::XOR) {
+    SDValue LHS = Value.getOperand(0);
+    SDValue RHS = Value.getOperand(1);
+    auto IsOne = [](SDValue V) {
+      auto *C = dyn_cast<ConstantSDNode>(V);
+      return C && C->getZExtValue() == 1;
+    };
+    if (IsOne(LHS))
+      Value = stripToggleValueCasts(RHS);
+    else if (IsOne(RHS))
+      Value = stripToggleValueCasts(LHS);
+    else
+      return SDValue();
+  } else if (Value.getOpcode() == MCS51ISD::CMPEQ8) {
+    SDValue LHS = Value.getOperand(0);
+    SDValue RHS = Value.getOperand(1);
+    auto IsZero = [](SDValue V) {
+      auto *C = dyn_cast<ConstantSDNode>(V);
+      return C && C->isZero();
+    };
+    if (IsZero(LHS))
+      Value = stripToggleValueCasts(RHS);
+    else if (IsZero(RHS))
+      Value = stripToggleValueCasts(LHS);
+    else
+      return SDValue();
+  } else {
+    return SDValue();
+  }
+
+  return Value && isa<LoadSDNode>(Value.getNode()) ? Value : SDValue();
+}
+
 class MCS51DAGToDAGISel final : public SelectionDAGISel {
 public:
   MCS51DAGToDAGISel(MCS51TargetMachine &TM, CodeGenOptLevel OL)
@@ -587,6 +638,38 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
 
   auto *ST = cast<StoreSDNode>(N);
   unsigned AS = ST->getAddressSpace();
+  if (AS == MCS51::Bit && ST->getMemoryVT() == MVT::i8) {
+    SDValue ToggleLoadValue = getBitToggleLoad(ST->getValue());
+    auto *LD = ToggleLoadValue ? dyn_cast<LoadSDNode>(ToggleLoadValue.getNode())
+                               : nullptr;
+    if (LD && LD->getAddressSpace() == MCS51::Bit &&
+        LD->getMemoryVT() == MVT::i8 &&
+        LD->getBasePtr() == ST->getBasePtr() &&
+        ToggleLoadValue.hasOneUse() && SDValue(LD, 1).hasOneUse() &&
+        ST->getChain() == SDValue(LD, 1)) {
+      SDValue Addr = ST->getBasePtr();
+      if (auto *GA = dyn_cast<GlobalAddressSDNode>(Addr))
+        Addr = CurDAG->getTargetGlobalAddress(
+            GA->getGlobal(), DL, MVT::i8, GA->getOffset(),
+            GA->getTargetFlags());
+      else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
+        Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
+      else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
+        Addr = SDValue();
+
+      if (Addr) {
+        SDValue Ops[] = {Addr, LD->getChain()};
+        SDNode *Res = CurDAG->getMachineNode(MCS51::CPL_BIT, DL, MVT::Other,
+                                             Ops);
+        MachineMemOperand *MemRefs[] = {LD->getMemOperand(),
+                                        ST->getMemOperand()};
+        CurDAG->setNodeMemRefs(cast<MachineSDNode>(Res), MemRefs);
+        ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+        CurDAG->RemoveDeadNode(N);
+        return true;
+      }
+    }
+  }
   if (AS == MCS51::PData &&
       (ST->getMemoryVT() == MVT::i8 || ST->getMemoryVT() == MVT::i16)) {
     SDValue Addr = ST->getBasePtr();
