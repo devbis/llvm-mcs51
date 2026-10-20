@@ -3,6 +3,7 @@
 ; count a virtual-register def in the A class (here the materialised LHS 0)
 ; as a clobber; otherwise "clr a" lands between and 0 - (x & 1) became 0.
 ; RUN: llc -mtriple=mcs51 < %s | FileCheck %s
+; RUN: llc -mtriple=mcs51 -mcs51-csr=none < %s | FileCheck %s
 
 ; CHECK-LABEL: neg_low_bit:
 ; CHECK: anl a, #1

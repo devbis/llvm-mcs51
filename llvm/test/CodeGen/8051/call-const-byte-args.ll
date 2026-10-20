@@ -2,6 +2,7 @@
 ; register. Selecting them into A kept every constant live in the single A
 ; register until the call, so all but one were spilled to the hardware stack.
 ; RUN: llc -mtriple=mcs51 < %s | FileCheck %s
+; RUN: llc -mtriple=mcs51 -mcs51-csr=none < %s | FileCheck %s
 
 declare void @b4(i8, i8, i8, i8)
 declare void @mixed(i8, i8, i16)

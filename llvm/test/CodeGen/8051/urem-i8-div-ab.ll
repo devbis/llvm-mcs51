@@ -2,6 +2,7 @@
 ; that read must be a modeled use of B, otherwise DIV AB (whose A and B
 ; results then look dead) is deleted and urem returned the divisor.
 ; RUN: llc -mtriple=mcs51 < %s | FileCheck %s
+; RUN: llc -mtriple=mcs51 -mcs51-csr=none < %s | FileCheck %s
 
 ; CHECK-LABEL: rem_const:
 ; CHECK: mov a, r7
