@@ -136,6 +136,8 @@ SECTIONS
     KEEP(*(.mcs51.iar.csr))
   } > XRAM
 
+  /* The optional IAR ABI runtime contributes this reserved downward-growing
+     XDATA stack. With the section absent, the standard Clang ABI uses no RAM. */
   .mcs51_iar_xstack 0x1d00 (NOLOAD) :
   {
     __mcs51_iar_xstack_start = .;
