@@ -933,17 +933,29 @@ groupMCS51AutoBankSections(ArrayRef<InputSectionBase *> sections) {
   };
   auto joinPCRelativeTarget = [&](InputSection &source,
                                   const auto &relocation) {
-    if (relocation.getType(false) != R_8051_PCREL8)
-      return;
+    uint32_t type = relocation.getType(false);
     auto sourceIt = sectionIndices.find(&source);
     if (sourceIt == sectionIndices.end())
       return;
     Symbol &targetSymbol = source.file->getRelocTargetSym(relocation);
+    // Module-local code (IAR shared subroutines and tables, referenced through
+    // section symbols) has no bank-call thunk, so it must share a bank with
+    // every section that reaches it.
+    if (type != R_8051_PCREL8 && targetSymbol.isFunc())
+      return;
+    if (type != R_8051_PCREL8 && type != R_8051_16_BE &&
+        type != R_8051_11 && type != R_8051_DPTR16)
+      return;
     auto *targetDefinition = dyn_cast<Defined>(&targetSymbol);
     auto *targetSection = targetDefinition
                               ? dyn_cast_or_null<InputSectionBase>(
                                     targetDefinition->section)
                               : nullptr;
+    // Compiler-emitted functions have bank-call thunks even when the assembler
+    // references them through their section symbol.
+    if (type != R_8051_PCREL8 && targetSection &&
+        targetSection->name.starts_with(".text."))
+      return;
     auto targetIt = sectionIndices.find(targetSection);
     if (targetIt != sectionIndices.end())
       join(sourceIt->second, targetIt->second);
@@ -1067,19 +1079,50 @@ static void pruneMCS51AutoBankThunks(Ctx &ctx,
     unsigned targetBank = getBank(function);
     bool needsThunk = !function || !direct ||
                       (targetBank && targetBank != callerBank);
+    // IAR banked functions are always entered through their thunk.
+    if (!needsThunk && !isThunk && symbol.isFunc())
+      if (Defined *thunk = findDefined(
+              defined->file, (Twine(BankCallPrefix) + symbol.getName()).str()))
+        if (auto *thunkSection =
+                dyn_cast_or_null<InputSectionBase>(thunk->section))
+          needsThunk =
+              thunkSection->name.starts_with(".text.autobankthunks.iar_");
     if (!needsThunk)
       return;
     if (isThunk) {
       if (auto *thunkSection =
               dyn_cast_or_null<InputSectionBase>(defined->section))
         neededThunks.insert(thunkSection);
-    } else if (symbol.isFunc()) {
-      std::string thunkName =
-          (Twine(BankCallPrefix) + symbol.getName()).str();
-      if (Defined *thunk = findDefined(defined->file, thunkName))
-        if (auto *thunkSection =
-                dyn_cast_or_null<InputSectionBase>(thunk->section))
-          neededThunks.insert(thunkSection);
+    } else {
+      // Local functions are referenced through their STT_SECTION symbol.
+      Defined *functionSym = nullptr;
+      if (symbol.isFunc()) {
+        functionSym = defined;
+      } else if (symbol.isSection()) {
+        auto *targetInput =
+            dyn_cast_or_null<InputSection>(defined->section);
+        if (targetInput && (targetInput->flags & SHF_EXECINSTR) &&
+            targetInput->name.starts_with(".text.") && defined->file)
+          for (Symbol *candidate : defined->file->getSymbols()) {
+            auto *def = dyn_cast<Defined>(candidate);
+            if (def && def->isFunc() && def->section == targetInput &&
+                def->value == defined->value && !def->getName().empty() &&
+                !def->getName().starts_with(".L") &&
+                findDefined(def->file,
+                            (Twine(BankCallPrefix) + def->getName()).str())) {
+              functionSym = def;
+              break;
+            }
+          }
+      }
+      if (functionSym) {
+        std::string thunkName =
+            (Twine(BankCallPrefix) + functionSym->getName()).str();
+        if (Defined *thunk = findDefined(functionSym->file, thunkName))
+          if (auto *thunkSection =
+                  dyn_cast_or_null<InputSectionBase>(thunk->section))
+            neededThunks.insert(thunkSection);
+      }
     }
   };
   for (InputSectionBase *base : ctx.inputSections) {

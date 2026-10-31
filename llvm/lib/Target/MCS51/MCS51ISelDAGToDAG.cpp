@@ -233,7 +233,14 @@ public:
         return;
       }
       if (SrcVT == MVT::i8 && DstVT == MVT::i16) {
-        SDValue Zero = CurDAG->getTargetConstant(0, DL, MVT::i8);
+        // CC2530 maps IDATA 0x00-0xFF at XDATA 0x1F00-0x1FFF.
+        uint64_t HighValue =
+            SrcAS == MCS51::IData && DstAS == MCS51::Default &&
+                    CurDAG->getTarget().getTargetCPU().equals_insensitive(
+                        "cc2530")
+                ? 0x1f
+                : 0;
+        SDValue Zero = CurDAG->getTargetConstant(HighValue, DL, MVT::i8);
         SDValue High = SDValue(
             CurDAG->getMachineNode(MCS51::MOV_RN_IMM, DL, MVT::i8, Zero), 0);
         SDValue Ops[] = {N->getOperand(0), High};

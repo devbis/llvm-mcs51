@@ -535,24 +535,36 @@ static void processSectionEdges(
         // common-area bank-call trampoline after the linker assigns banks.
         // Keep that candidate alive through section assignment; the MCS-51
         // linker later drops it when the caller and callee land in one bank.
-        if (ctx.arg.emachine == EM_8051 && sym.isFunc() &&
+        if (ctx.arg.emachine == EM_8051 &&
+            (sym.isFunc() || sym.isSection()) &&
             !sym.getName().starts_with("__mcs51_bankcall_")) {
-          auto getThunkSection = [&](InputFile *file) -> InputSectionBase * {
-            if (file && file->kind() == InputFile::ObjKind) {
+          auto *target = dyn_cast<Defined>(&sym);
+          InputFile *file = target ? target->file : nullptr;
+          if (file && file->kind() == InputFile::ObjKind) {
+            // Local functions are referenced through their section symbol.
+            auto addThunk = [&](StringRef funcName) {
               std::string thunkName =
-                  (Twine("__mcs51_bankcall_") + sym.getName()).str();
+                  (Twine("__mcs51_bankcall_") + funcName).str();
               for (Symbol *candidate : file->getSymbols())
                 if (candidate->getName() == thunkName)
                   if (auto *thunk = dyn_cast<Defined>(candidate))
                     if (auto *thunkSec =
                             dyn_cast_or_null<InputSectionBase>(thunk->section))
-                      return thunkSec;
+                      fn(thunkSec, 0);
+            };
+            if (sym.isFunc()) {
+              addThunk(sym.getName());
+            } else if (target->section && sym.isSection() &&
+                       (target->section->flags & SHF_EXECINSTR)) {
+              for (Symbol *candidate : file->getSymbols()) {
+                auto *def = dyn_cast<Defined>(candidate);
+                if (def && def->isFunc() && def->section == target->section &&
+                    def->value == target->value && !def->getName().empty() &&
+                    !def->getName().starts_with(".L"))
+                  addThunk(def->getName());
+              }
             }
-            return nullptr;
-          };
-          if (auto *target = dyn_cast<Defined>(&sym))
-            if (InputSectionBase *thunk = getThunkSection(target->file))
-              fn(thunk, 0);
+          }
         }
       }
       return;
