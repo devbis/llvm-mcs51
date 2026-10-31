@@ -384,6 +384,15 @@ public:
       CurDAG->RemoveDeadNode(N);
       return;
     }
+    if (N->getOpcode() == MCS51ISD::XSP_RESTORE) {
+      SDValue Ops[] = {N->getOperand(1), N->getOperand(0), N->getOperand(2)};
+      SDNode *Res = CurDAG->getMachineNode(MCS51::XSP_RESTORE, DL,
+                                           N->getVTList(), Ops);
+      ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
+      ReplaceUses(SDValue(N, 1), SDValue(Res, 1));
+      CurDAG->RemoveDeadNode(N);
+      return;
+    }
     if (N->getOpcode() == MCS51ISD::PUSH_PAD8) {
       SDValue Ops[] = {N->getOperand(0)};
       SDNode *Res = CurDAG->getMachineNode(MCS51::PUSHPAD8, DL,

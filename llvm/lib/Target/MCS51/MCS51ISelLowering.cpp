@@ -1747,6 +1747,13 @@ SDValue MCS51TargetLowering::LowerCall(
     Chain = Pop.getValue(0);
     InGlue = Pop.getValue(1);
   }
+  if (HasIARStackArgs) {
+    SDValue Restore = DAG.getNode(
+        MCS51ISD::XSP_RESTORE, DL, DAG.getVTList(MVT::Other, MVT::Glue),
+        Chain, DAG.getTargetConstant(IARStackSize, DL, MVT::i16), InGlue);
+    Chain = Restore.getValue(0);
+    InGlue = Restore.getValue(1);
+  }
   Chain = DAG.getCALLSEQ_END(Chain, CallFrameSize, 0, InGlue, DL);
   InGlue = Chain.getValue(1);
 
@@ -1763,18 +1770,6 @@ SDValue MCS51TargetLowering::LowerCall(
     Chain = Copy.getValue(1);
     InGlue = Copy.getValue(2);
     InVals.push_back(Copy.getValue(0));
-  }
-  if (HasIARStackArgs) {
-    GlobalVariable *IARXSP =
-        MF.getFunction().getParent()->getGlobalVariable("?XSP");
-    SDValue XSPAddress = DAG.getGlobalAddress(IARXSP, DL, MVT::i8);
-    auto XSP = DAG.getLoad(MVT::i16, DL, Chain, XSPAddress,
-                           MachinePointerInfo(IARXSP), Align(1));
-    SDValue RestoredXSP = DAG.getNode(
-        ISD::ADD, DL, MVT::i16, XSP,
-        DAG.getConstant(IARStackSize, DL, MVT::i16));
-    Chain = DAG.getStore(XSP.getValue(1), DL, RestoredXSP, XSPAddress,
-                         MachinePointerInfo(IARXSP), Align(1));
   }
   return Chain;
 }

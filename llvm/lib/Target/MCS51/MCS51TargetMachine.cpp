@@ -159,6 +159,145 @@ public:
 
 char MCS51IARXSPDeclaration::ID = 0;
 
+// Locals whose address escapes live on the IAR reentrant XDATA stack instead
+// of the 8051 hardware stack, which only has ~180 bytes and is shared with
+// return addresses and saved registers.
+class MCS51IARXStackLocals final : public FunctionPass {
+public:
+  static char ID;
+  MCS51IARXStackLocals() : FunctionPass(ID) {}
+
+  // Every use must be a cast to the default space, an IDATA access, a GEP of
+  // those, or a lifetime marker, and at least one cast must escape.
+  static bool isConvertible(AllocaInst *AI) {
+    SmallVector<Value *, 8> Work{AI};
+    bool Escapes = false;
+    while (!Work.empty()) {
+      Value *V = Work.pop_back_val();
+      for (User *U : V->users()) {
+        if (isa<DbgInfoIntrinsic>(U) || isa<LifetimeIntrinsic>(U))
+          continue;
+        if (auto *Cast = dyn_cast<AddrSpaceCastInst>(U)) {
+          if (Cast->getDestAddressSpace() != MCS51::Default)
+            return false;
+          Escapes = true;
+        } else if (auto *GEP = dyn_cast<GetElementPtrInst>(U)) {
+          if (GEP->getPointerOperand() != V)
+            return false;
+          Work.push_back(GEP);
+        } else if (auto *Ld = dyn_cast<LoadInst>(U)) {
+          if (Ld->getPointerOperand() != V)
+            return false;
+        } else if (auto *St = dyn_cast<StoreInst>(U)) {
+          if (St->getPointerOperand() != V || St->getValueOperand() == V)
+            return false;
+        } else {
+          return false;
+        }
+      }
+    }
+    return Escapes;
+  }
+
+  static void rewriteUsers(Value *Old, Value *New) {
+    SmallVector<User *, 8> Users(Old->users());
+    for (User *U : Users) {
+      if (auto *I = dyn_cast<IntrinsicInst>(U)) {
+        I->eraseFromParent();
+      } else if (auto *Cast = dyn_cast<AddrSpaceCastInst>(U)) {
+        Cast->replaceAllUsesWith(New);
+        Cast->eraseFromParent();
+      } else if (auto *GEP = dyn_cast<GetElementPtrInst>(U)) {
+        SmallVector<Value *, 2> Idx;
+        IRBuilder<> B(GEP);
+        for (Value *Index : GEP->indices())
+          Idx.push_back(Index->getType()->getIntegerBitWidth() < 16
+                            ? B.CreateZExt(Index, B.getInt16Ty())
+                            : Index);
+        Value *N = B.CreateGEP(GEP->getSourceElementType(), New, Idx, "",
+                               GEP->isInBounds());
+        rewriteUsers(GEP, N);
+        GEP->eraseFromParent();
+      } else if (auto *Ld = dyn_cast<LoadInst>(U)) {
+        Ld->setOperand(Ld->getPointerOperandIndex(), New);
+      } else if (auto *St = dyn_cast<StoreInst>(U)) {
+        St->setOperand(St->getPointerOperandIndex(), New);
+      }
+    }
+  }
+
+  bool runOnFunction(Function &F) override {
+    if (F.isDeclaration() || !usesMCS51IARABI(F) ||
+        F.hasFnAttribute("interrupt"))
+      return false;
+    Module &M = *F.getParent();
+    GlobalVariable *XSP = M.getGlobalVariable("?XSP");
+    if (!XSP)
+      return false;
+
+    struct Slot {
+      AllocaInst *AI;
+      uint64_t Size;
+    };
+    SmallVector<Slot, 4> Slots;
+    const DataLayout &DL = M.getDataLayout();
+    for (Instruction &I : F.getEntryBlock()) {
+      auto *AI = dyn_cast<AllocaInst>(&I);
+      if (!AI || !AI->isStaticAlloca() ||
+          AI->getAddressSpace() != MCS51::IData || !isConvertible(AI))
+        continue;
+      auto Size = AI->getAllocationSize(DL);
+      if (!Size || Size->isScalable() || Size->getFixedValue() == 0)
+        continue;
+      Slots.push_back({AI, Size->getFixedValue()});
+    }
+    if (Slots.empty())
+      return false;
+
+    uint64_t Total = 0;
+    SmallVector<uint64_t, 4> Offsets;
+    for (Slot &S : Slots) {
+      Offsets.push_back(Total);
+      Total += S.Size;
+    }
+    if (!isUInt<16>(Total))
+      return false;
+
+    LLVMContext &C = F.getContext();
+    Type *I16 = Type::getInt16Ty(C);
+    Type *Ptr = PointerType::get(C, MCS51::Default);
+    IRBuilder<> B(&*F.getEntryBlock().getFirstInsertionPt());
+    LoadInst *Old = B.CreateLoad(I16, XSP, "xsp");
+    Old->setAlignment(Align(1));
+    Value *Base = B.CreateSub(Old, ConstantInt::get(I16, Total), "xframe");
+    B.CreateAlignedStore(Base, XSP, Align(1));
+    Value *BasePtr = B.CreateIntToPtr(Base, Ptr, "xframe.ptr");
+    for (unsigned I = 0; I < Slots.size(); ++I) {
+      Value *P = BasePtr;
+      if (Offsets[I])
+        P = B.CreateGEP(Type::getInt8Ty(C), BasePtr,
+                        ConstantInt::get(I16, Offsets[I]));
+      rewriteUsers(Slots[I].AI, P);
+    }
+    // The insertion point may have been one of the allocas, so erase last.
+    for (Slot &S : Slots)
+      S.AI->eraseFromParent();
+    for (BasicBlock &BB : F) {
+      if (auto *Ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
+        IRBuilder<> RB(Ret);
+        RB.CreateAlignedStore(RB.CreateAdd(Base, ConstantInt::get(I16, Total)),
+                              XSP, Align(1));
+      }
+      for (Instruction &I : BB)
+        if (auto *Call = dyn_cast<CallInst>(&I))
+          Call->setTailCallKind(CallInst::TCK_NoTail);
+    }
+    return true;
+  }
+};
+
+char MCS51IARXStackLocals::ID = 0;
+
 // Large volatile XDATA operands are expensive to keep in caller registers on
 // the 8051. Outline their unsigned i32 comparison into one target runtime
 // helper, matching the helper-call strategy used by established 8051
@@ -2866,6 +3005,7 @@ public:
       addPass(new MCS51RemoveOptNone());
       addPass(createPromoteMemoryToRegisterPass());
     }
+    addPass(new MCS51IARXStackLocals());
   }
 
   bool addInstSelector() override {

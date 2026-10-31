@@ -189,6 +189,9 @@ def MCS51pusharg16 : SDNode<"MCS51ISD::PUSH_ARG16", SDT_MCS51PushArg16,
 // library call whose chain result the legalizer drops.
 def MCS51poparg8 : SDNode<"MCS51ISD::POP_ARG8", SDTNone,
                           [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+// Releases IAR XSTACK argument bytes; glued to the call for the same reason.
+def MCS51xsprestore : SDNode<"MCS51ISD::XSP_RESTORE", SDTNone,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
 def MCS51pushpad8 : SDNode<"MCS51ISD::PUSH_PAD8", SDTNone, [SDNPHasChain]>;
 
 // Brackets the pushes of stack arguments, so frame lowering knows how far SP
@@ -1737,6 +1740,18 @@ def PUSHARG16 : Instruction {
   let hasSideEffects = 1;
   let Defs = [SP];
   let Uses = [DPTR, SP];
+}
+
+def XSP_RESTORE : Instruction {
+  let Namespace = "MCS51";
+  let OutOperandList = (outs);
+  let InOperandList = (ins i16imm:$amt);
+  let AsmString = "";
+  let Size = 0;
+  let isPseudo = 1;
+  let isCodeGenOnly = 1;
+  let hasSideEffects = 1;
+  let Defs = [A, C];
 }
 
 def PUSHPAD8 : Instruction {

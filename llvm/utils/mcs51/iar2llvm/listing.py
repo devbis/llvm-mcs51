@@ -1095,6 +1095,58 @@ def _virtual_register_support(
     return lines, exports, names
 
 
+_THREE_BYTE_OPCODES = frozenset(
+    {0x02, 0x10, 0x12, 0x20, 0x30, 0x43, 0x53, 0x63, 0x75, 0x85, 0x90, 0xD5}
+    | set(range(0xB4, 0xC0))
+)
+_TWO_BYTE_OPCODES = frozenset(
+    {
+        0x05, 0x15, 0x24, 0x25, 0x34, 0x35, 0x40, 0x42, 0x44, 0x45, 0x50, 0x52,
+        0x54, 0x55, 0x60, 0x62, 0x64, 0x65, 0x70, 0x72, 0x74, 0x76, 0x77, 0x80,
+        0x82, 0x86, 0x87, 0x92, 0x94, 0x95, 0xA0, 0xA2, 0xA6, 0xA7, 0xB0, 0xB2,
+        0xC0, 0xC2, 0xC5, 0xD0, 0xD2, 0xE5, 0xF5,
+    }
+    | set(range(0x78, 0x80))
+    | set(range(0x88, 0x90))
+    | set(range(0xA8, 0xB0))
+    | set(range(0xD8, 0xE0))
+)
+
+
+def _opcode_length(opcode: int) -> int:
+    if opcode & 0x0F == 0x01 or opcode in _TWO_BYTE_OPCODES:
+        return 2
+    if opcode in _THREE_BYTE_OPCODES:
+        return 3
+    return 1
+
+
+def _segment_falls_through(items: list["_CodeItem"]) -> bool:
+    """Whether control can run off the end of a decoded code segment."""
+    index = 0
+    last: tuple[str, int | str] | None = None
+    while index < len(items):
+        item = items[index]
+        if item.kind == "byte":
+            opcode = int(item.value)
+            last = ("op", opcode)
+            index += _opcode_length(opcode)
+        else:
+            last = (item.kind, item.value)
+            index += 1
+    if last is None:
+        return False
+    kind, value = last
+    if kind == "op":
+        opcode = int(value)
+        if opcode in (0x22, 0x32, 0x02, 0x80, 0x73):
+            return False
+        return opcode & 0x1F != 0x01
+    if kind in ("call", "relcall"):
+        return str(value).lower() != "ljmp"
+    return kind in ("dptr", "pcrel8") or kind == "byte_reloc"
+
+
 def _code_group(segment: Segment) -> str | None:
     if segment.address_space == "HUGECODE" and segment.name == "BANKED_CODE":
         return "banked"
@@ -2556,6 +2608,18 @@ def convert_code_listing_to_archive(
                     lines.append(f"mov dptr, #{_asm_expression(str(item.value))}")
                 elif item.kind == "bankptr":
                     lines.append(f"bankaddr24 {_asm_expression(str(item.value))}")
+            if group in ("banked", "common_code") and _segment_falls_through(items):
+                position = segment_order.index(ident) + 1
+                if (
+                    position < len(segment_order)
+                    and segment_order[position] in group_segments
+                ):
+                    # Control runs into the next part, so section GC must keep
+                    # it; the linker keeps input order within a bank.
+                    lines.append(
+                        ".reloc .-1, fixup_none, "
+                        f"{_asm_symbol(segment_labels[segment_order[position]])}"
+                    )
             public_offsets = sorted(
                 {
                     symbol.offset

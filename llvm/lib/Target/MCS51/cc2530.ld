@@ -129,8 +129,13 @@ SECTIONS
     *(COMMON)
   } > XRAM
 
-  /* The optional IAR ABI runtime contributes this reserved downward-growing
-     XDATA stack. With the section absent, the standard Clang ABI uses no RAM. */
+  /* Save stack for the callee-saved registers of IAR-ABI functions: one page
+     whose address high byte is __mcs51_iar_csr_page (0x1c). */
+  .mcs51_iar_csr 0x1c00 (NOLOAD) :
+  {
+    KEEP(*(.mcs51.iar.csr))
+  } > XRAM
+
   .mcs51_iar_xstack 0x1d00 (NOLOAD) :
   {
     __mcs51_iar_xstack_start = .;
@@ -191,6 +196,12 @@ ASSERT(ADDR(.data) + SIZEOF(.data) <= __cc2530_data_alias_start,
        "CC2530 .data overlaps the DATA-space SRAM alias")
 ASSERT(ADDR(.bss) + SIZEOF(.bss) <= __cc2530_data_alias_start,
        "CC2530 .bss overlaps the DATA-space SRAM alias")
+ASSERT(SIZEOF(.mcs51_iar_csr) == 0 ||
+       ADDR(.bss) + SIZEOF(.bss) <= ADDR(.mcs51_iar_csr),
+       "CC2530 .bss overlaps the IAR callee-save stack")
+ASSERT(SIZEOF(.mcs51_iar_csr) == 0 ||
+       ADDR(.data) + SIZEOF(.data) <= ADDR(.mcs51_iar_csr),
+       "CC2530 .data overlaps the IAR callee-save stack")
 ASSERT(SIZEOF(.mcs51_iar_xstack) == 0 ||
        ADDR(.data) + SIZEOF(.data) <= ADDR(.mcs51_iar_xstack),
        "CC2530 .data overlaps the IAR XDATA stack")
