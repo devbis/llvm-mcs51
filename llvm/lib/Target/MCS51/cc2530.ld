@@ -203,6 +203,10 @@ ASSERT(__mcs51_data1_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA globals exceed directly addressable internal RAM")
 ASSERT(__mcs51_data2_bss_end <= __cc2530_static_data_end,
        "CC2530 DATA/IDATA globals overlap the hardware stack")
+/* The hardware stack grows upward from the end of the DATA/IDATA globals so
+   that it uses all the internal RAM they leave free. */
+__cc2530_stack_base = MAX(MAX(__mcs51_data1_bss_end, __mcs51_data2_bss_end),
+                          __cc2530_static_data_start);
 ASSERT(__mcs51_bit_bss_end <= LENGTH(BIT_RAM),
        "CC2530 bit globals exceed the bit-addressable DATA area")
 ASSERT(ADDR(.text) + SIZEOF(.text) <= 0x8000,

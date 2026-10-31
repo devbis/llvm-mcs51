@@ -691,6 +691,10 @@ outliner::InstrType MCS51InstrInfo::getOutliningTypeImpl(
         return outliner::InstrType::Illegal;
       continue;
     }
+    // Direct accesses to the SP SFR see the helper's extra return address.
+    if (MO.isImm() && MO.getImm() == 0x81 &&
+        getName(MI.getOpcode()).contains("DIRECT"))
+      return outliner::InstrType::Illegal;
     if (MO.isImm() || MO.isCImm() || MO.isGlobal() || MO.isSymbol())
       continue;
     return outliner::InstrType::Illegal;

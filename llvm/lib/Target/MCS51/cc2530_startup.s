@@ -11,7 +11,7 @@ reset:
 .type __mcs51_start,@function
 __mcs51_start:
   /* Keep the hardware stack above register banks and bit-addressable RAM. */
-  mov sp, #127
+  mov sp, #(__cc2530_stack_base - 1)
 
   /* Clear XDATA SRAM 0x0000-0x1EFF. 0x1F00-0x1FFF aliases IRAM, which holds
      this loop's own R6/R7 counters, so it is cleared separately below. */

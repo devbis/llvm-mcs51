@@ -245,6 +245,12 @@ bool MCS51::relaxOnce(int Pass) const {
     if (!(OSec->flags & SHF_EXECINSTR))
       continue;
     for (InputSection *Sec : getInputSections(*OSec, Storage)) {
+      // Converted IAR code keeps its conditional and short branches as
+      // assembler-resolved bytes without relocations, so shrinking a call in
+      // such a section would leave those branches off target.
+      if (Sec->name.starts_with(".mcs51.autobank.iar_") ||
+          Sec->name.starts_with(".text.__mcs51_iarcode_"))
+        continue;
       MutableArrayRef<Relocation> Relocs = Sec->relocs();
       auto isRelaxableCodeTransfer = [&](const Relocation &R) {
         if (R.type != R_8051_16_BE || !R.sym || R.offset == 0 ||
@@ -659,13 +665,40 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
                sec.content()[rel.offset - 1] == 0x02);
           // A function in common flash, or a function called from its own
           // bank, does not need the bank-switching trampoline.
-          if (!functionBank ||
-              (isDirectTransfer && functionBank == callerBank))
+          // IAR banked functions return through ?BRET and always need the
+          // thunk that pushes the bank byte, even from the same bank.
+          bool isIARThunk = thunk->section &&
+                            thunk->section->name.starts_with(
+                                ".text.autobankthunks.iar_");
+          if (!isIARThunk &&
+              (!functionBank ||
+               (isDirectTransfer && functionBank == callerBank)))
             val = function->getVA(ctx, rel.addend);
         }
       }
     }
-    if (rel.sym && rel.sym->isFunc()) {
+    // Local functions are referenced through their STT_SECTION symbol; resolve
+    // the function symbol whose section it names so the bank checks apply.
+    Defined *funcTarget = nullptr;
+    if (rel.sym && rel.sym->isFunc())
+      funcTarget = target;
+    else if (rel.sym && rel.sym->isSection() && target) {
+      auto *targetInput = dyn_cast_or_null<InputSection>(target->section);
+      if (targetInput && (targetInput->flags & SHF_EXECINSTR) &&
+          targetInput->name.starts_with(".text.") && rel.addend == 0) {
+        for (Symbol *candidate : targetInput->file->getSymbols()) {
+          auto *def = dyn_cast<Defined>(candidate);
+          if (def && def->isFunc() && def->section == targetInput &&
+              def->value == target->value && !def->getName().empty() &&
+              !def->getName().starts_with(".L") &&
+              findMCS51BankCallThunk(ctx, *def)) {
+            funcTarget = def;
+            break;
+          }
+        }
+      }
+    }
+    if (funcTarget) {
       unsigned callerBank = getMCS51CodeBank(sec.getOutputSection());
       if (rel.type == R_8051_11 && targetBank != callerBank)
         Err(ctx) << sec.getLocation(rel.offset)
@@ -681,16 +714,27 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       bool isDirectCodeTransfer =
           rel.type == R_8051_11 || isLongCall || isLongJump;
       bool isFunctionAddress =
-          (rel.type == R_8051_16 || rel.type == R_8051_DPTR16) && !isLongCall;
+          (rel.type == R_8051_16 || rel.type == R_8051_DPTR16 ||
+           rel.type == R_8051_LO8 || rel.type == R_8051_HI8) &&
+          !isLongCall;
+      // IAR banked functions return through ?BRET and must always be entered
+      // through the thunk that pushes the bank byte, even from their own bank.
+      bool isIARBanked = false;
+      if (isLongCall || isLongJump)
+        if (Defined *thunk = findMCS51BankCallThunk(ctx, *funcTarget))
+          if (auto *thunkSec = dyn_cast_or_null<InputSection>(thunk->section))
+            isIARBanked =
+                thunkSec->name.starts_with(".text.autobankthunks.iar_");
       bool needsThunk = targetBank &&
-                        ((isDirectCodeTransfer && targetBank != callerBank) ||
+                        ((isDirectCodeTransfer &&
+                          (targetBank != callerBank || isIARBanked)) ||
                          isFunctionAddress);
       if (needsThunk && !isBankThunk && !isAutoBankThunk) {
         // Some declarations in another translation unit do not carry a
         // section attribute. Resolve those calls and function pointers here,
         // after bank placement has made the target bank known.
         auto *thunk =
-            target ? findMCS51BankCallThunk(ctx, *target) : nullptr;
+            findMCS51BankCallThunk(ctx, *funcTarget);
         if (thunk)
           val = thunk->getVA(ctx, rel.addend);
         else

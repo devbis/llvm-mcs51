@@ -1320,6 +1320,7 @@ def _parse_code_item_records(
     banked_segments: set[str],
     relay_target_symbols_by_segment: dict[str, Symbol],
     source_aliases: dict[str, tuple[str, bool]],
+    thunked_functions: frozenset[str] = frozenset(),
 ) -> list[_CodeItem]:
     items: list[_CodeItem] = []
     stack: list[_IARValue] = []
@@ -1464,7 +1465,22 @@ def _parse_code_item_records(
             target, addend = match.groups()
             target = target.upper()
             relay_target = relay_target_symbols_by_segment.get(target)
-            if relay_target is not None:
+            if (
+                relay_target is not None
+                and relay_target.name in thunked_functions
+                and relay_target.offset + int(addend, 16) == 0
+            ):
+                # Banked IAR functions must be entered through their bank
+                # thunk (it pushes the bank byte ?BRET pops), so name the
+                # function itself and let the linker pick the thunk.
+                stack.append(
+                    _IARValue(
+                        "external",
+                        _asm_name(relay_target.name),
+                        relay_target.offset + int(addend, 16),
+                    )
+                )
+            elif relay_target is not None:
                 stack.append(
                     _IARValue(
                         "rel",
@@ -2348,6 +2364,11 @@ def convert_code_listing_to_archive(
             banked_segments,
             relay_target_symbols_by_segment,
             source_aliases,
+            frozenset(
+                name
+                for name, symbol in requested.items()
+                if _code_group(segments[symbol.segment]) == "banked"
+            ),
         )
     decoded_constants = {
         ident: _parse_literal_segment(code_records.get(ident, []), ident)
@@ -2558,6 +2579,8 @@ def convert_code_listing_to_archive(
             thunk = _asm_symbol(f"__mcs51_bankcall_{target}")
             target_symbol = _asm_symbol(target)
             function_token = name.encode("utf-8").hex()
+            # IAR banked functions return through ?BRET, which pops the saved
+            # bank register itself, so enter them like ?BCALL does.
             lines.extend(
                 [
                     f'.section .text.autobankthunks.iar_{module_token}_{function_token},"ax",@progbits',
@@ -2567,10 +2590,8 @@ def convert_code_listing_to_archive(
                     f"{thunk}:",
                     "push 159",
                     f"mov 159, #{target_symbol}",
-                    f"lcall {target_symbol}",
-                    "pop 159",
-                    "ret",
-                    f".size {thunk}, 11",
+                    f"ljmp {target_symbol}",
+                    f".size {thunk}, 8",
                 ]
             )
 
