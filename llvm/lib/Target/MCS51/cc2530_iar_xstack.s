@@ -22,6 +22,20 @@
 "?XSP":
   .space 2
 
+/* Callee-saved registers of IAR-ABI functions are kept in a one-page XDATA
+   save stack (see the __mcs51_save_iar_* helpers). ?CSP is its 8-bit offset
+   within that page; the stack grows down from the end of the page. */
+.weak "?CSP"
+"?CSP":
+  .space 1
+.globl __mcs51_iar_csr_page
+.set __mcs51_iar_csr_page, 0x1c
+
+.section .mcs51.iar.csr,"aw",@nobits
+.globl __mcs51_iar_csr_storage
+__mcs51_iar_csr_storage:
+  .space 256
+
 .section .mcs51.iar.xstack,"aw",@nobits
 .globl __mcs51_iar_xstack_storage
 __mcs51_iar_xstack_storage:
@@ -36,5 +50,7 @@ __mcs51_iar_xstack_init:
   mov "?XSP", a
   mov a, dph
   mov "?XSP"+1, a
+  clr a
+  mov "?CSP", a
   ret
 .size __mcs51_iar_xstack_init, .-__mcs51_iar_xstack_init

@@ -343,6 +343,22 @@ int MCS51InstrInfo::getSPAdjust(const MachineInstr &MI) const {
 
 bool MCS51InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
   unsigned Opcode = MI.getOpcode();
+  if (Opcode == MCS51::XSP_RESTORE) {
+    MachineBasicBlock &MBB = *MI.getParent();
+    const DebugLoc &DL = MI.getDebugLoc();
+    int64_t Amount = MI.getOperand(0).getImm();
+    auto I = MI.getIterator();
+    // ?XSP is the little-endian pair at IDATA 0x48.
+    BuildMI(MBB, I, DL, get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x48);
+    BuildMI(MBB, I, DL, get(MCS51::ADD_A_IMM), MCS51::A).addImm(Amount & 0xff);
+    BuildMI(MBB, I, DL, get(MCS51::MOV_DIRECT_A)).addImm(0x48);
+    BuildMI(MBB, I, DL, get(MCS51::MOV_A_DIRECT), MCS51::A).addImm(0x49);
+    BuildMI(MBB, I, DL, get(MCS51::ADDC_A_IMM), MCS51::A)
+        .addImm((Amount >> 8) & 0xff);
+    BuildMI(MBB, I, DL, get(MCS51::MOV_DIRECT_A)).addImm(0x49);
+    MI.eraseFromParent();
+    return true;
+  }
   if (Opcode == MCS51::LDI16) {
     MachineBasicBlock &MBB = *MI.getParent();
     const DebugLoc &DL = MI.getDebugLoc();

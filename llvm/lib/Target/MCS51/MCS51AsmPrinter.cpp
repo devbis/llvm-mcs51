@@ -135,13 +135,9 @@ public:
         if (F->isDeclaration() &&
             TM.getTargetCPU().equals_insensitive("cc2530"))
           PendingExternalBankCallThunks.insert(F->getName());
-        const MCExpr *Address = MCSymbolRefExpr::create(
-            getBankThunkSymbol(*F), OutContext);
-        if (Offset)
-          Address = MCBinaryExpr::createAdd(
-              Address, MCConstantExpr::create(Offset, OutContext),
-              OutContext);
-        return Address;
+        // Offset is the position inside the enclosing aggregate, not an
+        // addend for the function address.
+        return MCSymbolRefExpr::create(getBankThunkSymbol(*F), OutContext);
       }
     }
     return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
@@ -309,8 +305,9 @@ public:
       SmallString<32> Name;
       raw_svector_ostream(Name)
           << (IsSave ? "__mcs51_save_"
-                     : IsReturn ? "__mcs51_return_" : "__mcs51_restore_")
-          << (IsIARHelper && !IsReturn ? "iar_" : "") << GroupName
+                     : IsReturn && !IsIARHelper ? "__mcs51_return_"
+                                                : "__mcs51_restore_")
+          << (IsIARHelper ? "iar_" : "") << GroupName
           << MI->getOperand(1).getImm();
       MCInst Inst;
       Inst.setOpcode(IsReturn ? MCS51::LJMP : MCS51::LCALL);

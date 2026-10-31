@@ -1658,20 +1658,33 @@ __asm__(
    compactly; the assembler expands each fixed-size PUSH/POP sequence. */
 #define MCS51_STRINGIFY_INNER(Value) #Value
 #define MCS51_STRINGIFY(Value) MCS51_STRINGIFY_INNER(Value)
+/* In the IAR ABI callee-saved registers live in a separate XDATA save stack
+   (one page, addressed by the 8-bit ?CSP at DPH = __mcs51_iar_csr_page), the
+   way IAR keeps them off the small hardware stack. ?XSP is left alone so the
+   callee still finds its stack arguments at ?XSP. The restore helper is also
+   the tail-return helper because it does not touch the return address. */
 #define MCS51_IAR_SAVE(GROUP, N, BASE) \
   ".section .text.__mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) ",\"ax\",@progbits\n" \
   ".globl __mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) "\n" \
   ".type __mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) ",@function\n" \
   "__mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) ":\n" \
-  "  pop 224\n" \
-  "  pop 240\n" \
+  "  push 130\n" \
+  "  push 131\n" \
+  "  mov a, \"?CSP\"\n" \
+  "  clr c\n" \
+  "  subb a, #" MCS51_STRINGIFY(N) "\n" \
+  "  mov \"?CSP\", a\n" \
+  "  mov 130, a\n" \
+  "  mov 131, #__mcs51_iar_csr_page\n" \
   "  .set __mcs51_csr_reg, " MCS51_STRINGIFY(BASE) "\n" \
   "  .rept " MCS51_STRINGIFY(N) "\n" \
-  "  push __mcs51_csr_reg\n" \
+  "  mov a, __mcs51_csr_reg\n" \
+  "  movx @dptr, a\n" \
+  "  inc 130\n" \
   "  .set __mcs51_csr_reg, __mcs51_csr_reg + 1\n" \
   "  .endr\n" \
-  "  push 240\n" \
-  "  push 224\n" \
+  "  pop 131\n" \
+  "  pop 130\n" \
   "  ret\n" \
   ".size __mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) \
   ", .-__mcs51_save_iar_" GROUP MCS51_STRINGIFY(N) "\n"
@@ -1680,26 +1693,30 @@ __asm__(
   ".globl __mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) "\n" \
   ".type __mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) ",@function\n" \
   "__mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) ":\n" \
-  "  pop 224\n" \
-  "  pop 240\n" \
-  "  .set __mcs51_csr_reg, " MCS51_STRINGIFY(BASE) " + " \
-  MCS51_STRINGIFY(N) " - 1\n" \
+  "  push 130\n" \
+  "  push 131\n" \
+  "  mov 130, \"?CSP\"\n" \
+  "  mov 131, #__mcs51_iar_csr_page\n" \
+  "  .set __mcs51_csr_reg, " MCS51_STRINGIFY(BASE) "\n" \
   "  .rept " MCS51_STRINGIFY(N) "\n" \
-  "  pop __mcs51_csr_reg\n" \
-  "  .set __mcs51_csr_reg, __mcs51_csr_reg - 1\n" \
+  "  movx a, @dptr\n" \
+  "  mov __mcs51_csr_reg, a\n" \
+  "  inc 130\n" \
+  "  .set __mcs51_csr_reg, __mcs51_csr_reg + 1\n" \
   "  .endr\n" \
-  "  push 240\n" \
-  "  push 224\n" \
+  "  mov \"?CSP\", 130\n" \
+  "  pop 131\n" \
+  "  pop 130\n" \
   "  ret\n" \
   ".size __mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) \
   ", .-__mcs51_restore_iar_" GROUP MCS51_STRINGIFY(N) "\n"
 #define MCS51_IAR_CSR(GROUP, N, BASE) \
   MCS51_IAR_SAVE(GROUP, N, BASE) MCS51_IAR_RESTORE(GROUP, N, BASE)
 
-/* IAR save helpers use A/B as a temporary return-address pair. Both are
-   caller-saved in that ABI, so these helpers preserve DPTR without touching
-   the argument or return registers. */
-__asm__(MCS51_IAR_CSR("r67_", 2, 6)
+/* These helpers clobber only A and C and preserve DPTR. */
+__asm__(MCS51_IAR_CSR("r", 3, 2) MCS51_IAR_CSR("r", 4, 2)
+        MCS51_IAR_CSR("r", 5, 2) MCS51_IAR_CSR("r", 6, 2)
+        MCS51_IAR_CSR("r67_", 2, 6)
         MCS51_IAR_CSR("im", 3, 56) MCS51_IAR_CSR("im", 4, 56)
         MCS51_IAR_CSR("im", 5, 56) MCS51_IAR_CSR("im", 6, 56)
         MCS51_IAR_CSR("im", 7, 56) MCS51_IAR_CSR("im", 8, 56)

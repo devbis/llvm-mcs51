@@ -201,6 +201,10 @@ void RelocScan::scan(typename Relocs<RelTy>::const_iterator &it, RelType type,
       maybeReportUndefined(cast<Undefined>(sym), offset))
     return;
 
+  // R_*_NONE only keeps its target section alive during GC.
+  if (expr == R_NONE)
+    return;
+
   process(expr, type, offset, sym, addend);
 }
 

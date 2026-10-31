@@ -66,6 +66,8 @@ public:
       return MCS51::fixup_bank8;
     if (Name == "fixup_pcrel8")
       return MCS51::fixup_pcrel8;
+    if (Name == "fixup_none")
+      return FK_NONE;
     return MCAsmBackend::getFixupKind(Name);
   }
 

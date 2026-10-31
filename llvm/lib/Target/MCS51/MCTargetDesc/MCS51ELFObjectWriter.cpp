@@ -44,6 +44,8 @@ protected:
       return ELF::R_8051_NONE;
     }
     switch (Fixup.getKind()) {
+    case FK_NONE:
+      return ELF::R_8051_NONE;
     case MCS51::fixup_8:
     case FK_Data_1:
       return ELF::R_8051_8;

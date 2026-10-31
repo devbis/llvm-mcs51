@@ -60,6 +60,14 @@ static unsigned getCSRHelperMinimum(int Group) {
   return Group == CSRGroupR67 || Group == CSRGroupIM0 ? 2 : 3;
 }
 
+// IAR-mode functions, including those that use the private Clang convention,
+// keep callee-saved register groups on the XDATA save stack instead of the
+// small hardware stack.
+static bool usesCSPSaves(const Function &F) {
+  StringRef ABI = F.getFnAttribute("mcs51-abi").getValueAsString();
+  return ABI == "iar" || ABI == "clang";
+}
+
 static bool usesDPTROutsideCalls(const MachineFunction &MF) {
   const auto &TRI = *MF.getSubtarget().getRegisterInfo();
   for (const MachineBasicBlock &MBB : MF)
@@ -197,7 +205,7 @@ bool MCS51FrameLowering::spillCalleeSavedRegisters(
   for (const CSRSaveAction &Action : Actions) {
     if (Action.Group >= 0) {
       int Group = Action.Group;
-      unsigned Opcode = usesMCS51IARABI(F) ? MCS51::CSR_SAVE_IAR
+      unsigned Opcode = usesCSPSaves(F) ? MCS51::CSR_SAVE_IAR
                                            : MCS51::CSR_SAVE;
       auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(Opcode))
                      .addImm(Group)
@@ -240,7 +248,7 @@ bool MCS51FrameLowering::restoreCalleeSavedRegisters(
   for (const CSRSaveAction &Action : llvm::reverse(Actions)) {
     if (Action.Group >= 0) {
       int Group = Action.Group;
-      unsigned Opcode = usesMCS51IARABI(F) ? MCS51::CSR_RESTORE_IAR
+      unsigned Opcode = usesCSPSaves(F) ? MCS51::CSR_RESTORE_IAR
                                            : MCS51::CSR_RESTORE;
       auto MIB = BuildMI(MBB, MI, DebugLoc(), TII.get(Opcode))
                      .addImm(Group)
@@ -553,8 +561,17 @@ StackOffset MCS51FrameLowering::getFrameIndexReference(
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   // Incoming stack arguments lie below the callee-saved registers that the
   // prologue pushes; locals lie above them.
-  int64_t Pushed = FI < 0 ? static_cast<int64_t>(MFI.getCalleeSavedInfo().size())
-                          : 0;
+  int64_t Pushed = 0;
+  if (FI < 0) {
+    Pushed = MFI.getCalleeSavedInfo().size();
+    if (usesCSPSaves(MF.getFunction())) {
+      unsigned Counts[NumCSRGroups];
+      getCSRHelperCounts(MF.getSubtarget().getRegisterInfo(),
+                         MFI.getCalleeSavedInfo(), Counts);
+      for (unsigned Count : Counts)
+        Pushed -= Count;
+    }
+  }
   return StackOffset::getFixed(MFI.getObjectOffset(FI) - MFI.getStackSize() -
                                Pushed);
 }
