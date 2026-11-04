@@ -2325,8 +2325,11 @@ MachineBasicBlock *MCS51TargetLowering::emitCustomInserter(
     MI.eraseFromParent();
 
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::MOV_A_RN)).addReg(LHS);
+    // The bit test reads A: without the use, the MOV is a dead def that
+    // dead-mi-elimination deletes, and JNB tests a stale A.
     BuildMI(*MBB, MBB->end(), DL, TII.get(MCS51::JNB)).addImm(0xE7)
-        .addMBB(NonNegativeBB);
+        .addMBB(NonNegativeBB)
+        .addReg(MCS51::A, RegState::Implicit);
     Register NegativeCopy = MF.getRegInfo().createVirtualRegister(
         &MCS51::MCS51GPR8RegClass);
     Register NonNegativeCopy = MF.getRegInfo().createVirtualRegister(

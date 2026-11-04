@@ -1384,7 +1384,8 @@ public:
                                     : MCS51::JB;
               BuildMI(MBB, Branch, Branch->getDebugLoc(), TII->get(Opcode))
                   .addImm(BitAddress)
-                  .addMBB(Branch->getOperand(0).getMBB());
+                  .addMBB(Branch->getOperand(0).getMBB())
+                  .addReg(MCS51::A, RegState::Implicit);
               MachineInstr *AfterBranch = Branch->getNextNode();
               And->eraseFromParent();
               Branch->eraseFromParent();

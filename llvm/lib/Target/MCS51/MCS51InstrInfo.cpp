@@ -572,6 +572,12 @@ unsigned MCS51InstrInfo::insertBranch(
       for (unsigned I = 1; I != Cond.size(); ++I)
         Branch.add(Cond[I]);
       Branch.addMBB(TBB);
+      // analyzeBranch drops implicit operands; restore the A use of a
+      // bit branch on ACC.0-ACC.7.
+      if ((Opcode == MCS51::JB || Opcode == MCS51::JNB ||
+           Opcode == MCS51::JBC) &&
+          Cond[1].isImm() && (Cond[1].getImm() & 0xF8) == 0xE0)
+        Branch.addReg(MCS51::A, RegState::Implicit);
     }
     Count = 1;
     if (BytesAdded)
