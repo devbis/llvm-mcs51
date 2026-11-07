@@ -169,7 +169,11 @@ jobs:
           set -euo pipefail
           BUILD_DIR="$GITHUB_WORKSPACE/build/${{ matrix.host }}-toolchain"
           INSTALL_DIR="$GITHUB_WORKSPACE/install/${{ matrix.host }}-toolchain"
-          cmake --build "$BUILD_DIR" --target mcs51-runtime install llvm-config FileCheck --parallel
+          # Build first, install second: `install` does not depend on the
+          # runtime objects, so one ninja invocation can try to copy them
+          # while they are still being generated.
+          cmake --build "$BUILD_DIR" --target mcs51-runtime llvm-config FileCheck --parallel
+          cmake --build "$BUILD_DIR" --target install --parallel
           install -m 755 "$BUILD_DIR/bin/llvm-config" "$INSTALL_DIR/bin/llvm-config"
           install -m 755 "$BUILD_DIR/bin/FileCheck" "$INSTALL_DIR/bin/FileCheck"
 
@@ -179,7 +183,12 @@ jobs:
         run: |
           $buildDir = Join-Path $env:GITHUB_WORKSPACE "build/${{ matrix.host }}-toolchain"
           $installDir = Join-Path $env:GITHUB_WORKSPACE "install/${{ matrix.host }}-toolchain"
-          cmake --build $buildDir --target mcs51-runtime install llvm-config FileCheck --parallel
+          # Build first, install second: `install` does not depend on the
+          # runtime objects, so one ninja invocation can try to copy them
+          # while they are still being generated.
+          cmake --build $buildDir --target mcs51-runtime llvm-config FileCheck --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build $buildDir --target install --parallel
           Copy-Item -Force (Join-Path $buildDir "bin/llvm-config.exe") (Join-Path $installDir "bin/llvm-config.exe")
           Copy-Item -Force (Join-Path $buildDir "bin/FileCheck.exe") (Join-Path $installDir "bin/FileCheck.exe")
 
