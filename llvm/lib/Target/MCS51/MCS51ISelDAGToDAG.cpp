@@ -547,7 +547,9 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
       else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
         Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
       else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
-        return false;
+        report_fatal_error(
+            "MCS-51 bit accesses need a constant or bit-addressed global "
+            "address; a variable bit index is not supported");
       SDValue Ops[] = {Addr, LD->getChain()};
       SDNode *Res = CurDAG->getMachineNode(MCS51::LOADBIT8, DL,
                                            N->getVTList(), Ops);
@@ -774,7 +776,9 @@ bool MCS51DAGToDAGISel::selectXDataMemory(SDNode *N) {
     else if (auto *C = dyn_cast<ConstantSDNode>(Addr))
       Addr = CurDAG->getTargetConstant(C->getZExtValue(), DL, MVT::i8);
     else if (Addr.getOpcode() != ISD::TargetGlobalAddress)
-      return false;
+      report_fatal_error(
+          "MCS-51 bit accesses need a constant or bit-addressed global "
+          "address; a variable bit index is not supported");
     if (auto *C = dyn_cast<ConstantSDNode>(ST->getValue())) {
       unsigned Opcode = (C->getZExtValue() & 1) ? MCS51::SETB_BIT
                                                 : MCS51::CLR_BIT;
