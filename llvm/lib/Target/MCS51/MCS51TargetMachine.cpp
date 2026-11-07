@@ -21,6 +21,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
@@ -34,6 +35,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Utils.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include <optional>
 #include <utility>
 #include "llvm/ADT/Twine.h"
@@ -766,6 +768,88 @@ public:
 };
 
 char MCS51SinkIdataConstantStore::ID = 0;
+
+// Bit, DATA and SFR accesses are selected only when the address is an
+// immediate (a global or a constant), because SETB/CLR/MOV C and the direct
+// MOV forms encode the address in the instruction. The mid-level optimizer may
+// merge two conditional accesses to different addresses into one access
+// through a select of the two addresses (for example
+// `if (c) P44 = 1; else P43 = 1;`), which no instruction can implement. Split
+// such an access back into two accesses on separate paths, keeping
+// volatility, ordering and metadata.
+class MCS51SplitBitSelectAccess final : public FunctionPass {
+public:
+  static char ID;
+  MCS51SplitBitSelectAccess() : FunctionPass(ID) {}
+
+  bool runOnFunction(Function &F) override {
+    SmallVector<Instruction *, 4> Work;
+    for (Instruction &I : instructions(F))
+      if (getSelectAddress(&I))
+        Work.push_back(&I);
+    bool Changed = false;
+    while (!Work.empty()) {
+      Instruction *I = Work.pop_back_val();
+      SelectInst *Sel = getSelectAddress(I);
+      if (!Sel)
+        continue;
+      split(I, Sel, Work);
+      Changed = true;
+    }
+    return Changed;
+  }
+
+private:
+  static SelectInst *getSelectAddress(Instruction *I) {
+    Value *Ptr = nullptr;
+    if (auto *LI = dyn_cast<LoadInst>(I))
+      Ptr = LI->getPointerOperand();
+    else if (auto *SI = dyn_cast<StoreInst>(I))
+      Ptr = SI->getPointerOperand();
+    else
+      return nullptr;
+    auto *Sel = dyn_cast<SelectInst>(Ptr);
+    if (!Sel)
+      return nullptr;
+    switch (Sel->getType()->getPointerAddressSpace()) {
+    case MCS51::Bit:
+    case MCS51::Data:
+    case MCS51::SFR:
+      return Sel;
+    default:
+      return nullptr;
+    }
+  }
+
+  static void split(Instruction *I, SelectInst *Sel,
+                    SmallVectorImpl<Instruction *> &Work) {
+    Instruction *ThenTerm, *ElseTerm;
+    SplitBlockAndInsertIfThenElse(Sel->getCondition(), I, &ThenTerm,
+                                  &ElseTerm);
+    unsigned PtrIdx = isa<LoadInst>(I) ? 0 : 1;
+    Instruction *ThenI = I->clone();
+    ThenI->setOperand(PtrIdx, Sel->getTrueValue());
+    ThenI->insertBefore(ThenTerm->getIterator());
+    Instruction *ElseI = I->clone();
+    ElseI->setOperand(PtrIdx, Sel->getFalseValue());
+    ElseI->insertBefore(ElseTerm->getIterator());
+    if (isa<LoadInst>(I)) {
+      PHINode *Phi = PHINode::Create(I->getType(), 2, "", I->getIterator());
+      Phi->addIncoming(ThenI, ThenTerm->getParent());
+      Phi->addIncoming(ElseI, ElseTerm->getParent());
+      I->replaceAllUsesWith(Phi);
+    }
+    I->eraseFromParent();
+    if (Sel->use_empty())
+      Sel->eraseFromParent();
+    // Either arm may itself be a select of bit addresses.
+    for (Instruction *New : {ThenI, ElseI})
+      if (getSelectAddress(New))
+        Work.push_back(New);
+  }
+};
+
+char MCS51SplitBitSelectAccess::ID = 0;
 
 class MCS51AccCopyHoisting final : public MachineFunctionPass {
 public:
@@ -2772,6 +2856,9 @@ public:
       addPass(createInstructionCombiningPass());
       addPass(createCFGSimplificationPass());
     }
+    // Keep this after the last CFG simplification: SimplifyCFG would merge
+    // the split accesses back into a select of bit addresses.
+    addPass(new MCS51SplitBitSelectAccess());
     return false;
   }
 
