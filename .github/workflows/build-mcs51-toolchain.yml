@@ -50,11 +50,11 @@ jobs:
             archive_ext: tar.gz
             is_windows: false
           - host: macos-amd64
-            runs_on: macos-15-intel
+            runs_on: macos-26-intel
             archive_ext: tar.gz
             is_windows: false
           - host: macos-arm64
-            runs_on: macos-14
+            runs_on: macos-26
             archive_ext: tar.gz
             is_windows: false
           - host: windows-amd64
