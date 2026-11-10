@@ -132,6 +132,7 @@ public:
                                uint64_t(Opcode) | (uint64_t(Bytes[1]) << 8),
                                Address, this, STI);
     case 0x05: // INC direct
+    case 0x15: // DEC direct
     case 0x40: // JC rel
     case 0x50: // JNC rel
     case 0x60: // JZ rel
