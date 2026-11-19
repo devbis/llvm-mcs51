@@ -21,7 +21,7 @@ body:             |
   bb.0:
     successors: %bb.1
     liveins: $r2
-    $a = MOV_A_RN $r2
+    MOV_A_RN $r2, implicit-def $a
     dead $a = MOV_A_DIRECT 131
     SJMP %bb.1
 
@@ -57,7 +57,7 @@ body:             |
   bb.0:
     successors: %bb.1
     liveins: $ip5, $r2
-    $a = MOV_A_RN $r2
+    MOV_A_RN $r2, implicit-def $a
     dead $a = MOV_A_DIRECT 131
     SJMP %bb.1
 
