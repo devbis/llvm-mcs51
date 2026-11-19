@@ -139,19 +139,35 @@ public:
     SmallVector<MemCpyInst *, 4> DynamicCopies;
     SmallVector<MemMoveInst *, 4> DynamicMoves;
     SmallVector<MemSetInst *, 4> XDataMemsets;
+    SmallVector<MemTransferInst *, 4> XDataTransfers;
     for (Instruction &I : instructions(F)) {
       if (auto *Copy = dyn_cast<MemCpyInst>(&I)) {
         if (!isa<ConstantInt>(Copy->getLength()))
           DynamicCopies.push_back(Copy);
+        else if (isXDataTransfer(*Copy))
+          XDataTransfers.push_back(Copy);
       } else if (auto *Move = dyn_cast<MemMoveInst>(&I)) {
         if (!isa<ConstantInt>(Move->getLength()))
           DynamicMoves.push_back(Move);
+        else if (isXDataTransfer(*Move))
+          XDataTransfers.push_back(Move);
       } else if (auto *Set = dyn_cast<MemSetInst>(&I)) {
         Value *Destination = getMemIntrinsicMemoryPointer(Set->getRawDest());
         if (cast<PointerType>(Destination->getType())->getAddressSpace() ==
             MCS51::XData)
           XDataMemsets.push_back(Set);
       }
+    }
+    for (MemTransferInst *Transfer : XDataTransfers) {
+      if (Transfer->isVolatile()) {
+        if (auto *Copy = dyn_cast<MemCpyInst>(Transfer))
+          lowerDynamicAddressSpaceCopy(*Copy);
+        else
+          lowerDynamicAddressSpaceMove(*cast<MemMoveInst>(Transfer));
+      } else {
+        lowerXDataTransfer(*Transfer);
+      }
+      Changed = true;
     }
     for (MemCpyInst *Copy : DynamicCopies) {
       lowerDynamicAddressSpaceCopy(*Copy);
@@ -563,6 +579,39 @@ private:
     }
   }
 
+  // Explicit XDATA pointers and default pointers use the same MOVX bus.
+  // Only convert when both operands are explicitly XDATA: default pointers
+  // may instead refer to stack storage in IDATA.
+  static bool isXDataTransfer(MemTransferInst &Transfer) {
+    Value *Dst = getMemIntrinsicMemoryPointer(Transfer.getRawDest());
+    Value *Src = getMemIntrinsicMemoryPointer(Transfer.getRawSource());
+    return cast<PointerType>(Dst->getType())->getAddressSpace() == MCS51::XData &&
+           cast<PointerType>(Src->getType())->getAddressSpace() == MCS51::XData;
+  }
+
+  static void lowerXDataTransfer(MemTransferInst &Transfer) {
+    IRBuilder<> Builder(&Transfer);
+    Builder.SetCurrentDebugLocation(Transfer.getDebugLoc());
+    auto *DefaultPtr = PointerType::get(Transfer.getContext(), MCS51::Default);
+    Value *Dst = Builder.CreateAddrSpaceCast(
+        getMemIntrinsicMemoryPointer(Transfer.getRawDest()), DefaultPtr);
+    Value *Src = Builder.CreateAddrSpaceCast(
+        getMemIntrinsicMemoryPointer(Transfer.getRawSource()), DefaultPtr);
+    if (Transfer.getIntrinsicID() == Intrinsic::memcpy_inline)
+      Builder.CreateMemCpyInline(Dst, Transfer.getDestAlign(), Src,
+                                 Transfer.getSourceAlign(), Transfer.getLength(),
+                                 false, Transfer.getAAMetadata());
+    else if (isa<MemCpyInst>(Transfer))
+      Builder.CreateMemCpy(Dst, Transfer.getDestAlign(), Src,
+                           Transfer.getSourceAlign(), Transfer.getLength(),
+                           false, Transfer.getAAMetadata());
+    else
+      Builder.CreateMemMove(Dst, Transfer.getDestAlign(), Src,
+                            Transfer.getSourceAlign(), Transfer.getLength(),
+                            false, Transfer.getAAMetadata());
+    Transfer.eraseFromParent();
+  }
+
   static void lowerXDataMemset(MemSetInst &Set) {
     Function &F = *Set.getFunction();
     LLVMContext &C = F.getContext();
@@ -821,8 +870,13 @@ private:
             DstAddress, SrcAddress, "mcs51.memmove.dst.after.src");
         Value *Distance = DirectionBuilder.CreateSub(
             DstAddress, SrcAddress, "mcs51.memmove.distance");
+        Value *Length = Move.getLength();
+        unsigned LengthBits = cast<IntegerType>(Length->getType())->getBitWidth();
+        Type *CompareTy = IntegerType::get(C, std::max(16U, LengthBits));
         Value *InRange = DirectionBuilder.CreateICmpULT(
-            Distance, Move.getLength(), "mcs51.memmove.in.range");
+            DirectionBuilder.CreateZExt(Distance, CompareTy),
+            DirectionBuilder.CreateZExt(Length, CompareTy),
+            "mcs51.memmove.in.range");
         OverlapAfterSource = DirectionBuilder.CreateAnd(
             DstAfterSrc, InRange, "mcs51.memmove.overlap");
         if (HasGeneric) {
