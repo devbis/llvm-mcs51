@@ -5,6 +5,7 @@
 #include "TargetInfo/MCS51TargetInfo.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/AsmPrinter.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -165,9 +166,29 @@ public:
       return;
 
     MCSection *SavedSection = OutStreamer->getCurrentSectionOnly();
+    // Fixed objects are incoming stack arguments (or the varargs anchor),
+    // addressed below the trampoline frame. Without them, entry through the
+    // trampoline is indistinguishable from a direct call made under the same
+    // FMAP, so the ".direct." marker lets the linker bypass the trampoline for
+    // calls from the callee's own bank.
+    const MachineFrameInfo &Frame = MF->getFrameInfo();
+    bool DirectEntrySafe = AutoBank && !F.isVarArg() &&
+                           !F.hasFnAttribute(Attribute::Naked) &&
+                           !Frame.isFrameAddressTaken() &&
+                           !Frame.isReturnAddressTaken() &&
+                           Frame.getNumFixedObjects() == 0;
+    // Inline assembly can inspect SP or its return address without creating a
+    // fixed frame object. Preserve the trampoline for such functions.
+    if (DirectEntrySafe)
+      for (const MachineBasicBlock &MBB : *MF)
+        for (const MachineInstr &MI : MBB)
+          if (MI.isInlineAsm())
+            DirectEntrySafe = false;
     SmallString<48> ThunkSectionName;
     raw_svector_ostream(ThunkSectionName)
-        << (AutoBank ? ".text.autobankthunks." : ".text.bankthunks.")
+        << (AutoBank ? (DirectEntrySafe ? ".text.autobankthunks.direct."
+                                        : ".text.autobankthunks.")
+                     : ".text.bankthunks.")
         << MF->getFunctionNumber();
     MCSection *ThunkSection =
         OutContext.getELFSection(ThunkSectionName, ELF::SHT_PROGBITS,

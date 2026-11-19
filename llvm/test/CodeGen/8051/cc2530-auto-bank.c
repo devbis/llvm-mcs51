@@ -1,4 +1,5 @@
 // RUN: clang -target mcs51 -mcpu=cc2530 -O0 -S %s -o - | FileCheck %s --check-prefix=ASM
+// RUN: clang -target mcs51 -mcpu=cc2530 -O0 -S %s -o - | FileCheck %s --check-prefix=STK
 // RUN: clang -target mcs51 -mcpu=cc2530 -nostdlib \
 // RUN:   -Wl,-T,%S/../../../lib/Target/MCS51/cc2530.ld \
 // RUN:   -Wl,--no-check-sections \
@@ -30,6 +31,13 @@ unsigned char lto_internal(unsigned char value) { return value + 3; }
 
 callback_t volatile banked_callback = banked_add;
 
+// Incoming stack arguments are addressed below the trampoline frame, so this
+// trampoline must not carry the ".direct." marker that allows same-bank bypass.
+__attribute__((noinline))
+unsigned char banked_wide(unsigned long long value) {
+  return (unsigned char)value;
+}
+
 __attribute__((noinline))
 unsigned char call_banked(unsigned char value) { return banked_add(value); }
 
@@ -39,19 +47,20 @@ unsigned char call_other_bank(unsigned char value) {
 }
 
 int main(void) {
-  return call_banked(1) + call_other_bank(2) + lto_internal(3);
+  return call_banked(1) + call_other_bank(2) + lto_internal(3) +
+         banked_wide(4);
 }
 
 // ASM: .section .mcs51.autobank.banked_add,"ax"
 // ASM-LABEL: banked_add:
-// ASM: .section .text.autobankthunks.{{[0-9]+}},"ax"
+// ASM: .section .text.autobankthunks.direct.{{[0-9]+}},"ax"
 // ASM-LABEL: __mcs51_bankcall_banked_add:
 // ASM: push 159
 // ASM: mov 159, #banked_add
 // ASM: lcall banked_add
 // ASM: pop 159
 // ASM: ret
-// ASM: .section .text.autobankthunks.{{[0-9]+}},"ax"
+// ASM: .section .text.autobankthunks.direct.{{[0-9]+}},"ax"
 // ASM-LABEL: __mcs51_bankcall_banked_xor:
 // ASM: mov 159, #banked_xor
 // ASM: lcall banked_xor
@@ -63,6 +72,11 @@ int main(void) {
 // ASM: lcall __mcs51_bankcall_banked_add
 // ASM: .short __mcs51_bankcall_banked_add
 
+// STK-LABEL: banked_wide:
+// STK: .section .text.autobankthunks.{{[0-9]+}},"ax"
+// STK-NOT: .section
+// STK: __mcs51_bankcall_banked_wide:
+
 // MAP: Name: .bank1
 // MAP: Address: 0x8000
 // MAP: Size: {{[1-9][0-9]*}}
@@ -73,13 +87,18 @@ int main(void) {
 // LINK-LABEL: <__mcs51_bankcall_banked_add>:
 // LINK: push 159
 // LINK: mov 159, #{{[1-7]}}
-// LINK: lcall 32768
+// LINK: lcall {{3[2-9][0-9][0-9][0-9]}}
 // LINK: pop 159
 // LINK: ret
 // LINK-LABEL: <__mcs51_bankcall_banked_xor>:
 // LINK: mov 159, #{{[1-7]}}
 // LINK-LABEL: <__mcs51_bankcall_call_banked>:
 // LINK: mov 159, #{{[1-7]}}
-// LINK: lcall {{327[0-9][0-9]}}
+// LINK: lcall {{3[2-9][0-9][0-9][0-9]}}
 // LINK-LABEL: <__mcs51_bankcall_call_other_bank>:
 // LINK: mov 159, #{{[1-7]}}
+// Same-bank calls skip the trampoline and enter the callee in bank space.
+// LINK-LABEL: <call_banked>:
+// LINK-NEXT: lcall {{3[2-9][0-9][0-9][0-9]}}
+// LINK-LABEL: <call_other_bank>:
+// LINK-NEXT: lcall {{3[2-9][0-9][0-9][0-9]}}

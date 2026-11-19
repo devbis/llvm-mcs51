@@ -107,6 +107,39 @@ static const Defined *getCommonTargetOfExternalBankThunk(Ctx &ctx,
   return target;
 }
 
+// A definition's trampoline lives in ".text.autobankthunks.direct.N" when the
+// compiler proved the callee reads nothing relative to the trampoline frame
+// (no incoming stack arguments). A call already running under the callee's
+// FMAP value then gains nothing from the trampoline, so return the callee's
+// address in that bank. Other trampolines, including ones from older objects,
+// keep the protocol. Calls to a local trampoline arrive against its section's
+// STT_SECTION symbol; each trampoline owns its section, so offset 0 is it.
+static std::optional<uint64_t>
+getSameBankTargetOfBankThunk(Ctx &ctx, const Symbol &sym, unsigned callerBank) {
+  if (!callerBank ||
+      !(sym.isSection() || sym.getName().starts_with("__mcs51_bankcall_")))
+    return std::nullopt;
+  auto *thunk = dyn_cast<Defined>(&sym);
+  auto *thunkSec =
+      thunk ? dyn_cast_or_null<InputSection>(thunk->section) : nullptr;
+  if (!thunkSec || thunk->value != 0 ||
+      !thunkSec->name.starts_with(".text.autobankthunks.direct."))
+    return std::nullopt;
+  for (const Relocation &r : thunkSec->relocs()) {
+    // push 0x9f; mov 0x9f,#bank; lcall F: the call target is at offset 6.
+    if (r.offset != 6 || r.type != R_8051_16_BE || !r.sym)
+      continue;
+    auto *target = dyn_cast<Defined>(r.sym);
+    auto *targetSec =
+        target ? dyn_cast_or_null<InputSection>(target->section) : nullptr;
+    if (!targetSec || !(targetSec->flags & SHF_EXECINSTR) ||
+        getMCS51CodeBank(targetSec->getOutputSection()) != callerBank)
+      return std::nullopt;
+    return target->getVA(ctx, r.addend);
+  }
+  return std::nullopt;
+}
+
 class MCS51 final : public TargetInfo {
 public:
   MCS51(Ctx &ctx) : TargetInfo(ctx) { defaultImageBase = 0; }
@@ -469,6 +502,14 @@ void MCS51::relocateAlloc(InputSection &sec, uint8_t *buf) const {
       if (const Defined *direct =
               getCommonTargetOfExternalBankThunk(ctx, *rel.sym))
         val = direct->getVA(ctx, rel.addend);
+    if (rel.sym && !isBankThunk && !isAutoBankThunk && rel.addend == 0 &&
+        rel.type == R_8051_16_BE && (sec.flags & SHF_EXECINSTR) &&
+        rel.offset > 0 &&
+        (sec.content()[rel.offset - 1] == 0x12 ||
+         sec.content()[rel.offset - 1] == 0x02))
+      if (std::optional<uint64_t> direct = getSameBankTargetOfBankThunk(
+              ctx, *rel.sym, getMCS51CodeBank(sec.getOutputSection())))
+        val = *direct;
     unsigned targetBank = 0;
     if (rel.sym) {
       // The assembler rewrites references to local functions against their
