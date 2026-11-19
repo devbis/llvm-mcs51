@@ -28,6 +28,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <string>
 #include "llvm/Support/Casting.h"
+#include "llvm/Transforms/Utils/Local.h"
 
 using namespace llvm;
 
@@ -37,8 +38,103 @@ public:
   static char ID;
   MCS51GenericPointerLowering() : FunctionPass(ID) {}
 
+  // Bit instructions require an immediate address. Optimizers can merge
+  // volatile reads into a load through a PHI or constant pointer table, so
+  // dispatch at the load site.
+  static bool lowerBitPhiLoads(Function &F) {
+    SmallVector<LoadInst *, 4> Loads;
+    for (Instruction &I : instructions(F))
+      if (auto *L = dyn_cast<LoadInst>(&I))
+        if (L->getPointerAddressSpace() == MCS51::Bit)
+          Loads.push_back(L);
+    bool Changed = false;
+    for (LoadInst *L : Loads) {
+      if (L->isAtomic())
+        continue;
+      Value *Pointer = L->getPointerOperand();
+      auto *P = dyn_cast<PHINode>(Pointer);
+      SmallVector<Constant *, 4> Addresses;
+      Value *Index = nullptr;
+      GlobalVariable *Table = nullptr;
+      if (P) {
+        if (P->getNumIncomingValues() < 2 || P->getNumIncomingValues() > 256)
+          continue;
+        for (Value *V : P->incoming_values()) {
+          auto *C = dyn_cast<Constant>(V);
+          if (!C)
+            break;
+          Addresses.push_back(C);
+        }
+        if (Addresses.size() != P->getNumIncomingValues())
+          continue;
+        auto *Phi = PHINode::Create(Type::getInt8Ty(F.getContext()),
+                                    P->getNumIncomingValues(), "bit.index",
+                                    P->getIterator());
+        for (unsigned I = 0; I < P->getNumIncomingValues(); ++I) {
+          unsigned Edge = I;
+          for (unsigned J = 0; J < I; ++J)
+            if (P->getIncomingBlock(J) == P->getIncomingBlock(I)) {
+              Edge = J;
+              break;
+            }
+          Phi->addIncoming(ConstantInt::get(Phi->getType(), Edge),
+                           P->getIncomingBlock(I));
+        }
+        Index = Phi;
+      } else if (auto *TableLoad = dyn_cast<LoadInst>(Pointer)) {
+        auto *GEP = dyn_cast<GetElementPtrInst>(TableLoad->getPointerOperand());
+        if (!GEP || TableLoad->isVolatile() || TableLoad->isAtomic() ||
+            GEP->getNumIndices() != 1 || !GEP->getSourceElementType()->isIntegerTy(8))
+          continue;
+        auto *Global = dyn_cast<GlobalVariable>(GEP->getPointerOperand());
+        if (!Global || !Global->isConstant() || !Global->hasDefinitiveInitializer())
+          continue;
+        auto *Array = dyn_cast<ConstantArray>(Global->getInitializer());
+        if (!Array || Array->getType()->getElementType() != TableLoad->getType() ||
+            !TableLoad->getType()->isPointerTy() ||
+            Array->getNumOperands() < 2 ||
+            Array->getNumOperands() > 256)
+          continue;
+        for (Value *V : Array->operands())
+          Addresses.push_back(cast<Constant>(V));
+        Index = GEP->getOperand(1);
+        Table = Global;
+      } else {
+        continue;
+      }
+      BasicBlock *Head = L->getParent();
+      BasicBlock *Tail = Head->splitBasicBlock(L, "bit.cont");
+      Head->getTerminator()->eraseFromParent();
+      auto *Result = PHINode::Create(L->getType(), Addresses.size(),
+                                     "bit.value", Tail->begin());
+      auto *Switch =
+          SwitchInst::Create(Index, Tail, Addresses.size(), Head);
+      for (unsigned I = 0; I < Addresses.size(); ++I) {
+        BasicBlock *Case =
+            BasicBlock::Create(F.getContext(), "bit.read", &F, Tail);
+        auto *Read = cast<LoadInst>(L->clone());
+        Read->setOperand(0, Addresses[I]);
+        Read->insertInto(Case, Case->end());
+        UncondBrInst::Create(Tail, Case);
+        Result->addIncoming(Read, Case);
+        Switch->addCase(
+            ConstantInt::get(cast<IntegerType>(Index->getType()), I), Case);
+      }
+      // The original load requires a valid index into the pointer table.
+      Switch->setDefaultDest(Switch->getSuccessor(1));
+      L->replaceAllUsesWith(Result);
+      L->eraseFromParent();
+      RecursivelyDeleteTriviallyDeadInstructions(Pointer);
+      if (Table && Table->hasLocalLinkage() && Table->use_empty())
+        Table->eraseFromParent();
+      Changed = true;
+    }
+    return Changed;
+  }
+
   bool runOnFunction(Function &F) override {
-    bool Changed = expandNestedGenericCasts(F);
+    bool Changed = lowerBitPhiLoads(F);
+    Changed |= expandNestedGenericCasts(F);
     Changed |= rejectUnsupportedGenericCasts(F);
     SmallVector<MemCpyInst *, 4> DynamicCopies;
     SmallVector<MemMoveInst *, 4> DynamicMoves;
