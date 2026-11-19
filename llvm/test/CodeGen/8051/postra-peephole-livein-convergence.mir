@@ -1,0 +1,82 @@
+# RUN: llc -mtriple=mcs51 -verify-machineinstrs -start-after=patchable-function \
+# RUN:   -stop-before=branch-relaxation %s -o - | FileCheck %s
+
+# The MCS-51 post-RA peephole pass recomputes block live-ins with
+# fullyRecomputeLiveIns. That fixed-point iteration only converges when it
+# starts from a state at or below the exact liveness. In both functions below
+# the blocks form a cycle visited against the direction of the CFG edges, so a
+# live-in that does not match the recomputed one moves one block per sweep and
+# never settles: the compiler used to hang here. The pass must start from
+# empty live-in lists and reach the exact liveness.
+
+# A stale live-in: nothing in the loop uses $r5.
+# CHECK-LABEL: name: stale_livein_cycle
+# CHECK:       body:
+# CHECK-NOT:     liveins: $
+# CHECK:       {{^\.\.\.$}}
+---
+name:            stale_livein_cycle
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $r2
+    $a = MOV_A_RN $r2
+    dead $a = MOV_A_DIRECT 131
+    SJMP %bb.1
+
+  bb.1:
+    successors: %bb.2
+    SJMP %bb.2
+
+  bb.2:
+    successors: %bb.3
+    liveins: $r5
+    SJMP %bb.3
+
+  bb.3:
+    successors: %bb.1
+    SJMP %bb.1
+...
+
+# Exact liveness written in two forms: the register pair $ip5 versus its
+# halves $im10 and $im11. Both are live around the whole loop.
+# CHECK-LABEL: name: pair_livein_cycle
+# CHECK:       bb.0:
+# CHECK:         liveins: $im10, $im11
+# CHECK:       bb.1:
+# CHECK:         liveins: $im10, $im11
+# CHECK:       bb.2:
+# CHECK:         liveins: $im10, $im11
+# CHECK:       bb.3:
+# CHECK:         liveins: $im10, $im11
+---
+name:            pair_livein_cycle
+tracksRegLiveness: true
+body:             |
+  bb.0:
+    successors: %bb.1
+    liveins: $ip5, $r2
+    $a = MOV_A_RN $r2
+    dead $a = MOV_A_DIRECT 131
+    SJMP %bb.1
+
+  bb.1:
+    successors: %bb.2
+    liveins: $im10, $im11
+    $a = MOV_A_IM $im10
+    $im9 = MOV_IM_A killed $a
+    $a = MOV_A_IM $im11
+    $im8 = MOV_IM_A killed $a
+    SJMP %bb.2
+
+  bb.2:
+    successors: %bb.3
+    liveins: $ip5
+    SJMP %bb.3
+
+  bb.3:
+    successors: %bb.1
+    liveins: $im10, $im11
+    SJMP %bb.1
+...

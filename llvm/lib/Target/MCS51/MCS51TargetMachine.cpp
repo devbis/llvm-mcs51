@@ -2106,8 +2106,12 @@ public:
       // Recomputing in forward order can require one full sweep per block for
       // long unrolled paths, making this pass quadratic on large functions.
       SmallVector<MachineBasicBlock *, 16> Blocks;
-      for (auto I = MF.rbegin(), E = MF.rend(); I != E; ++I)
+      // Start from empty live-ins so stale lane masks in cycles cannot
+      // prevent the fixed-point iteration from converging.
+      for (auto I = MF.rbegin(), E = MF.rend(); I != E; ++I) {
+        I->clearLiveIns();
         Blocks.push_back(&*I);
+      }
       fullyRecomputeLiveIns(Blocks);
     }
     return Changed;
