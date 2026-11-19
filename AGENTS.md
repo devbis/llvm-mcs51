@@ -75,7 +75,9 @@ builds a flat test image with the MCS-51 runtime, executes an IDATA byte and
 64-bit generic-pointer round-trip plus reads and writes through CODE, XDATA,
 PDATA, DATA, and IDATA generic pointers, then checks the XDATA result byte.
 This is an optional runtime check in addition to the lit suite; the simulator
-is not used as the SDCC compiler.
+is not used as the SDCC compiler. `verify-classic-stack-pointer-runtime.sh`
+executes cross-translation-unit IDATA and generic stack-pointer reads and
+writes on `s51`; it uses the same `MCS51_SIM` override.
 `llvm/lib/Target/MCS51/verify-arith32-runtime.sh` runs the same kind of check
 for variable 32-bit shifts: the hand-written `__ashlsi3`, `__lshrsi3` and
 `__ashrsi3` helpers (and inline 32-bit multiplication) are compared with
@@ -176,8 +178,11 @@ common flash. Interrupt handlers save the imaginary registers they use. Locals
 live in IDATA and are accessed with `@R0`/`@R1`; the default address space is
 XDATA. On CC2530, non-null DATA/IDATA pointers converted to the default space
 use the `0x1f00` SRAM alias, including escaped stack addresses; null remains
-zero. Classic 8051 retains its numeric conversion because a universal XDATA
-alias is not available. Assembly source can name address bytes with
+zero. Classic 8051 has no universal XDATA alias: known escapes of stack
+addresses as ordinary XDATA pointers are diagnosed; use `__idata` or
+`__generic` pointer arguments instead. This intraprocedural diagnostic cannot
+track arbitrary pointer provenance through integer memory or other functions.
+Assembly source can name address bytes with
 `mov 48, #lo8(sym)` / `#hi8(sym)` (relocations `R_8051_LO8`/`R_8051_HI8`).
 The sim-based checks `verify-generic-pointer-runtime.sh` and
 `verify-arith32-runtime.sh` expect `s51` on `PATH` or in `MCS51_SIM`.

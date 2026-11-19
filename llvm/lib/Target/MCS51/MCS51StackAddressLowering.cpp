@@ -5,9 +5,11 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
@@ -15,6 +17,107 @@
 using namespace llvm;
 
 namespace {
+// On a classic 8051, default pointers address XDATA while automatic
+// objects live in IDATA. Unlike CC2530 there is no universal XDATA alias for
+// the stack, so an escaping near pointer cannot be used to access the object.
+class MCS51ClassicStackEscapeDiagnostic final : public FunctionPass {
+  bool HasXDataStackAlias;
+
+public:
+  static char ID;
+  explicit MCS51ClassicStackEscapeDiagnostic(bool HasAlias)
+      : FunctionPass(ID), HasXDataStackAlias(HasAlias) {}
+
+  bool runOnFunction(Function &F) override {
+    if (HasXDataStackAlias)
+      return false;
+    auto Diagnose = [&](Instruction *Inst) {
+      F.getContext().diagnose(DiagnosticInfoUnsupported(
+          F, "IDATA stack pointer escapes through an XDATA or incompatible "
+             "address space; use an __idata or __generic pointer on classic "
+             "MCS-51",
+          Inst->getDebugLoc()));
+    };
+    for (Instruction &I : instructions(F)) {
+      auto *AI = dyn_cast<AllocaInst>(&I);
+      if (!AI)
+        continue;
+      SmallVector<Value *, 16> Worklist{AI};
+      SmallPtrSet<Value *, 16> Seen;
+      while (!Worklist.empty()) {
+        Value *Pointer = Worklist.pop_back_val();
+        if (!Seen.insert(Pointer).second)
+          continue;
+        for (User *U : Pointer->users()) {
+          auto *Inst = dyn_cast<Instruction>(U);
+          if (!Inst || isa<DbgInfoIntrinsic>(Inst) ||
+              isa<LifetimeIntrinsic>(Inst))
+            continue;
+          if (isa<PtrToIntInst>(Inst)) {
+            Worklist.push_back(Inst);
+            continue;
+          }
+          if (Pointer->getType()->isIntegerTy()) {
+            if (auto *Cast = dyn_cast<IntToPtrInst>(Inst)) {
+              unsigned AS = Cast->getAddressSpace();
+              if (AS == MCS51::Default || AS == MCS51::XData ||
+                  AS == MCS51::PData || AS == MCS51::Code) {
+                Diagnose(Inst);
+                return false;
+              }
+            } else if (Inst->getType()->isIntegerTy() &&
+                       isa<BinaryOperator, CastInst, PHINode, SelectInst>(
+                           Inst)) {
+              auto *Select = dyn_cast<SelectInst>(Inst);
+              if (!Select || Select->getCondition() != Pointer)
+                Worklist.push_back(Inst);
+            }
+            continue;
+          }
+          if (auto *Cast = dyn_cast<AddrSpaceCastInst>(Inst)) {
+            unsigned AS = Cast->getDestAddressSpace();
+            if (AS == MCS51::Default || AS == MCS51::Data ||
+                AS == MCS51::IData)
+              Worklist.push_back(Cast);
+            else if (AS == MCS51::XData || AS == MCS51::PData ||
+                     AS == MCS51::Code) {
+              Diagnose(Inst);
+              return false;
+            }
+            continue;
+          }
+          if (isa<GetElementPtrInst, BitCastInst, PHINode, SelectInst>(Inst) &&
+              Inst->getType()->isPointerTy()) {
+            Worklist.push_back(Inst);
+            continue;
+          }
+          if (cast<PointerType>(Pointer->getType())->getAddressSpace() !=
+              MCS51::Default)
+            continue;
+          bool Escapes = false;
+          if (auto *Store = dyn_cast<StoreInst>(Inst))
+            Escapes = Store->getValueOperand() == Pointer;
+          else if (auto *Return = dyn_cast<ReturnInst>(Inst))
+            Escapes = Return->getReturnValue() == Pointer;
+          else if (auto *Call = dyn_cast<CallBase>(Inst))
+            Escapes = !isa<IntrinsicInst>(Call);
+          if (Escapes) {
+            Diagnose(Inst);
+            return false;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  StringRef getPassName() const override {
+    return "MCS-51 classic stack pointer escape diagnostic";
+  }
+};
+
+char MCS51ClassicStackEscapeDiagnostic::ID = 0;
+
 class MCS51StackAddressLowering final : public FunctionPass {
 public:
   static char ID;
@@ -247,4 +350,8 @@ char MCS51StackAddressLowering::ID = 0;
 
 FunctionPass *llvm::createMCS51StackAddressLoweringPass() {
   return new MCS51StackAddressLowering();
+}
+
+FunctionPass *llvm::createMCS51ClassicStackEscapeDiagnosticPass(bool HasAlias) {
+  return new MCS51ClassicStackEscapeDiagnostic(HasAlias);
 }

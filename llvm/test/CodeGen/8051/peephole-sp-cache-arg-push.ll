@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=mcs51 -O2 -verify-machineinstrs %s -o - | FileCheck %s
+; RUN: llc -mtriple=mcs51 -mcpu=cc2530 -O2 -verify-machineinstrs %s -o - | FileCheck %s
 
 ; The post-RA peephole caches "R1 holds SP+k" to rewrite stack addressing as
 ; relative R1 adjustments. Argument pushes move SP, so the cache must be
@@ -19,7 +19,7 @@ define i32 @caller32(i32 %a, i32 %b, i32 %c, i32 %d) {
 ; CHECK-NEXT:  add a, #245
 ; CHECK-NEXT:  mov r1, a
 ; CHECK-NOT:   push
-; CHECK:       lcall callee32
+; CHECK:       lcall __mcs51_bankcall_callee32
 entry:
   %r = alloca i32, align 1, addrspace(2)
   %r.ascast = addrspacecast ptr addrspace(2) %r to ptr

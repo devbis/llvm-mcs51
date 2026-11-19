@@ -16,19 +16,3 @@ define ptr @convert(ptr addrspace(2) %p) {
   %q = addrspacecast ptr addrspace(2) %p to ptr
   ret ptr %q
 }
-
-; Frame indices are non-null and can use the alias without a runtime test.
-define ptr @local_ptr() {
-; CC2530-LABEL: local_ptr:
-; CC2530: mov {{r[0-7]}}, #31
-; CC2530-NOT: jz
-; CC2530: ret
-; CLASSIC-LABEL: local_ptr:
-; CLASSIC-NOT: #31
-; CLASSIC: mov {{r[0-7]}}, #0
-; CLASSIC: ret
-  %v = alloca i8, addrspace(2)
-  %q = addrspacecast ptr addrspace(2) %v to ptr
-  ret ptr %q
-}
-

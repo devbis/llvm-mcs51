@@ -2838,6 +2838,8 @@ public:
   }
 
   bool addPreISel() override {
+    addPass(createMCS51ClassicStackEscapeDiagnosticPass(
+        getMCS51TargetMachine().getTargetCPU().equals_insensitive("cc2530")));
     addPass(createMCS51GenericPointerLoweringPass());
     addPass(new MCS51OutlineXDataI32Compare());
     addPass(new MCS51NarrowByteMaskTests());

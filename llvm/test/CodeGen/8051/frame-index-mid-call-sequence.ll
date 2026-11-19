@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=mcs51 -O2 -verify-machineinstrs %s -o - | FileCheck %s
+; RUN: llc -mtriple=mcs51 -mcpu=cc2530 -O2 -verify-machineinstrs %s -o - | FileCheck %s
 
 ; The i64 abs/select expansions are custom-inserted control flow that lands
 ; between ADJCALLSTACKDOWN and the call, after part of the arguments has been
@@ -14,7 +14,7 @@ define i64 @caller(i64 %n, i64 %d) minsize optsize {
 ; CHECK:       add a, #245
 ; CHECK-NEXT:  mov r1, a
 ; CHECK:       push 54
-; CHECK-NEXT:  lcall callee
+; CHECK-NEXT:  lcall __mcs51_bankcall_callee
 entry:
   %r = alloca i64, align 1, addrspace(2)
   %g = addrspacecast ptr addrspace(2) %r to ptr

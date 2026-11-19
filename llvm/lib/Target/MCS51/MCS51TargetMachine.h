@@ -47,6 +47,7 @@ private:
 FunctionPass *createMCS51ISelDag(MCS51TargetMachine &TM, CodeGenOptLevel OL);
 FunctionPass *createMCS51GenericPointerLoweringPass();
 FunctionPass *createMCS51StackAddressLoweringPass();
+FunctionPass *createMCS51ClassicStackEscapeDiagnosticPass(bool HasAlias);
 ModulePass *createMCS51OverlayPass();
 ModulePass *createMCS51CodeConstantEscapePass();
 void initializeMCS51AsmPrinterPass(PassRegistry &PR);
