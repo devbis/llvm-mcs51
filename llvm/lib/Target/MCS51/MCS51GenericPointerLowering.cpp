@@ -144,10 +144,14 @@ public:
       if (auto *Copy = dyn_cast<MemCpyInst>(&I)) {
         if (!isa<ConstantInt>(Copy->getLength()))
           DynamicCopies.push_back(Copy);
+        else if (hasMergedMemTransferPointer(*Copy))
+          DynamicCopies.push_back(Copy);
         else if (isXDataTransfer(*Copy))
           XDataTransfers.push_back(Copy);
       } else if (auto *Move = dyn_cast<MemMoveInst>(&I)) {
         if (!isa<ConstantInt>(Move->getLength()))
+          DynamicMoves.push_back(Move);
+        else if (hasMergedMemTransferPointer(*Move))
           DynamicMoves.push_back(Move);
         else if (isXDataTransfer(*Move))
           XDataTransfers.push_back(Move);
@@ -310,7 +314,7 @@ public:
   }
 
 private:
-  static void lowerGenericGEP(GetElementPtrInst &GEP) {
+  static Value *lowerGenericGEP(GetElementPtrInst &GEP) {
     IRBuilder<> B(&GEP);
     Module &M = *GEP.getModule();
     LLVMContext &C = M.getContext();
@@ -356,6 +360,7 @@ private:
     Value *Result = B.CreateIntToPtr(ResultBits, GEP.getType(), "gptr.gep");
     GEP.replaceAllUsesWith(Result);
     GEP.eraseFromParent();
+    return Result;
   }
 
   static bool isGenericTagSupported(unsigned AddressSpace) {
@@ -579,24 +584,116 @@ private:
     }
   }
 
-  // Explicit XDATA pointers and default pointers use the same MOVX bus.
-  // Only convert when both operands are explicitly XDATA: default pointers
-  // may instead refer to stack storage in IDATA.
+  static bool hasNonXDataProvenance(Value *Pointer) {
+    SmallPtrSet<Value *, 16> Seen;
+    SmallVector<Value *, 8> Worklist(1, Pointer);
+    while (!Worklist.empty()) {
+      Value *Current = Worklist.pop_back_val();
+      if (!Seen.insert(Current).second)
+        continue;
+      unsigned AS = cast<PointerType>(Current->getType())->getAddressSpace();
+      if (isa<AllocaInst>(Current) ||
+          (AS != MCS51::Default && AS != MCS51::XData))
+        return true;
+      if (auto *GEP = dyn_cast<GEPOperator>(Current))
+        Worklist.push_back(GEP->getPointerOperand());
+      else if (auto *Cast = dyn_cast<BitCastOperator>(Current))
+        Worklist.push_back(Cast->getOperand(0));
+      else if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Current))
+        Worklist.push_back(Cast->getPointerOperand());
+      else if (auto *Select = dyn_cast<SelectInst>(Current)) {
+        Worklist.push_back(Select->getTrueValue());
+        Worklist.push_back(Select->getFalseValue());
+      } else if (auto *Phi = dyn_cast<PHINode>(Current)) {
+        for (Value *Incoming : Phi->incoming_values())
+          Worklist.push_back(Incoming);
+      }
+    }
+    return false;
+  }
+
+  static bool hasMergedMemTransferPointer(MemTransferInst &Transfer) {
+    for (Value *Pointer : {Transfer.getRawDest(), Transfer.getRawSource()}) {
+      Pointer = getMemIntrinsicMemoryPointer(Pointer);
+      if (cast<PointerType>(Pointer->getType())->getAddressSpace() ==
+              MCS51::Default &&
+          hasMergedPointerProvenance(Pointer) &&
+          hasNonXDataProvenance(Pointer))
+        return true;
+    }
+    return false;
+  }
+
+  // A merged default pointer can select either an IDATA/CODE/PDATA object
+  // or XDATA. Keep each incoming memory-space tag through the byte loop.
+  static Value *tagMergedMemTransferPointer(IRBuilder<> &Builder,
+                                             Value *Pointer) {
+    if (cast<PointerType>(Pointer->getType())->getAddressSpace() !=
+            MCS51::Default ||
+        !hasMergedPointerProvenance(Pointer) ||
+        !hasNonXDataProvenance(Pointer))
+      return Pointer;
+    DenseMap<const PHINode *, PHINode *> Phis;
+    return lowerAddressSpaceCast(
+        Builder, Pointer, PointerType::get(Builder.getContext(), MCS51::Generic),
+        MCS51::Default, MCS51::Generic, Phis);
+  }
+
+  // Unknown default-space arguments follow the target's XDATA memory model.
+  // Reject known stack objects and casts from other buses, including through
+  // selects and PHIs, so the runtime never receives a known IDATA pointer.
+  static bool usesXDataBus(Value *Pointer) {
+    SmallPtrSet<Value *, 16> Seen;
+    SmallVector<Value *, 8> Worklist(1, Pointer);
+    while (!Worklist.empty()) {
+      Value *Current = Worklist.pop_back_val();
+      if (!Seen.insert(Current).second)
+        continue;
+      unsigned AS = cast<PointerType>(Current->getType())->getAddressSpace();
+      if (AS == MCS51::XData)
+        continue;
+      if (AS != MCS51::Default || isa<AllocaInst>(Current))
+        return false;
+      if (auto *GEP = dyn_cast<GEPOperator>(Current))
+        Worklist.push_back(GEP->getPointerOperand());
+      else if (auto *Cast = dyn_cast<BitCastOperator>(Current))
+        Worklist.push_back(Cast->getOperand(0));
+      else if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Current))
+        Worklist.push_back(Cast->getPointerOperand());
+      else if (auto *Select = dyn_cast<SelectInst>(Current)) {
+        Worklist.push_back(Select->getTrueValue());
+        Worklist.push_back(Select->getFalseValue());
+      } else if (auto *Phi = dyn_cast<PHINode>(Current)) {
+        for (Value *Incoming : Phi->incoming_values())
+          Worklist.push_back(Incoming);
+      } else if (!isa<Argument, GlobalValue, ConstantPointerNull>(Current)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   static bool isXDataTransfer(MemTransferInst &Transfer) {
     Value *Dst = getMemIntrinsicMemoryPointer(Transfer.getRawDest());
     Value *Src = getMemIntrinsicMemoryPointer(Transfer.getRawSource());
-    return cast<PointerType>(Dst->getType())->getAddressSpace() == MCS51::XData &&
-           cast<PointerType>(Src->getType())->getAddressSpace() == MCS51::XData;
+    unsigned DstAS = cast<PointerType>(Dst->getType())->getAddressSpace();
+    unsigned SrcAS = cast<PointerType>(Src->getType())->getAddressSpace();
+    return (DstAS == MCS51::XData || SrcAS == MCS51::XData) &&
+           usesXDataBus(Dst) && usesXDataBus(Src);
   }
 
   static void lowerXDataTransfer(MemTransferInst &Transfer) {
     IRBuilder<> Builder(&Transfer);
     Builder.SetCurrentDebugLocation(Transfer.getDebugLoc());
     auto *DefaultPtr = PointerType::get(Transfer.getContext(), MCS51::Default);
-    Value *Dst = Builder.CreateAddrSpaceCast(
-        getMemIntrinsicMemoryPointer(Transfer.getRawDest()), DefaultPtr);
-    Value *Src = Builder.CreateAddrSpaceCast(
-        getMemIntrinsicMemoryPointer(Transfer.getRawSource()), DefaultPtr);
+    auto AsDefault = [&](Value *Pointer) {
+      Pointer = getMemIntrinsicMemoryPointer(Pointer);
+      return Pointer->getType() == DefaultPtr
+                 ? Pointer
+                 : Builder.CreateAddrSpaceCast(Pointer, DefaultPtr);
+    };
+    Value *Dst = AsDefault(Transfer.getRawDest());
+    Value *Src = AsDefault(Transfer.getRawSource());
     if (Transfer.getIntrinsicID() == Intrinsic::memcpy_inline)
       Builder.CreateMemCpyInline(Dst, Transfer.getDestAlign(), Src,
                                  Transfer.getSourceAlign(), Transfer.getLength(),
@@ -666,6 +763,9 @@ private:
     Type *I8Ty = Type::getInt8Ty(C);
     Value *Dst = getMemIntrinsicMemoryPointer(Copy.getRawDest());
     Value *Src = getMemIntrinsicMemoryPointer(Copy.getRawSource());
+    IRBuilder<> PointerBuilder(&Copy);
+    Dst = tagMergedMemTransferPointer(PointerBuilder, Dst);
+    Src = tagMergedMemTransferPointer(PointerBuilder, Src);
     unsigned DstAS = cast<PointerType>(Dst->getType())->getAddressSpace();
     unsigned SrcAS = cast<PointerType>(Src->getType())->getAddressSpace();
     bool DstIsStack = DstAS == MCS51::Default && pointsToStackObject(Dst);
@@ -770,6 +870,9 @@ private:
     Type *I32Ty = Type::getInt32Ty(C);
     Value *Dst = getMemIntrinsicMemoryPointer(Move.getRawDest());
     Value *Src = getMemIntrinsicMemoryPointer(Move.getRawSource());
+    IRBuilder<> PointerBuilder(&Move);
+    Dst = tagMergedMemTransferPointer(PointerBuilder, Dst);
+    Src = tagMergedMemTransferPointer(PointerBuilder, Src);
     unsigned DstAS = cast<PointerType>(Dst->getType())->getAddressSpace();
     unsigned SrcAS = cast<PointerType>(Src->getType())->getAddressSpace();
     bool DstIsStack = DstAS == MCS51::Default && pointsToStackObject(Dst);
@@ -1061,6 +1164,35 @@ private:
     Module &M = *B.GetInsertBlock()->getModule();
     LLVMContext &C = M.getContext();
     if (DstAS == MCS51::Generic) {
+      if (SrcAS == MCS51::Default) {
+        if (auto *Cast = dyn_cast<AddrSpaceCastOperator>(Pointer)) {
+          unsigned OriginalAS = Cast->getSrcAddressSpace();
+          if (isGenericTagSupported(OriginalAS))
+            return lowerAddressSpaceCast(B, Cast->getPointerOperand(), DestTy,
+                                         OriginalAS, DstAS,
+                                         GenericPointerPhis);
+          if (OriginalAS == MCS51::Bit || OriginalAS == MCS51::SFR) {
+            Function &F = *B.GetInsertBlock()->getParent();
+            C.diagnose(DiagnosticInfoUnsupported(
+                F, "conversion of a BIT or SFR address to a generic pointer",
+                B.getCurrentDebugLocation()));
+            return PoisonValue::get(DestTy);
+          }
+        }
+      }
+      if (auto *GEP = dyn_cast<GetElementPtrInst>(Pointer)) {
+        if (SrcAS == MCS51::Default && hasMergedPointerProvenance(Pointer)) {
+          Value *Base = lowerAddressSpaceCast(B, GEP->getPointerOperand(),
+                                              DestTy, SrcAS, DstAS,
+                                              GenericPointerPhis);
+          SmallVector<Value *, 4> Indices(GEP->idx_begin(), GEP->idx_end());
+          Value *Result = B.CreateGEP(GEP->getSourceElementType(), Base,
+                                      Indices, "gptr.cast.gep");
+          if (auto *GenericGEP = dyn_cast<GetElementPtrInst>(Result))
+            return lowerGenericGEP(*GenericGEP);
+          return Result;
+        }
+      }
       if (auto *Select = dyn_cast<SelectInst>(Pointer)) {
         Value *TruePointer =
             lowerAddressSpaceCast(B, Select->getTrueValue(), DestTy, SrcAS,
