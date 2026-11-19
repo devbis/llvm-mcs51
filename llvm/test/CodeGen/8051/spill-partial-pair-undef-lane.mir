@@ -1,0 +1,182 @@
+# RUN: llc -mtriple=mcs51 -run-pass=prolog-epilog -verify-machineinstrs %s -o - \
+# RUN:   | FileCheck %s --check-prefixes=CHECK,STACK
+
+# The register allocator spills a 16-bit pair as a whole while only one of its
+# byte lanes holds a value. Frame-index elimination stores the pair one byte at
+# a time, and the byte that carries no value is a read of an undefined
+# physical register unless it is flagged undef. A byte is undefined at the
+# spill when the nearest preceding instruction that touches it ends its live
+# range: a kill, a dead def, or a register-mask clobber. A byte with a live def
+# or a block live-in must keep its value, so it is never flagged.
+
+# A call's dead implicit def of $im1 leaves only the low byte defined.
+# CHECK-LABEL: name: call_dead_def_hi
+# STACK:       MOV_R1_IND_IM $im0, implicit $r1
+# STACK:       MOV_R1_IND_IM undef $im1, implicit $r1
+
+# A dead def of the whole pair followed by a def of its low byte (the
+# allocator's view of `undef %v.sub_lo = ...`).
+# CHECK-LABEL: name: pair_dead_def_then_lo
+# STACK:       MOV_R1_IND_IM $im2, implicit $r1
+# STACK:       MOV_R1_IND_IM undef $im3, implicit $r1
+
+# A dead def of the low byte with a live high byte.
+# CHECK-LABEL: name: dead_def_lo
+# STACK:       MOV_R1_IND_IM undef $im0, implicit $r1
+# STACK:       MOV_R1_IND_IM $im1, implicit $r1
+
+# A register-mask clobber without an explicit def operand.
+# CHECK-LABEL: name: regmask_clobber_hi
+# STACK:       MOV_R1_IND_IM $im0, implicit $r1
+# STACK:       MOV_R1_IND_IM undef $im1, implicit $r1
+
+# Both bytes defined: nothing may be flagged.
+# CHECK-LABEL: name: both_defined
+# STACK:       MOV_R1_IND_IM $im0, implicit $r1
+# STACK:       MOV_R1_IND_IM $im1, implicit $r1
+# CHECK-NOT:   undef $im
+
+# A live def after an earlier dead def wins.
+# CHECK-LABEL: name: redefined_after_dead_def
+# STACK:       MOV_R1_IND_IM $im0, implicit $r1
+# STACK:       MOV_R1_IND_IM $im1, implicit $r1
+# CHECK-NOT:   undef $im
+
+# A pair inherited through the block live-ins stays defined across a block
+# boundary.
+# CHECK-LABEL: name: livein_pair
+# CHECK:       bb.1:
+# STACK:       MOV_R1_IND_IM $im0, implicit $r1
+# STACK:       MOV_R1_IND_IM $im1, implicit $r1
+# CHECK-NOT:   undef $im
+
+--- |
+  target datalayout = "e-p:16:8-p1:8:8-p2:8:8-p3:8:8-p4:16:8-p5:16:8-p6:8:8-p7:8:8-p8:32:8-A2-i1:8-i8:8-i16:8-i32:8-i64:8-f32:8-f64:8-n8:16"
+  target triple = "mcs51"
+
+  declare i8 @callee()
+
+  define i8 @call_dead_def_hi() { ret i8 0 }
+  define i8 @pair_dead_def_then_lo() { ret i8 0 }
+  define i8 @dead_def_lo() { ret i8 0 }
+  define i8 @regmask_clobber_hi() { ret i8 0 }
+  define i8 @both_defined() { ret i8 0 }
+  define i8 @redefined_after_dead_def() { ret i8 0 }
+  define i8 @livein_pair() { ret i8 0 }
+...
+---
+name:            call_dead_def_hi
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    LCALL @callee, csr_mcs51, implicit-def $a, implicit-def dead $b, implicit-def dead $c, implicit-def dead $dptr, implicit-def $sp, implicit-def dead $r0, implicit-def dead $r1, implicit-def dead $im0, implicit-def dead $im1, implicit-def dead $im2, implicit-def dead $im3, implicit-def dead $im4, implicit-def dead $im5, implicit-def dead $im6, implicit-def dead $im7, implicit $sp
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    $im0 = COPY killed $a
+    SPILL_STORE16 %stack.0, 0, $ip0, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip0 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im0
+    RET_NOA implicit killed $a
+...
+---
+name:            pair_dead_def_then_lo
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a
+    dead $ip1 = LDI16 255
+    $im2 = COPY killed $a
+    SPILL_STORE16 %stack.0, 0, $ip1, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip1 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im2
+    RET_NOA implicit killed $a
+...
+---
+name:            dead_def_lo
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a
+    $im1 = COPY killed $a
+    dead $im0 = MOV_IM_IMM 0
+    SPILL_STORE16 %stack.0, 0, $ip0, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip0 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im1
+    RET_NOA implicit killed $a
+...
+---
+name:            regmask_clobber_hi
+tracksRegLiveness: true
+frameInfo:
+  adjustsStack:    true
+  hasCalls:        true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $im1
+    ADJCALLSTACKDOWN 0, 0, implicit-def dead $sp, implicit $sp
+    LCALL @callee, csr_mcs51, implicit-def $a, implicit-def $sp, implicit $sp
+    ADJCALLSTACKUP 0, 0, implicit-def dead $sp, implicit $sp
+    $im0 = COPY killed $a
+    SPILL_STORE16 %stack.0, 0, $ip0, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip0 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im0
+    RET_NOA implicit killed $a
+...
+---
+name:            both_defined
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    $ip0 = LDI16 4660
+    SPILL_STORE16 %stack.0, 0, $ip0, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip0 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im1
+    RET_NOA implicit killed $a
+...
+---
+name:            redefined_after_dead_def
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    liveins: $a
+    dead $ip0 = LDI16 0
+    $im0 = COPY $a
+    $im1 = COPY killed $a
+    SPILL_STORE16 %stack.0, 0, $ip0, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip0 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im1
+    RET_NOA implicit killed $a
+...
+---
+name:            livein_pair
+tracksRegLiveness: true
+stack:
+  - { id: 0, type: spill-slot, offset: 0, size: 2, alignment: 1 }
+body:             |
+  bb.0:
+    successors: %bb.1
+    $ip0 = LDI16 4660
+    SJMP %bb.1
+
+  bb.1:
+    liveins: $ip0
+    SPILL_STORE16 %stack.0, 0, $ip0, implicit-def $r1, implicit $sp :: (store (s16) into %stack.0, align 1)
+    $ip0 = SPILL_LOAD16 %stack.0, 0, implicit-def $r1, implicit $sp :: (load (s16) from %stack.0, align 1)
+    $a = COPY killed $im1
+    RET_NOA implicit killed $a
+...

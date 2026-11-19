@@ -100,9 +100,24 @@ bool MCS51RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator MI,
       --It;
       if (It->isDebugInstr())
         continue;
-      if (It->modifiesRegister(Byte, this))
-        return RegState{};
-      if (It->killsRegister(Byte, this))
+      bool Ends = false;
+      for (const MachineOperand &MO : It->operands()) {
+        if (MO.isRegMask()) {
+          Ends |= MO.clobbersPhysReg(Byte.asMCReg());
+          continue;
+        }
+        if (!MO.isReg() || !MO.getReg().isPhysical() ||
+            !regsOverlap(MO.getReg(), Byte))
+          continue;
+        if (MO.isDef()) {
+          if (!MO.isDead())
+            return RegState{};
+          Ends = true;
+        } else if (MO.isKill()) {
+          Ends = true;
+        }
+      }
+      if (Ends)
         return RegState::Undef;
     }
     for (const MachineBasicBlock::RegisterMaskPair &LI : MBB.liveins())
