@@ -1,7 +1,6 @@
 #!/bin/sh
-# Regression reproducer: an ordinary pointer to an IDATA local escapes to
-# separately compiled code. This currently fails because default-space
-# accesses do not reach the stack alias. Expected bytes: a5 42 69.
+# An ordinary pointer to an IDATA local escapes to separately compiled code.
+# Check the CC2530 SRAM alias against a manually constructed control address.
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SOURCE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../../.." && pwd)
@@ -27,7 +26,7 @@ for mode in control ordinary; do
   "$OBJCOPY" -O ihex "$WORK/test.elf" "$WORK/test.hex"
   "$MCUEMU" run --model CC2530F256 --firmware "$WORK/test.hex" \
     --steps 1000000 --dump-xdata 0x1e00:4 > "$WORK/emulator.log" 2>&1
-  if ! grep -Eq '^xdata 0x1e00: a5 42 69( |$)' "$WORK/emulator.log" || \
+  if ! grep -Eq '^xdata 0x1e00: a5 42 69 00( |$)' "$WORK/emulator.log" || \
      ! grep -q '^stop: idle self-loop' "$WORK/emulator.log"; then
     cat "$WORK/emulator.log" >&2
     echo "CC2530 stack pointer test failed ($mode)" >&2

@@ -174,8 +174,10 @@ epilogues save three or more registers of a group through the shared routines
 in the runtime; these live in `.text.__mcs51_*` sections so LLD keeps them in
 common flash. Interrupt handlers save the imaginary registers they use. Locals
 live in IDATA and are accessed with `@R0`/`@R1`; the default address space is
-XDATA, so a pointer to a local that escapes through a default-space cast keeps
-its numeric value. Assembly source can name address bytes with
+XDATA. On CC2530, non-null DATA/IDATA pointers converted to the default space
+use the `0x1f00` SRAM alias, including escaped stack addresses; null remains
+zero. Classic 8051 retains its numeric conversion because a universal XDATA
+alias is not available. Assembly source can name address bytes with
 `mov 48, #lo8(sym)` / `#hi8(sym)` (relocations `R_8051_LO8`/`R_8051_HI8`).
 The sim-based checks `verify-generic-pointer-runtime.sh` and
 `verify-arith32-runtime.sh` expect `s51` on `PATH` or in `MCS51_SIM`.
