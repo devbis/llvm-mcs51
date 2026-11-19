@@ -275,11 +275,29 @@ public:
          cast<GlobalAddressSDNode>(N)->getGlobal()->getAddressSpace() ==
              MCS51::IData)) {
       auto *GA = cast<GlobalAddressSDNode>(N);
+      // The byte address is a modulo-256 value, but its R_8051_8 relocation
+      // requires symbol + addend to lie in 0-255. Reassociation can fold an
+      // offset that leaves the object into the symbol (pb[k - 5] becomes
+      // (pb - 5) + k), which then fails to link for an object near address 0.
+      // Only offsets within the object, or one past its end, are folded; the
+      // rest is added in a register with the same 8-bit wrap-around.
+      int64_t Offset = GA->getOffset();
+      Type *ObjectType = GA->getGlobal()->getValueType();
+      bool InObject =
+          Offset >= 0 && ObjectType->isSized() &&
+          static_cast<uint64_t>(Offset) <=
+              CurDAG->getDataLayout().getTypeAllocSize(ObjectType)
+                  .getFixedValue();
+      int64_t Folded = InObject ? Offset : 0;
       SDValue Addr = CurDAG->getTargetGlobalAddress(
-          GA->getGlobal(), DL, MVT::i8, GA->getOffset(),
-          GA->getTargetFlags());
+          GA->getGlobal(), DL, MVT::i8, Folded, GA->getTargetFlags());
       SDNode *Res = CurDAG->getMachineNode(MCS51::MOV_RN_IMM, DL,
                                            N->getVTList(), Addr);
+      if (Folded != Offset)
+        Res = CurDAG->getMachineNode(
+            MCS51::ADD8ri, DL, MVT::i8, SDValue(Res, 0),
+            CurDAG->getTargetConstant(static_cast<uint8_t>(Offset - Folded),
+                                      DL, MVT::i8));
       ReplaceUses(SDValue(N, 0), SDValue(Res, 0));
       CurDAG->RemoveDeadNode(N);
       return;
