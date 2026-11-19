@@ -478,6 +478,10 @@ MCS51TargetLowering::MCS51TargetLowering(const TargetMachine &TM,
                      Custom);
     setTruncStoreAction(VT, MVT::i1, Custom);
   }
+  // Byte loads into a 16-bit value are selected as 8-bit loads whose result
+  // reaches the pair through a zero-extending byte-to-word copy. That covers
+  // EXTLOAD/ZEXTLOAD, but a SEXTLOAD needs an explicit sign extension.
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i16, MVT::i8, Custom);
   // The 8051 has no indirect branch instruction; avoid jump-table lowering.
   setMinimumJumpTableEntries(~0U);
   setOperationAction(ISD::ADD, MVT::i16, Custom);
@@ -701,6 +705,16 @@ SDValue MCS51TargetLowering::LowerOperation(SDValue Op,
         Result = DAG.getNode(ISD::SIGN_EXTEND_INREG, DL, VT, Result,
                              DAG.getValueType(MVT::i1));
       return DAG.getMergeValues({Result, Byte.getValue(1)}, DL);
+    }
+    if (Load->getMemoryVT() == MVT::i8 && Load->getValueType(0) == MVT::i16 &&
+        Load->getExtensionType() == ISD::SEXTLOAD) {
+      assert(Load->isUnindexed() && "MCS-51 has no indexed loads");
+      SDValue Byte = DAG.getLoad(MVT::i8, DL, Load->getChain(),
+                                 Load->getBasePtr(), Load->getMemOperand());
+      return DAG.getMergeValues(
+          {DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i16, Byte),
+           Byte.getValue(1)},
+          DL);
     }
   }
   if (Op.getOpcode() == ISD::STORE) {
