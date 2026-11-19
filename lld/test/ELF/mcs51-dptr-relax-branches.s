@@ -41,6 +41,7 @@ b:      .byte   0
 # RELOC-NEXT:   0x7 R_8051_RELAX - 0x0
 # RELOC-NEXT:   0xB R_8051_PCREL8 .Lback 0xFFFFFFFF
 # RELOC-NEXT:   0xD R_8051_16_BE .Lend 0x0
+# RELOC-NEXT:   0xD R_8051_RELAX - 0x0
 # RELOC-NEXT: }
 # RELOC:      .rela.rodata {
 # RELOC-NEXT:   0x0 R_8051_16 .Lend 0x0
