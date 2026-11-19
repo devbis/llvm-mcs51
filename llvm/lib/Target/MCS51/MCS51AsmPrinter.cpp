@@ -112,15 +112,10 @@ public:
       unsigned Bank = F->hasSection() ? getMCS51CodeBank(F->getSection()) : 0;
       bool AutoBank = isAutoBankFunction(*F, TM.getTargetCPU(),
                                          TM.Options.FunctionSections);
-      if (Bank || AutoBank) {
-        const MCExpr *Address = MCSymbolRefExpr::create(
-            getBankThunkSymbol(*F), OutContext);
-        if (Offset)
-          Address = MCBinaryExpr::createAdd(
-              Address, MCConstantExpr::create(Offset, OutContext),
-              OutContext);
-        return Address;
-      }
+      // Offset is the position of CV inside the initializer BaseCV, not an
+      // addend: every element refers to the start of the trampoline.
+      if (Bank || AutoBank)
+        return MCSymbolRefExpr::create(getBankThunkSymbol(*F), OutContext);
     }
     return AsmPrinter::lowerConstant(CV, BaseCV, Offset);
   }
